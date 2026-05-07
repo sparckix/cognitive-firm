@@ -8,10 +8,10 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 
-import src.cognitive_firm.supervisor.supervisor_program_autoloop as program_autoloop_module
-from src.cognitive_firm.supervisor.supervisor_manifest import ManifestPacket, ManifestPacketStatus, ProgramManifest
-from src.cognitive_firm.supervisor.supervisor_registry import registry_path
-from src.cognitive_firm.supervisor.supervisor_state import (
+import cognitive_firm.supervisor.supervisor_program_autoloop as program_autoloop_module
+from cognitive_firm.supervisor.supervisor_manifest import ManifestPacket, ManifestPacketStatus, ProgramManifest
+from cognitive_firm.supervisor.supervisor_registry import registry_path
+from cognitive_firm.supervisor.supervisor_state import (
     Actor,
     ArtifactPaths,
     HandoffStatus,

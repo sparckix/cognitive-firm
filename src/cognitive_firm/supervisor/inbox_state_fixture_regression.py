@@ -16,7 +16,7 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.cognitive_firm.supervisor.inbox_state import (
+from cognitive_firm.supervisor.inbox_state import (
     list_pending,
     reconcile_pending_resolved,
     resolve_gate,

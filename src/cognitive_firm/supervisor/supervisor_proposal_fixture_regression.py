@@ -5,7 +5,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from src.cognitive_firm.supervisor.supervisor_proposal import (
+from cognitive_firm.supervisor.supervisor_proposal import (
     build_proposal_context,
     build_proposal_prompt,
     planning_debate_path,

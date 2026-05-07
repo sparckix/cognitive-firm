@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from src.cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import REPO_ROOT
 
 
 class SeedStatus(str, Enum):

@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.cognitive_firm.supervisor.supervisor_attended_autoloop import fresh_input_tokens
-from src.cognitive_firm.supervisor.supervisor_backlog import build_what_next
-from src.cognitive_firm.supervisor.supervisor_state import status_from_dict
+from cognitive_firm.supervisor.supervisor_attended_autoloop import fresh_input_tokens
+from cognitive_firm.supervisor.supervisor_backlog import build_what_next
+from cognitive_firm.supervisor.supervisor_state import status_from_dict
 
 
 def _read_json(path: Path) -> dict[str, Any]:

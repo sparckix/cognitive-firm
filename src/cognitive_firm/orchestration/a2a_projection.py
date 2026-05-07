@@ -19,7 +19,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - product smoke path.
     yaml = None
 
-from src.cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import REPO_ROOT
 
 
 ROLES_DIR = REPO_ROOT / "org" / "roles"

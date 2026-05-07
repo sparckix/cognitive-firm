@@ -7,8 +7,8 @@ import re
 from dataclasses import replace
 from pathlib import Path
 
-from src.cognitive_firm.common.paths import REPO_ROOT
-from src.cognitive_firm.supervisor.supervisor_state import (
+from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.supervisor.supervisor_state import (
     Actor,
     ArtifactSnapshot,
     HandoffStatus,
@@ -20,7 +20,7 @@ from src.cognitive_firm.supervisor.supervisor_state import (
     status_to_dict,
     transition_input_from_dict,
 )
-from src.cognitive_firm.supervisor.supervisor_registry import (
+from cognitive_firm.supervisor.supervisor_registry import (
     OwnerMode,
     ProgramStatus,
     derive_closed_programs,
@@ -28,25 +28,25 @@ from src.cognitive_firm.supervisor.supervisor_registry import (
     registry_path,
     registry_entry_map,
 )
-from src.cognitive_firm.supervisor.supervisor_genesis import (
+from cognitive_firm.supervisor.supervisor_genesis import (
     genesis_path_for_program,
     load_optional_program_genesis,
 )
-from src.cognitive_firm.supervisor.supervisor_manifest import (
+from cognitive_firm.supervisor.supervisor_manifest import (
     advance_manifest_packet,
     load_optional_program_manifest,
     manifest_summary,
     next_manifest_packet,
 )
-from src.cognitive_firm.supervisor.supervisor_backlog import sync_program_plan_markdown
-from src.cognitive_firm.supervisor.supervisor_pipeline import (
+from cognitive_firm.supervisor.supervisor_backlog import sync_program_plan_markdown
+from cognitive_firm.supervisor.supervisor_pipeline import (
     actor_for_pipeline_state,
     build_actor_for_pipeline,
     derive_pipeline_type,
 )
-from src.cognitive_firm.supervisor.supervisor_staging import write_staging_files
-from src.cognitive_firm.supervisor.supervisor_transitions import apply_transition
-from src.cognitive_firm.supervisor.supervisor_wrappers import (
+from cognitive_firm.supervisor.supervisor_staging import write_staging_files
+from cognitive_firm.supervisor.supervisor_transitions import apply_transition
+from cognitive_firm.supervisor.supervisor_wrappers import (
     launch_staged_request,
     wrapper_config_path,
 )

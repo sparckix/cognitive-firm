@@ -20,9 +20,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.cognitive_firm.common.paths import REPO_ROOT
-from src.cognitive_firm.supervisor.spend_tracker import check_budget_allows, record_spend
-from src.cognitive_firm.supervisor.supervisor_usage import estimate_cost_usd
+from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.supervisor.spend_tracker import check_budget_allows, record_spend
+from cognitive_firm.supervisor.supervisor_usage import estimate_cost_usd
 
 
 DEFAULT_TOKEN_CHARS = 3

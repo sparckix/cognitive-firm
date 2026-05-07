@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from src.cognitive_firm.supervisor.supervisor_backlog import build_what_next
+from cognitive_firm.supervisor.supervisor_backlog import build_what_next
 
 
 def main() -> int:

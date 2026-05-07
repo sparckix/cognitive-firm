@@ -19,7 +19,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - bare Python product path.
     yaml = None
 
-from src.cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import REPO_ROOT
 
 
 ROLE_PATH_PREFIXES = (

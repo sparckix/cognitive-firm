@@ -17,8 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from src.cognitive_firm.common.paths import REPO_ROOT
-from src.cognitive_firm.orchestration.transition_log import append_transition
+from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.orchestration.transition_log import append_transition
 
 
 CHANNELS_DIR = REPO_ROOT / "org" / "channels"

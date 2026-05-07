@@ -15,27 +15,27 @@ from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 from anthropic import Anthropic
 
-from src.cognitive_firm.common.paths import REPO_ROOT
-from src.cognitive_firm.supervisor.supervisor_manifest import (
+from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.supervisor.supervisor_manifest import (
     derive_packet_read_bundle,
     load_optional_program_manifest,
     next_manifest_packet,
     packet_for_target,
 )
-from src.cognitive_firm.supervisor.supervisor_pipeline import (
+from cognitive_firm.supervisor.supervisor_pipeline import (
     default_research_draft_path,
     default_research_spec_path,
     default_research_verification_command,
 )
-from src.cognitive_firm.supervisor.supervisor_state import (
+from cognitive_firm.supervisor.supervisor_state import (
     Actor,
     HandoffStatus,
     SupervisorState,
     TurnUsageTelemetry,
     status_to_dict,
 )
-from src.cognitive_firm.supervisor.supervisor_usage import estimate_cost_usd
-from src.cognitive_firm.supervisor.supervisor_usage import extract_usage_telemetry
+from cognitive_firm.supervisor.supervisor_usage import estimate_cost_usd
+from cognitive_firm.supervisor.supervisor_usage import extract_usage_telemetry
 
 
 class WrapperMode(str, Enum):

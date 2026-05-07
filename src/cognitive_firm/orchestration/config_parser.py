@@ -9,8 +9,8 @@ import yaml
 from pathlib import Path
 from typing import Any
 
-from src.cognitive_firm.orchestration.core import GoalConfig, StageDefinition, validate_stage_graph
-from src.cognitive_firm.orchestration.predicates import validate_predicate_schema
+from cognitive_firm.orchestration.core import GoalConfig, StageDefinition, validate_stage_graph
+from cognitive_firm.orchestration.predicates import validate_predicate_schema
 
 GOAL_TYPES_DIR = Path("research_areas/private/goal_types")
 

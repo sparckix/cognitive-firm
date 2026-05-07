@@ -6,9 +6,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-from src.cognitive_firm.common.paths import PROJECTS_DIR
-from src.cognitive_firm.orchestration.arbiter import merge_critic_reports, render_markdown
-from src.cognitive_firm.orchestration.artifact_bundle import build_stage1_fail_bundle, bundle_to_dict
+from cognitive_firm.common.paths import PROJECTS_DIR
+from cognitive_firm.orchestration.arbiter import merge_critic_reports, render_markdown
+from cognitive_firm.orchestration.artifact_bundle import build_stage1_fail_bundle, bundle_to_dict
 
 
 DEFAULT_CRITICS = ["critic_a", "critic_b"]

@@ -12,7 +12,7 @@ manager via a Telegram bot:
 Stdlib-only (urllib + json) so it has zero pip dependencies.
 
 Usage from agent / cron tick:
-    from src.cognitive_firm.notifications.telegram import poll_inbound, push_notification
+    from cognitive_firm.notifications.telegram import poll_inbound, push_notification
     messages = poll_inbound(consume=True)  # returns list[InboundMessage]
     push_notification(title="...", message="...", priority="high")
 

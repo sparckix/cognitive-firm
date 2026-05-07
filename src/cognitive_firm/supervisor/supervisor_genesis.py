@@ -4,13 +4,13 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.cognitive_firm.common.paths import REPO_ROOT
-from src.cognitive_firm.supervisor.supervisor_registry import (
+from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.supervisor.supervisor_registry import (
     ProgramStatus,
     load_program_registry,
     registry_entry_map,
 )
-from src.cognitive_firm.supervisor.supervisor_seed_registry import (
+from cognitive_firm.supervisor.supervisor_seed_registry import (
     SeedStatus,
     load_seed_registry,
     seed_entry_by_spec_path,

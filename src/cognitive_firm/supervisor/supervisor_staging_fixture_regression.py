@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from src.cognitive_firm.supervisor.supervisor_state import (
+from cognitive_firm.supervisor.supervisor_state import (
     Actor,
     ArtifactPaths,
     ArtifactSnapshot,
@@ -14,12 +14,12 @@ from src.cognitive_firm.supervisor.supervisor_state import (
     SupervisorState,
     TransitionInput,
 )
-from src.cognitive_firm.supervisor.supervisor_staging import (
+from cognitive_firm.supervisor.supervisor_staging import (
     build_staging_context,
     build_staging_template,
     staging_filename,
 )
-from src.cognitive_firm.supervisor.supervisor_transitions import apply_transition
+from cognitive_firm.supervisor.supervisor_transitions import apply_transition
 
 
 def _base_status(*, state: SupervisorState, next_actor: Actor) -> HandoffStatus:

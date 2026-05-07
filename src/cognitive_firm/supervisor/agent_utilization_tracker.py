@@ -46,7 +46,7 @@ Three primitives:
 
 Usage:
 
-    from src.cognitive_firm.supervisor.agent_utilization_tracker import (
+    from cognitive_firm.supervisor.agent_utilization_tracker import (
         record_agent_session, check_utilization_allows, get_utilization_pct,
     )
 
@@ -512,7 +512,7 @@ def _emit_warn_notification(*, role_id: str, agent_cli: str,
     # Channel 1: Telegram push
     push_ok = False
     try:
-        from src.cognitive_firm.notifications import push_notification
+        from cognitive_firm.notifications import push_notification
         push_notification(
             title=title,
             message=body,
@@ -643,7 +643,7 @@ def record_override_event(*, kind: str,
 
     # Channel 3: best-effort Telegram push (friction-of-being-watched).
     try:
-        from src.cognitive_firm.notifications.push_notification import push_notification
+        from cognitive_firm.notifications.push_notification import push_notification
         delta_str = ""
         if old_value is not None and new_value is not None:
             delta_str = f" ({old_value:g} → {new_value:g})"

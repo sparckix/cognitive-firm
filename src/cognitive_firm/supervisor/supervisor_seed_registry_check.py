@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from src.cognitive_firm.supervisor.supervisor_seed_registry import validate_seed_registry
+from cognitive_firm.supervisor.supervisor_seed_registry import validate_seed_registry
 
 
 def main() -> int:

@@ -5,8 +5,8 @@ import json
 import tempfile
 from pathlib import Path
 
-import src.cognitive_firm.supervisor.supervisor_manifest as supervisor_manifest_module
-from src.cognitive_firm.supervisor.supervisor_manifest import (
+import cognitive_firm.supervisor.supervisor_manifest as supervisor_manifest_module
+from cognitive_firm.supervisor.supervisor_manifest import (
     ManifestPacketStatus,
     advance_manifest_packet,
     derive_packet_read_bundle,

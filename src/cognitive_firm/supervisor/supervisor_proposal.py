@@ -6,14 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from src.cognitive_firm.common.paths import REPO_ROOT
-from src.cognitive_firm.supervisor.supervisor_seed_registry import (
+from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.supervisor.supervisor_seed_registry import (
     SeedPipelineType,
     load_seed_registry,
     seed_entry_map,
 )
-from src.cognitive_firm.supervisor.supervisor_state import Actor
-from src.cognitive_firm.supervisor.supervisor_wrappers import invoke_agent, load_wrapper_configs
+from cognitive_firm.supervisor.supervisor_state import Actor
+from cognitive_firm.supervisor.supervisor_wrappers import invoke_agent, load_wrapper_configs
 
 
 MAX_PROPOSED_PACKETS = 5

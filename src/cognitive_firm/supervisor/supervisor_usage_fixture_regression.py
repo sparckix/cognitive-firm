@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from src.cognitive_firm.supervisor.supervisor_usage import extract_usage_telemetry
+from cognitive_firm.supervisor.supervisor_usage import extract_usage_telemetry
 
 
 def run_supervisor_usage_fixture_regression() -> dict[str, object]:

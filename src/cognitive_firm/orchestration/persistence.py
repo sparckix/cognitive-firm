@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
 
-from src.cognitive_firm.orchestration.core import GoalState, GoalStatus
+from cognitive_firm.orchestration.core import GoalState, GoalStatus
 
 GOALS_ROOT = Path("research_areas/private/goals")
 

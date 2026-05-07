@@ -30,8 +30,8 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from src.cognitive_firm.common.paths import REPO_ROOT
-from src.cognitive_firm.signals import damage
+from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.signals import damage
 
 log = logging.getLogger(__name__)
 

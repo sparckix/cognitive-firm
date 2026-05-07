@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.cognitive_firm.supervisor.supervisor_seed_registry import (
+from cognitive_firm.supervisor.supervisor_seed_registry import (
     SeedPipelineType,
     load_seed_registry,
     seed_entry_by_spec_path,
 )
-from src.cognitive_firm.supervisor.supervisor_state import Actor, SupervisorState
+from cognitive_firm.supervisor.supervisor_state import Actor, SupervisorState
 
 
 def derive_pipeline_type(seed_spec_path: str | None) -> str:

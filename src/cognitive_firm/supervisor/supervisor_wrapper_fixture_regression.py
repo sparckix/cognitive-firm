@@ -6,10 +6,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-import src.cognitive_firm.supervisor.supervisor_wrappers as supervisor_wrappers_module
-from src.cognitive_firm.supervisor.supervisor_manifest import ManifestPacket, ManifestPacketStatus, ProgramManifest
-from src.cognitive_firm.supervisor.supervisor_staging import write_staging_files
-from src.cognitive_firm.supervisor.supervisor_state import (
+import cognitive_firm.supervisor.supervisor_wrappers as supervisor_wrappers_module
+from cognitive_firm.supervisor.supervisor_manifest import ManifestPacket, ManifestPacketStatus, ProgramManifest
+from cognitive_firm.supervisor.supervisor_staging import write_staging_files
+from cognitive_firm.supervisor.supervisor_state import (
     Actor,
     ArtifactPaths,
     ArtifactSnapshot,
@@ -17,7 +17,7 @@ from src.cognitive_firm.supervisor.supervisor_state import (
     StatusReason,
     SupervisorState,
 )
-from src.cognitive_firm.supervisor.supervisor_wrappers import APITransportResult, launch_staged_request
+from cognitive_firm.supervisor.supervisor_wrappers import APITransportResult, launch_staged_request
 
 
 def _base_status(*, state: SupervisorState, next_actor: Actor) -> HandoffStatus:

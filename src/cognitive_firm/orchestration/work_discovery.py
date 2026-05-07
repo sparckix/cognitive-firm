@@ -5,7 +5,7 @@ worth doing without being told. This module implements the two
 cheapest + highest-signal-density discovery sources from GP-131:
 
 1. TODO-scan   — open TODO boxes in seam files (self-authored, pre-filtered)
-2. Damage-scan — unresolved signals from src.cognitive_firm.signals.damage
+2. Damage-scan — unresolved signals from cognitive_firm.signals.damage
 3. Agent-channel — durable messages sent from one persistent role office
    to another
 
@@ -29,9 +29,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
-from src.cognitive_firm.common.paths import REPO_ROOT
-from src.cognitive_firm.orchestration.execution_routing import infer_execution_route
-from src.cognitive_firm.signals import damage
+from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.orchestration.execution_routing import infer_execution_route
+from cognitive_firm.signals import damage
 
 
 SEAMS_ROOT = REPO_ROOT / "research_areas" / "private" / "seams" / "mission"
@@ -175,7 +175,7 @@ def discover_principal_goals(
     These are the HIGHEST-priority discovery source because they carry
     explicit principal intent — not inferred from artifacts, but stated.
     """
-    from src.cognitive_firm.orchestration.goals_inbox import list_pending_goals
+    from cognitive_firm.orchestration.goals_inbox import list_pending_goals
     goals = list_pending_goals(assigned_to=assigned_to)
     out: list[Candidate] = []
     for g in goals[:max_per_source]:
@@ -227,7 +227,7 @@ def discover_agent_channel_messages(
     if not assigned_to or not assigned_to.startswith("role."):
         return []
     role_id = assigned_to.split(".", 1)[1]
-    from src.cognitive_firm.orchestration.agent_channels import list_agent_messages
+    from cognitive_firm.orchestration.agent_channels import list_agent_messages
 
     out: list[Candidate] = []
     for msg in list_agent_messages(role_id=role_id, status="open", limit=max_per_source):
@@ -331,6 +331,85 @@ def discover_resolved_pending_execution(
                    if k in ("assigned_to", "estimated_cost_usd", "execution_route", "frontmatter", "priority")},
             },
         ))
+    return out
+
+
+def discover_open_debates(
+    *,
+    assigned_to: Optional[str] = "debate_runner",
+    idle_threshold_hours: float = 6.0,
+    max_per_source: int = 5,
+) -> list[Candidate]:
+    """GP-195 — surface seam-debate work for the debate_runner role.
+
+    Scans research_areas/private/seams/ for *.md files that are tagged as
+    active debates, have not had a turn appended in the last
+    `idle_threshold_hours`, and have not reached CONVERGED or
+    ESCALATED_CAP per supervisor_findings_debate.read_debate_state.
+
+    Returns a list of Candidate objects with kind="debate_turn". The
+    daemon dispatches these as resolved-pending-execution candidates;
+    the actual debate-turn machinery lives in supervisor_findings_runner.
+
+    Discovery heuristic:
+      - File contains a `<!-- debate_state:` comment OR the file ends
+        with a turn marker (e.g., "## Turn N — <speaker>") AND
+      - Last modification time exceeds idle_threshold_hours AND
+      - File path is under research_areas/private/seams/.
+
+    Soft-fails: if supervisor_findings_debate is not importable (legacy
+    layout), this discoverer returns []. The role can be reactivated
+    once #195 implementation completes the wiring.
+    """
+    import time
+    from datetime import datetime, timedelta, timezone
+
+    out: list[Candidate] = []
+    seams_root = REPO_ROOT / "research_areas" / "private" / "seams"
+    if not seams_root.exists():
+        return out
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=idle_threshold_hours)
+
+    try:
+        from cognitive_firm.supervisor.supervisor_findings_debate import read_debate_state  # type: ignore
+    except Exception:  # noqa: BLE001
+        # Legacy layout missing — return empty rather than crash; the role
+        # remains scaffolded and the daemon discovers nothing for it.
+        return out
+
+    for seam_path in seams_root.rglob("*.md"):
+        try:
+            mtime = datetime.fromtimestamp(seam_path.stat().st_mtime, tz=timezone.utc)
+            if mtime > cutoff:
+                continue
+            text = seam_path.read_text(encoding="utf-8", errors="ignore")
+            if "debate_state:" not in text and "## Turn " not in text:
+                continue
+            try:
+                state = read_debate_state(str(seam_path))
+            except Exception:  # noqa: BLE001
+                continue
+            verdict = getattr(state, "verdict", None) or state.get("verdict") if isinstance(state, dict) else None
+            if verdict in ("CONVERGED", "ESCALATED_CAP"):
+                continue
+            out.append(Candidate(
+                source="open_debate",
+                kind="debate_turn",
+                ref=str(seam_path.relative_to(REPO_ROOT)),
+                title=f"Append turn to stagnant debate: {seam_path.name}",
+                metadata={
+                    "assigned_to": assigned_to or "debate_runner",
+                    "idle_hours": (datetime.now(timezone.utc) - mtime).total_seconds() / 3600,
+                    "execution_route": "supervisor_findings_runner",
+                    "priority": "P1",
+                },
+            ))
+            if len(out) >= max_per_source:
+                break
+        except Exception:  # noqa: BLE001
+            continue
+
     return out
 
 
@@ -513,6 +592,10 @@ def discover_all(
     out.extend(discover_open_todos(max_per_source=max_per_source))
     out.extend(discover_substrate_portfolio_opportunities(
         assigned_to=assigned_to, max_per_source=max_per_source))
+    # GP-195 — debate-runner role surfaces stagnant seams as work
+    if assigned_to in (None, "debate_runner"):
+        out.extend(discover_open_debates(
+            assigned_to=assigned_to or "debate_runner", max_per_source=max_per_source))
 
     # Apply per-role scope filter (SRO is the only role with a tight scope today)
     return [c for c in out if _is_in_role_scope(c, assigned_to)]

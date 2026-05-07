@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from src.cognitive_firm.supervisor.supervisor_state import (
+from cognitive_firm.supervisor.supervisor_state import (
     Actor,
     HandoffStatus,
     HumanGateReason,
@@ -13,7 +13,7 @@ from src.cognitive_firm.supervisor.supervisor_state import (
     TurnUsageTelemetry,
     TransitionInput,
 )
-from src.cognitive_firm.supervisor.supervisor_transitions import apply_transition
+from cognitive_firm.supervisor.supervisor_transitions import apply_transition
 
 
 def _a2_status(*, rounds: int, budget_cap: float | None = None, refinement_cost_usd: float = 0.0) -> HandoffStatus:

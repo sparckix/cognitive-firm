@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from src.cognitive_firm.common.llm_runtime import pricing_model_name
-from src.cognitive_firm.common.paths import REPO_ROOT
-from src.cognitive_firm.supervisor.supervisor_state import TurnUsageTelemetry
+from cognitive_firm.common.llm_runtime import pricing_model_name
+from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.supervisor.supervisor_state import TurnUsageTelemetry
 
 
 @dataclass(frozen=True)

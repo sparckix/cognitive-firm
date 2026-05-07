@@ -19,19 +19,19 @@ import subprocess
 import sys
 from pathlib import Path
 
-from src.cognitive_firm.orchestration.core import (
+from cognitive_firm.orchestration.core import (
     GoalConfig,
     GoalState,
     GoalStatus,
     validate_transition,
 )
-from src.cognitive_firm.orchestration.config_parser import (
+from cognitive_firm.orchestration.config_parser import (
     list_available_goal_types,
     load_goal_config,
     parse_goal_config,
 )
-from src.cognitive_firm.orchestration.gate_escalation import write_gate_escalation
-from src.cognitive_firm.orchestration.persistence import (
+from cognitive_firm.orchestration.gate_escalation import write_gate_escalation
+from cognitive_firm.orchestration.persistence import (
     GOALS_ROOT,
     append_transition,
     check_artifact_drift,
@@ -43,7 +43,7 @@ from src.cognitive_firm.orchestration.persistence import (
     read_transitions,
     write_state,
 )
-from src.cognitive_firm.orchestration.adapters.dispatch import (
+from cognitive_firm.orchestration.adapters.dispatch import (
     dispatch,
     stage_guidance,
 )

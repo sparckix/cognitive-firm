@@ -15,8 +15,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-from src.cognitive_firm.orchestration import goals_inbox as gi
-from src.cognitive_firm.signals import damage
+from cognitive_firm.orchestration import goals_inbox as gi
+from cognitive_firm.signals import damage
 
 
 def cmd_list(args: argparse.Namespace) -> int:

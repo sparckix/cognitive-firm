@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from src.cognitive_firm.supervisor.supervisor_genesis import validate_program_genesis
+from cognitive_firm.supervisor.supervisor_genesis import validate_program_genesis
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> None:

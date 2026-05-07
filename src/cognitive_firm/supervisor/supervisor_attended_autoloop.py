@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import time
 
-from src.cognitive_firm.supervisor.supervisor_loop import (
+from cognitive_firm.supervisor.supervisor_loop import (
     _append_jsonl,
     _advance_manifest_after_successful_verifier,
     _prepare_request_payload,
@@ -14,12 +14,12 @@ from src.cognitive_firm.supervisor.supervisor_loop import (
     _sync_debate_receipt,
     _write_json,
 )
-from src.cognitive_firm.supervisor.supervisor_manifest import (
+from cognitive_firm.supervisor.supervisor_manifest import (
     load_optional_program_manifest,
     manifest_summary,
     packet_for_target,
 )
-from src.cognitive_firm.supervisor.supervisor_state import (
+from cognitive_firm.supervisor.supervisor_state import (
     Actor,
     HandoffStatus,
     HumanGateReason,
@@ -32,9 +32,9 @@ from src.cognitive_firm.supervisor.supervisor_state import (
     status_to_dict,
     transition_input_from_dict,
 )
-from src.cognitive_firm.supervisor.supervisor_staging import write_staging_files
-from src.cognitive_firm.supervisor.supervisor_transitions import apply_transition
-from src.cognitive_firm.supervisor.supervisor_wrappers import (
+from cognitive_firm.supervisor.supervisor_staging import write_staging_files
+from cognitive_firm.supervisor.supervisor_transitions import apply_transition
+from cognitive_firm.supervisor.supervisor_wrappers import (
     WrapperLaunchResult,
     WrapperMode,
     launch_staged_request,

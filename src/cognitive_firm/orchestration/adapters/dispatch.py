@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Callable, Optional
 
-from src.cognitive_firm.orchestration.core import GoalConfig, GoalState, StageDefinition, StageResult
+from cognitive_firm.orchestration.core import GoalConfig, GoalState, StageDefinition, StageResult
 
 Adapter = Callable[[GoalState, StageDefinition, GoalConfig], StageResult]
 

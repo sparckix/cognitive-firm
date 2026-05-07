@@ -16,7 +16,7 @@ PUBLIC API
 ----------
 The Director invokes:
 
-    from src.cognitive_firm.role_extensions.research_director import triangulate
+    from cognitive_firm.role_extensions.research_director import triangulate
     summary = triangulate(project_dir, anchors)
 
 `triangulate` evaluates the project's just-promoted form (read from

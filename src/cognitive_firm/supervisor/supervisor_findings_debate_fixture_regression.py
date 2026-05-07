@@ -13,7 +13,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from src.cognitive_firm.supervisor.supervisor_findings_debate import (
+from cognitive_firm.supervisor.supervisor_findings_debate import (
     DebateStatus,
     HARD_TURN_CAP,
     SENTINEL_NO_NEW_CLAIM,

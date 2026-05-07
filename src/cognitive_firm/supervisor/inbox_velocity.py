@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from src.cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import REPO_ROOT
 
 log = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ def check_velocity_trend(*, gate_dir: Optional[Path] = None) -> Optional[Path]:
             pass
 
     # Fire the gate via escalation_manager so it lands in the inbox.
-    from src.cognitive_firm.supervisor.escalation_manager import escalate
+    from cognitive_firm.supervisor.escalation_manager import escalate
     result = escalate(
         title="Inbox scope contraction required",
         reason=(

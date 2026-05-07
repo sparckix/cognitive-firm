@@ -6,13 +6,13 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.cognitive_firm.findings.prose_spec import (
+from cognitive_firm.findings.prose_spec import (
     ProseAssertionType,
     ProseSpec,
     ProseSpecAssertion,
     prose_spec_to_dict,
 )
-from src.cognitive_firm.supervisor.supervisor_state import (
+from cognitive_firm.supervisor.supervisor_state import (
     Actor,
     ArtifactSnapshot,
     HandoffStatus,
@@ -20,7 +20,7 @@ from src.cognitive_firm.supervisor.supervisor_state import (
     SupervisorState,
     TransitionInput,
 )
-from src.cognitive_firm.supervisor.supervisor_transitions import apply_transition
+from cognitive_firm.supervisor.supervisor_transitions import apply_transition
 
 
 @dataclass(frozen=True)

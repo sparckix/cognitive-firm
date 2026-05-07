@@ -11,7 +11,7 @@ underlying transport changed.
 
 Usage (unchanged):
 
-    from src.cognitive_firm.notifications import push_notification
+    from cognitive_firm.notifications import push_notification
 
     push_notification(
         title="Patent #4 gate pending",
@@ -38,7 +38,7 @@ import logging
 from pathlib import Path
 from typing import Iterable, Optional
 
-from src.cognitive_firm.notifications.telegram import (
+from cognitive_firm.notifications.telegram import (
     push_notification as _telegram_push_notification,
 )
 

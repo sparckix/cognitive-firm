@@ -5,13 +5,13 @@ import json
 import tempfile
 from pathlib import Path
 
-import src.cognitive_firm.supervisor.supervisor_backlog as supervisor_backlog_module
-import src.cognitive_firm.supervisor.supervisor_manifest as supervisor_manifest_module
-from src.cognitive_firm.supervisor.supervisor_gate_resolution import (
+import cognitive_firm.supervisor.supervisor_backlog as supervisor_backlog_module
+import cognitive_firm.supervisor.supervisor_manifest as supervisor_manifest_module
+from cognitive_firm.supervisor.supervisor_gate_resolution import (
     _close_or_freeze_program,
     _resume_program,
 )
-from src.cognitive_firm.supervisor.supervisor_state import (
+from cognitive_firm.supervisor.supervisor_state import (
     Actor,
     ArtifactPaths,
     HandoffStatus,

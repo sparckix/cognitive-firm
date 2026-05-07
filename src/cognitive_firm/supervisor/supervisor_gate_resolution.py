@@ -7,15 +7,15 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.cognitive_firm.common.paths import REPO_ROOT
-from src.cognitive_firm.supervisor.supervisor_backlog import sync_program_plan_markdown
-from src.cognitive_firm.supervisor.supervisor_manifest import (
+from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.supervisor.supervisor_backlog import sync_program_plan_markdown
+from cognitive_firm.supervisor.supervisor_manifest import (
     advance_manifest_packet,
     load_optional_program_manifest,
     next_manifest_packet,
 )
-from src.cognitive_firm.supervisor.supervisor_registry import registry_path
-from src.cognitive_firm.supervisor.supervisor_state import (
+from cognitive_firm.supervisor.supervisor_registry import registry_path
+from cognitive_firm.supervisor.supervisor_state import (
     Actor,
     HandoffEvent,
     HumanGateReason,
@@ -26,7 +26,7 @@ from src.cognitive_firm.supervisor.supervisor_state import (
     status_to_dict,
     transition_input_from_dict,
 )
-from src.cognitive_firm.supervisor.supervisor_transitions import apply_transition
+from cognitive_firm.supervisor.supervisor_transitions import apply_transition
 
 TURN_HEADER_RE = re.compile(r"^## Turn (\d+)\b", re.MULTILINE)
 

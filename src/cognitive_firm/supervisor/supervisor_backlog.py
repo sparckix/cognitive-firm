@@ -5,21 +5,21 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.cognitive_firm.common.paths import REPO_ROOT
-from src.cognitive_firm.supervisor.supervisor_genesis import (
+from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.supervisor.supervisor_genesis import (
     genesis_path_for_program,
     load_optional_program_genesis,
 )
-from src.cognitive_firm.supervisor.supervisor_manifest import (
+from cognitive_firm.supervisor.supervisor_manifest import (
     ProgramManifest,
     load_optional_program_manifest,
     manifest_path_for_program,
     manifest_summary,
     validate_program_manifest,
 )
-from src.cognitive_firm.supervisor.supervisor_registry import load_program_registry, registry_entry_map
-from src.cognitive_firm.supervisor.supervisor_state import Actor, StatusReason, status_from_dict
-from src.cognitive_firm.supervisor.supervisor_wrappers import invoke_agent, load_wrapper_configs
+from cognitive_firm.supervisor.supervisor_registry import load_program_registry, registry_entry_map
+from cognitive_firm.supervisor.supervisor_state import Actor, StatusReason, status_from_dict
+from cognitive_firm.supervisor.supervisor_wrappers import invoke_agent, load_wrapper_configs
 
 
 @dataclass(frozen=True)

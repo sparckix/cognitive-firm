@@ -26,12 +26,12 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.cognitive_firm.common.paths import REPO_ROOT
-from src.cognitive_firm.supervisor.supervisor_findings_debate import (
+from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.supervisor.supervisor_findings_debate import (
     DebateStatus,
     read_debate_state,
 )
-from src.cognitive_firm.supervisor.supervisor_seed_registry import (
+from cognitive_firm.supervisor.supervisor_seed_registry import (
     SeedPipelineType,
     SeedStatus,
     load_seed_registry,

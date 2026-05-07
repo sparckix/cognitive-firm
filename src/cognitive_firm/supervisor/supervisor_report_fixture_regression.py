@@ -5,11 +5,11 @@ import json
 import tempfile
 from pathlib import Path
 
-from src.cognitive_firm.supervisor.supervisor_report import (
+from cognitive_firm.supervisor.supervisor_report import (
     build_supervisor_report,
     render_supervisor_report_markdown,
 )
-from src.cognitive_firm.supervisor.supervisor_state import (
+from cognitive_firm.supervisor.supervisor_state import (
     Actor,
     ArtifactPaths,
     HandoffStatus,
