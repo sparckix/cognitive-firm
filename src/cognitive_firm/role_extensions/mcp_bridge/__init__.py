@@ -43,3 +43,10 @@ from cognitive_firm.role_extensions.mcp_bridge.projections import (  # noqa: F40
     project_response,
     ProjectionResult,
 )
+from cognitive_firm.role_extensions.mcp_bridge.transport import (  # noqa: F401
+    ServerSpec,
+    register_server,
+    registered_servers,
+    get_server_spec,
+    call_mcp_tool,
+)

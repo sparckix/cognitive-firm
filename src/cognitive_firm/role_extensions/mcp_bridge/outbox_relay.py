@@ -107,16 +107,18 @@ def _send_mcp_request(
     idempotency_key: str,
     timeout_seconds: float,
 ) -> dict[str, Any]:
-    """Phase 1 stub. Replaced by the real MCP client in Phase 1.5.
-
-    Raises NotImplementedError so any real attempted dispatch in Phase 1
-    fails loudly and the relay marks the request as failed with a clear
-    reason. Tests inject a fake via the `transport` parameter on
-    `dispatch_pending`.
+    """Default transport. Routes through the general-purpose JSON-RPC client
+    in transport.py. Servers must be registered via register_server before
+    dispatch; an unregistered server raises LookupError, which the relay
+    converts to mcp_call_failed.
     """
-    raise NotImplementedError(
-        f"MCP transport not wired (Phase 1.5 deliverable); "
-        f"server={server_name} tool={tool_name} key={idempotency_key[:16]}…"
+    from cognitive_firm.role_extensions.mcp_bridge.transport import call_mcp_tool
+    return call_mcp_tool(
+        server_name=server_name,
+        tool_name=tool_name,
+        request=request,
+        idempotency_key=idempotency_key,
+        timeout_seconds=timeout_seconds,
     )
 
 
