@@ -16,7 +16,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from src.cognitive_firm.notifications import telegram as tg
+from cognitive_firm.notifications import telegram as tg
 
 
 class _FakeApi:

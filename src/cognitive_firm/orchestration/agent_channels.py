@@ -37,6 +37,72 @@ MessageKind = Literal[
 MessageStatus = Literal["open", "acknowledged", "closed"]
 
 
+# GP-232 Phase A — obligation lifecycle distinct from message lifecycle.
+#
+# message status      = "the envelope's state" (open / acknowledged / closed)
+# obligation_state    = "the work's state"     (pending / accepted / in_progress /
+#                                                blocked_input / fulfilled /
+#                                                refused / expired)
+#
+# Per the A2A audit panel (2026-05-07): the kernel's existing channel.status
+# tracks whether the message was read and replied to; it does NOT track whether
+# the work the message obliges has been done. This conflation makes
+# "B is blocked-input on A" only inferable from open messages, never
+# structurally visible. Phase A adds the missing field.
+ObligationState = Literal[
+    "pending",         # initial state on a request/proposal/handoff
+    "accepted",        # receiver acknowledged the obligation
+    "in_progress",     # work has started
+    "blocked_input",   # waiting on principal input or another obligation
+    "fulfilled",       # work completed successfully
+    "refused",         # receiver declined the obligation
+    "expired",         # past expires_utc without resolution
+]
+
+
+# Allowed transitions (the state-machine validator below enforces this).
+# pending -> accepted | refused | expired
+# accepted -> in_progress | refused | expired
+# in_progress -> blocked_input | fulfilled | refused | expired
+# blocked_input -> in_progress | refused | expired
+# fulfilled -> (terminal)
+# refused -> (terminal)
+# expired -> (terminal)
+_OBLIGATION_TRANSITIONS: dict[str, frozenset[str]] = {
+    "pending": frozenset(["accepted", "refused", "expired"]),
+    "accepted": frozenset(["in_progress", "refused", "expired"]),
+    "in_progress": frozenset(["blocked_input", "fulfilled", "refused", "expired"]),
+    "blocked_input": frozenset(["in_progress", "refused", "expired"]),
+    "fulfilled": frozenset(),
+    "refused": frozenset(),
+    "expired": frozenset(),
+}
+
+
+def validate_obligation_transition(from_state: str, to_state: str) -> tuple[bool, str]:
+    """Return (allowed, reason). Used by message updaters to gate state
+    transitions; rejects anything not in the legal-transitions table."""
+    if from_state not in _OBLIGATION_TRANSITIONS:
+        return False, f"unknown from_state: {from_state}"
+    if to_state not in _OBLIGATION_TRANSITIONS:
+        return False, f"unknown to_state: {to_state}"
+    if to_state in _OBLIGATION_TRANSITIONS[from_state]:
+        return True, "ok"
+    if not _OBLIGATION_TRANSITIONS[from_state]:
+        return False, f"{from_state} is terminal — no transitions allowed"
+    return (
+        False,
+        f"illegal transition {from_state} -> {to_state}; "
+        f"allowed: {sorted(_OBLIGATION_TRANSITIONS[from_state])}",
+    )
+
+
+# Kinds that carry an obligation by default — request/proposal/handoff oblige
+# the receiver to do work; inform/clarification/refusal/status do not. This
+# mapping decides whether the message is created with a non-None obligation_state.
+_OBLIGATION_KINDS: frozenset[str] = frozenset(["request", "proposal", "handoff"])
+
+
 @dataclass(frozen=True)
 class AgentMessage:
     schema_version: int
@@ -55,6 +121,10 @@ class AgentMessage:
     references: list[str] = field(default_factory=list)
     artifacts: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # GP-232 Phase A fields — present on all new messages; older log entries
+    # may have None for these (loader treats absence as absence of obligation).
+    obligation_state: ObligationState | None = None
+    parent_obligation_id: str | None = None  # saga compensation chain
 
 
 class ChannelPolicyError(PermissionError):
@@ -171,6 +241,7 @@ def send_agent_message(
     artifacts: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
     enforce_policy: bool = True,
+    parent_obligation_id: str | None = None,
 ) -> AgentMessage:
     """Append one durable A2A-style message to the receiver inbox.
 
@@ -201,6 +272,10 @@ def send_agent_message(
         references=references or [],
         artifacts=artifacts or [],
         metadata={**(metadata or {}), "channel_policy": policy_reason},
+        # GP-232 Phase A: obligation lifecycle defaults to pending for kinds
+        # that carry an obligation; None for inform/clarification/refusal/status.
+        obligation_state="pending" if kind in _OBLIGATION_KINDS else None,
+        parent_obligation_id=parent_obligation_id,
     )
     payload = asdict(message)
     _write_json(_role_inbox(message.to_role) / f"{message_id}.json", payload)
@@ -285,3 +360,91 @@ def update_agent_message_status(
         payload={"note": note, "from_role": data.get("from_role"), "to_role": data.get("to_role")},
     )
     return AgentMessage(**data)
+
+
+# ── GP-232 Phase A: obligation lifecycle updates ─────────────────────────
+
+
+def update_obligation_state(
+    *,
+    role_id: str,
+    message_id: str,
+    new_state: ObligationState,
+    actor: str,
+    note: str = "",
+) -> AgentMessage:
+    """Transition the message's obligation_state. Validates the transition
+    against the legal-transitions table; raises ValueError on illegal moves.
+
+    The message envelope's `status` field is independent — a request can be
+    `acknowledged` (envelope read) while its obligation is still `pending`
+    (work not yet accepted).
+    """
+    path = _message_path(role_id, message_id)
+    if not path.exists():
+        raise FileNotFoundError(f"agent message not found: {message_id}")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    current = data.get("obligation_state")
+    if current is None:
+        raise ValueError(
+            f"message {message_id} has no obligation_state — only "
+            f"request/proposal/handoff carry obligations"
+        )
+    ok, reason = validate_obligation_transition(current, new_state)
+    if not ok:
+        raise ValueError(reason)
+    data["obligation_state"] = new_state
+    data.setdefault("metadata", {})
+    data["metadata"]["last_obligation_note"] = note
+    data["metadata"]["last_obligation_actor"] = actor
+    data["metadata"]["last_obligation_utc"] = datetime.now(timezone.utc).isoformat()
+    _write_json(path, data)
+    sender_mirror = _role_sent(str(data.get("from_role", ""))) / f"{message_id}.json"
+    if sender_mirror.exists():
+        _write_json(sender_mirror, data)
+    append_transition(
+        event=f"agent.obligation.{new_state}",
+        actor=actor,
+        role_id=role_id,
+        surface="agent_channel",
+        subject=message_id,
+        causality_id=data.get("causality_id") or data.get("thread_id"),
+        payload={
+            "note": note,
+            "from_state": current,
+            "to_state": new_state,
+            "from_role": data.get("from_role"),
+            "to_role": data.get("to_role"),
+            "parent_obligation_id": data.get("parent_obligation_id"),
+        },
+    )
+    return AgentMessage(**data)
+
+
+def list_blocked_obligations(role_id: str | None = None) -> list[AgentMessage]:
+    """Return messages whose obligation_state is `blocked_input` — the
+    structurally-visible "B is blocked waiting" view that Orbit and the
+    manager-role daemon render to the principal.
+
+    If role_id is None, scan all role inboxes; otherwise only that role's.
+    """
+    if not CHANNELS_DIR.exists():
+        return []
+    targets: list[Path]
+    if role_id:
+        targets = [_role_inbox(role_id)]
+    else:
+        targets = [p / "inbox" for p in CHANNELS_DIR.iterdir() if p.is_dir()]
+
+    out: list[AgentMessage] = []
+    for inbox in targets:
+        if not inbox.exists():
+            continue
+        for path in inbox.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if data.get("obligation_state") == "blocked_input":
+                    out.append(AgentMessage(**data))
+            except Exception:
+                continue
+    return out

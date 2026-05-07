@@ -66,7 +66,7 @@ class TestSubprocessEnvScrub(unittest.TestCase):
 # ── 2. work_discovery scope filter ─────────────────────────────────────────
 class TestScopeFilter(unittest.TestCase):
     def setUp(self):
-        from src.cognitive_firm.orchestration.work_discovery import _is_in_role_scope, Candidate
+        from cognitive_firm.orchestration.work_discovery import _is_in_role_scope, Candidate
         self.is_in_scope = _is_in_role_scope
         self.Candidate = Candidate
 
@@ -122,9 +122,17 @@ class TestScopeFilter(unittest.TestCase):
 
 
 # ── 3. substrate_portfolio registry loader ─────────────────────────────────
+# NOTE: cognitive_firm.research_director was kept in figs_activist_loop's
+# src/ztare/ tree per the cognitive-firm extraction scope; it is not part
+# of the public package. The substrate_portfolio + eigenquestion_generator
+# tests below skip when that module is unavailable.
+
+import importlib.util as _ilu
+_HAS_RESEARCH_DIRECTOR = _ilu.find_spec("cognitive_firm.research_director") is not None
+@unittest.skipUnless(_HAS_RESEARCH_DIRECTOR, "research_director not in cognitive-firm")
 class TestSubstratePortfolio(unittest.TestCase):
     def test_load_missing_file_raises(self):
-        from src.cognitive_firm.research_director.substrate_portfolio import load_registry
+        from cognitive_firm.research_director.substrate_portfolio import load_registry
         with tempfile.NamedTemporaryFile(suffix=".yaml", delete=True) as fp:
             missing = Path(fp.name)
         # File does not exist now (NamedTemporaryFile auto-deletes on close)
@@ -132,7 +140,7 @@ class TestSubstratePortfolio(unittest.TestCase):
             load_registry(missing)
 
     def test_load_empty_yaml_returns_empty_list(self):
-        from src.cognitive_firm.research_director.substrate_portfolio import load_registry
+        from cognitive_firm.research_director.substrate_portfolio import load_registry
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as fp:
             fp.write("")  # empty file
             tmp_path = Path(fp.name)
@@ -143,7 +151,7 @@ class TestSubstratePortfolio(unittest.TestCase):
             tmp_path.unlink()
 
     def test_load_well_formed_returns_members(self):
-        from src.cognitive_firm.research_director.substrate_portfolio import load_registry
+        from cognitive_firm.research_director.substrate_portfolio import load_registry
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as fp:
             fp.write(textwrap.dedent("""
                 schema_version: 1
@@ -167,7 +175,7 @@ class TestSubstratePortfolio(unittest.TestCase):
             tmp_path.unlink()
 
     def test_load_members_must_be_list(self):
-        from src.cognitive_firm.research_director.substrate_portfolio import load_registry
+        from cognitive_firm.research_director.substrate_portfolio import load_registry
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as fp:
             fp.write("members: not_a_list\n")  # invalid
             tmp_path = Path(fp.name)
@@ -179,19 +187,20 @@ class TestSubstratePortfolio(unittest.TestCase):
 
 
 # ── 4. eigenquestion_generator argument paths ──────────────────────────────
+@unittest.skipUnless(_HAS_RESEARCH_DIRECTOR, "research_director not in cognitive-firm")
 class TestEigenquestionGenerator(unittest.TestCase):
     def test_missing_project_raises(self):
-        from src.cognitive_firm.research_director.eigenquestion_generator import generate_eigenquestion
+        from cognitive_firm.research_director.eigenquestion_generator import generate_eigenquestion
         with self.assertRaises(FileNotFoundError):
             generate_eigenquestion("nonexistent_project_xyz_12345")
 
     def test_summarize_explored_classes_empty(self):
-        from src.cognitive_firm.research_director.eigenquestion_generator import _summarize_explored_classes
+        from cognitive_firm.research_director.eigenquestion_generator import _summarize_explored_classes
         result = _summarize_explored_classes([])
         self.assertIn("no primitive classes explored yet", result)
 
     def test_summarize_explored_classes_with_data(self):
-        from src.cognitive_firm.research_director.eigenquestion_generator import _summarize_explored_classes
+        from cognitive_firm.research_director.eigenquestion_generator import _summarize_explored_classes
         explored = [
             {"class_name": "ACRR", "score": 90, "run_id": "run1"},
             {"class_name": "ACRR", "score": 92, "run_id": "run2"},
@@ -204,7 +213,7 @@ class TestEigenquestionGenerator(unittest.TestCase):
         self.assertLess(result.index("ACRR"), result.index("PECVP"))
 
     def test_summarize_handles_missing_score(self):
-        from src.cognitive_firm.research_director.eigenquestion_generator import _summarize_explored_classes
+        from cognitive_firm.research_director.eigenquestion_generator import _summarize_explored_classes
         # Score missing or None should not raise
         explored = [{"class_name": "X", "run_id": "r"}]
         result = _summarize_explored_classes(explored)
@@ -230,7 +239,7 @@ class TestGateDedup(unittest.TestCase):
 # ── 6. LLMRuntime dotenv bootstrap (CRITICAL: substrate-chain env survival) ──
 # Scenario the daemon will hit:
 #   daemon (has API keys) → claude subprocess (env-scrubbed) → make portfolio-run
-#   → python -m src.cognitive_firm.... → LLMRuntime() — at this point os.environ has
+#   → python -m cognitive_firm.... → LLMRuntime() — at this point os.environ has
 #   NO API keys. Without _bootstrap_dotenv_if_needed, substrate calls fail.
 
 class TestLLMRuntimeDotenvBootstrap(unittest.TestCase):
@@ -256,7 +265,7 @@ class TestLLMRuntimeDotenvBootstrap(unittest.TestCase):
                 try:
                     # Re-import to trigger module-level bootstrap, but we test
                     # the function directly to avoid import caching weirdness
-                    from src.cognitive_firm.common.llm_runtime import _bootstrap_dotenv_if_needed
+                    from cognitive_firm.common.llm_runtime import _bootstrap_dotenv_if_needed
                     _bootstrap_dotenv_if_needed()
                     self.assertEqual(
                         os.environ.get("ANTHROPIC_API_KEY"),
@@ -292,7 +301,7 @@ class TestLLMRuntimeDotenvBootstrap(unittest.TestCase):
                 old_cwd = os.getcwd()
                 os.chdir(td_path)
                 try:
-                    from src.cognitive_firm.common.llm_runtime import _bootstrap_dotenv_if_needed
+                    from cognitive_firm.common.llm_runtime import _bootstrap_dotenv_if_needed
                     _bootstrap_dotenv_if_needed()
                     self.assertEqual(
                         os.environ["ANTHROPIC_API_KEY"],
@@ -311,7 +320,7 @@ class TestLLMRuntimeDotenvBootstrap(unittest.TestCase):
 class TestPrincipalProviderPreference(unittest.TestCase):
     def setUp(self):
         # Reset cache so tests are independent
-        from src.cognitive_firm.common import llm_runtime
+        from cognitive_firm.common import llm_runtime
         if hasattr(llm_runtime._read_principal_preferred_provider, "_cached"):
             del llm_runtime._read_principal_preferred_provider._cached
 
@@ -336,7 +345,7 @@ class TestPrincipalProviderPreference(unittest.TestCase):
             os.environ.pop("LLM_DISPATCH_PREF", None)
             try:
                 # Reset cache after env mutation
-                from src.cognitive_firm.common import llm_runtime
+                from cognitive_firm.common import llm_runtime
                 if hasattr(llm_runtime._read_principal_preferred_provider, "_cached"):
                     del llm_runtime._read_principal_preferred_provider._cached
                 model = llm_runtime.pick_default_model_id_for_scripts()
@@ -371,7 +380,7 @@ class TestPrincipalProviderPreference(unittest.TestCase):
             os.environ["GEMINI_API_KEY"] = "z"
             os.environ["LLM_DISPATCH_PREF"] = "anthropic"
             try:
-                from src.cognitive_firm.common import llm_runtime
+                from cognitive_firm.common import llm_runtime
                 if hasattr(llm_runtime._read_principal_preferred_provider, "_cached"):
                     del llm_runtime._read_principal_preferred_provider._cached
                 model = llm_runtime.pick_default_model_id_for_scripts()
@@ -392,7 +401,7 @@ class TestPrincipalProviderPreference(unittest.TestCase):
 
 class TestModelEconomy(unittest.TestCase):
     def setUp(self):
-        from src.cognitive_firm.common import llm_runtime
+        from cognitive_firm.common import llm_runtime
         for fn_name in ("_read_principal_preferred_provider", "_read_principal_model_economy"):
             fn = getattr(llm_runtime, fn_name, None)
             if fn and hasattr(fn, "_cached"):
@@ -428,7 +437,7 @@ model_economy:
             saved = {k: os.environ.get(k) for k in ("ANTHROPIC_API_KEY","OPENAI_API_KEY","GEMINI_API_KEY")}
             os.environ["ANTHROPIC_API_KEY"]="x"; os.environ["OPENAI_API_KEY"]="y"; os.environ["GEMINI_API_KEY"]="z"
             try:
-                from src.cognitive_firm.common import llm_runtime
+                from cognitive_firm.common import llm_runtime
                 # Reset caches
                 for fn in (llm_runtime._read_principal_preferred_provider, llm_runtime._read_principal_model_economy):
                     if hasattr(fn, "_cached"): del fn._cached
@@ -448,7 +457,7 @@ model_economy:
             saved = {k: os.environ.get(k) for k in ("ANTHROPIC_API_KEY","OPENAI_API_KEY","GEMINI_API_KEY")}
             os.environ["ANTHROPIC_API_KEY"]="x"; os.environ["OPENAI_API_KEY"]="y"; os.environ["GEMINI_API_KEY"]="z"
             try:
-                from src.cognitive_firm.common import llm_runtime
+                from cognitive_firm.common import llm_runtime
                 for fn in (llm_runtime._read_principal_preferred_provider, llm_runtime._read_principal_model_economy):
                     if hasattr(fn, "_cached"): del fn._cached
                 self.assertEqual(llm_runtime.pick_model_for_tier("mid"), "gemini-pro-fixture")
@@ -467,7 +476,7 @@ model_economy:
             saved = {k: os.environ.get(k) for k in ("ANTHROPIC_API_KEY","OPENAI_API_KEY","GEMINI_API_KEY")}
             os.environ["ANTHROPIC_API_KEY"]="x"; os.environ["OPENAI_API_KEY"]="y"; os.environ["GEMINI_API_KEY"]="z"
             try:
-                from src.cognitive_firm.common import llm_runtime
+                from cognitive_firm.common import llm_runtime
                 for fn in (llm_runtime._read_principal_preferred_provider, llm_runtime._read_principal_model_economy):
                     if hasattr(fn, "_cached"): del fn._cached
                 # Pro tier only has anthropic in fixture → must return that
@@ -488,7 +497,7 @@ model_economy:
             saved = {k: os.environ.get(k) for k in ("ANTHROPIC_API_KEY","OPENAI_API_KEY","GEMINI_API_KEY")}
             os.environ["ANTHROPIC_API_KEY"]="x"; os.environ["OPENAI_API_KEY"]="y"; os.environ["GEMINI_API_KEY"]="z"
             try:
-                from src.cognitive_firm.common import llm_runtime
+                from cognitive_firm.common import llm_runtime
                 for fn in (llm_runtime._read_principal_preferred_provider, llm_runtime._read_principal_model_economy):
                     if hasattr(fn, "_cached"): del fn._cached
                 self.assertEqual(
@@ -502,7 +511,7 @@ model_economy:
                     elif k in os.environ: del os.environ[k]
 
     def test_invalid_tier_raises(self):
-        from src.cognitive_firm.common.llm_runtime import pick_model_for_tier
+        from cognitive_firm.common.llm_runtime import pick_model_for_tier
         with self.assertRaises(ValueError):
             pick_model_for_tier("ultra")
 
