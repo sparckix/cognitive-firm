@@ -1,0 +1,25 @@
+# LLM provider SDKs
+google-genai>=1.0.0
+anthropic>=0.25.0
+openai>=1.0.0
+
+# Scientific stack — required by validator/orchestrator/substrate paths
+sympy>=1.14
+scipy>=1.14
+numpy>=2.0
+networkx>=3.5
+pandas>=2.0
+matplotlib>=3.10  # used by analytics/queries dashboards
+
+# I/O + config
+python-dotenv>=1.0.0
+PyYAML>=6.0
+jsonschema>=4.0    # role yaml validation in scripts/org_role_preflight.py
+requests>=2.30     # telegram + ad-hoc HTTP
+
+# Resilience + UX in scripts
+tenacity>=8.0
+tqdm>=4.60
+click>=8.0
+rich>=13.0
+httpx>=0.27

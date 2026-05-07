@@ -1,0 +1,81 @@
+schema_version: 1
+role_id: research_director
+role_class: director
+description: >
+  Research director. External-validity and frontier-experiment director
+  for ZTARE results. Triggered by verified axioms, explicit skeptic-review
+  requests, claim-overreach signals, or principal-authorized frontier
+  mechanism hunts. Generates skeptic dossiers, proposes/triages decisive
+  discriminators, enforces instrument-vs-science separation, and writes
+  review artifacts to workspace / research_areas / org/directives.
+  Also turns repeatable operator-agent frontier moves into typed
+  next-discriminator proposals and research-taste opportunity cards without
+  treating taste as evidence.
+  Operates at a different cadence than ZTARE (10-30 min/probe or
+  frontier-run planning vs inner-loop iterations). Does NOT run the inner
+  ZTARE loop by default and does NOT silently modify substrates.
+
+authorized_paths:
+  - "projects/*/workspace/"
+  - "projects/*/verified_axioms.json"
+  - "research_areas/"
+  - "research_areas/private/"   # GP-217 broadening 2026-05-05: 35 historical agent-driven F-rows; sealed pre-regs + debates still gated by AGENTS.md §2/§7
+  - "ztare_proofs/"              # GP-217 broadening 2026-05-05: 7 historical agent-driven F-rows on Lean proof program (GP-186 NS)
+  - "docs/"
+  - "org/sessions/"
+  - "org/signals/"
+
+forbidden_paths:
+  - "org/mandates/"          # cannot modify own mandate
+  - "org/roles/"             # cannot modify roles
+  - "src/"                   # cannot modify apparatus code
+  - "rubrics/"               # cannot modify rubrics
+  - "projects/*/test_model.py"  # cannot touch substrates
+  - "projects/*/gate_harness.py"
+  - "projects/*/evidence.txt"
+  - "~/.ssh/"
+  - "~/.aws/"
+
+delegates_to:
+  - worker.explore_agent     # for literature search
+  - worker.general_purpose   # for domain-specific probes
+
+escalates_to:
+  - role.principal           # probe results that change the claim
+  - role.manager             # coordinate with active ZTARE runs
+
+budget:
+  daily_cap_usd: 30.00
+  session_cap_usd: 20.00
+  single_action_cap_usd: 5.00
+  warn_threshold_frac: 0.80
+  absolute_ceiling_usd: 30.00
+
+# Agent-CLI utilization caps (capacity dimension, separate from USD spend).
+# Tracks claude / codex / gemini wall-clock + token throughput per day so a
+# chatty RD doesn't starve other roles' subscription quota. Schema consumed
+# by src/ztare/supervisor/agent_utilization_tracker.py._role_caps().
+# Warn-threshold trip emits a Telegram push (GP-128b) AND a damage signal.
+agent_utilization:
+  daily_cap_seconds: 7200          # 2 hours/day of agent-CLI wall clock
+  daily_cap_output_tokens: 300000  # 300k output tokens/day
+  daily_cap_turn_count: 100        # 100 agent steps/day
+  session_cap_seconds: 3600        # 1-hour single-session cap
+  absolute_ceiling_seconds: 14400  # 4-hour hard ceiling/day
+  warn_threshold_frac: 0.80
+
+mandate_path: org/mandates/research_director_mandate.md
+
+sla:
+  response_time_inbox_hours: null  # director is triggered, not polled
+
+failure_mode:
+  on_unavailable: "axioms accumulate without external validation; operator must review manually"
+  on_crash: "skeptic_dossier.md preserves partial work"
+
+signs_gates:
+  - DUTY_PERFORMED   # attests cycles for KRs in org/key_results/ with owner_role: research_director (e.g. rd_apparatus_l2_review)
+
+opened_date: "2026-04-26"
+opened_by: principal
+last_updated: "2026-04-30"
