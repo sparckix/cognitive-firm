@@ -46,6 +46,7 @@ substrate = [
 dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
+    "hypothesis>=6.100",
     "ruff>=0.1",
     "mypy>=1.7",
 ]
