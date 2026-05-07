@@ -45,6 +45,9 @@ from cognitive_firm.role_extensions.mcp_bridge.projections import (
     project_response,
     ProjectionResult,
 )
+from cognitive_firm.role_extensions.mcp_bridge.capabilities import (
+    is_dispatch_authorized,
+)
 
 
 log = logging.getLogger(__name__)
@@ -189,6 +192,32 @@ def dispatch_pending(
             )
             dispatched += 1
             continue
+
+        # Phase 2 capability check — refuse dispatch if the requesting role
+        # holds no active capability for (server, tool). Per panel verdict:
+        # this is the structural fix for layer-boundary violations where an
+        # App-layer agent could otherwise reach any server it knows the name
+        # of. Phase 1 has no capability registry, so callers without role_id
+        # set bypass the check; tests that exercise the relay directly
+        # without a role context still work.
+        role_for_check = row.get("role_id")
+        if role_for_check:
+            cap_ok, cap_reason = is_dispatch_authorized(role_for_check, server, tool)
+            if not cap_ok:
+                log.append(
+                    _emit_followup(
+                        requested_event_id=row["event_id"],
+                        actor=row.get("actor", "outbox_relay"),
+                        role_id=role_for_check,
+                        success=False,
+                        response=None,
+                        rejection=cap_reason,
+                        log_path=log_path,
+                        appended=appended,
+                    )
+                )
+                dispatched += 1
+                continue
 
         try:
             response = transport(server, tool, request, idem, timeout)

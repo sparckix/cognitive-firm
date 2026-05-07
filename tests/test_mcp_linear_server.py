@@ -96,7 +96,7 @@ def test_end_to_end_linear_dispatch_with_fake_transport(tmp_path: Path):
     rec = append_transition(
         event="mcp_call_requested",
         actor="test",
-        role_id="test_role",
+        role_id=None,  # capability check bypassed — see test_mcp_capabilities
         surface="mcp_bridge",
         subject="linear_demo",
         payload={

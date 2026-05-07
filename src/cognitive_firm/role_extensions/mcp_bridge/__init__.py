@@ -50,3 +50,12 @@ from cognitive_firm.role_extensions.mcp_bridge.transport import (  # noqa: F401
     get_server_spec,
     call_mcp_tool,
 )
+from cognitive_firm.role_extensions.mcp_bridge.capabilities import (  # noqa: F401
+    MCPCapability,
+    grant_capability,
+    revoke_capability,
+    revoke_task_capabilities,
+    is_dispatch_authorized,
+    list_role_capabilities,
+    load_capabilities_from_role_yaml,
+)

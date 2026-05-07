@@ -67,7 +67,9 @@ def _request_call(
     rec = append_transition(
         event="mcp_call_requested",
         actor="test",
-        role_id="test_role",
+        role_id=None,  # capability check bypassed — these tests are about
+                       # the relay mechanics, not the capability layer.
+                       # See test_mcp_capabilities.py for capability tests.
         surface="mcp_bridge",
         subject="unit_test",
         payload={
