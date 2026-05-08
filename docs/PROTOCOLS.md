@@ -36,7 +36,7 @@ defining what each role may do autonomously vs what requires escalation.
 
 How role offices coordinate with each other inside the kernel. Typed `AgentMessage` envelopes, seven performative kinds (`request`, `proposal`, `handoff`, `inform`, `clarification`, `refusal`, `status`), an **obligation lifecycle** distinct from envelope status (so "B is blocked waiting on A's output" is structurally visible, not inferred), and a **content-addressed artifact-dependency primitive** so "task B requires task A's output X with property Y" is a typed event rather than implicit knowledge.
 
-Status: best-in-class for single-principal governance kernels. Phase A (obligation lifecycle) + Phase B (artifact dependencies) shipped. Phase C (saga compensation) and remote adapter remaining for full publishable parity.
+Status: best-in-class for single-principal governance kernels. Phase A (obligation lifecycle), Phase B (artifact dependencies), and Phase C (saga compensation) all shipped. Remote adapter (cross-VPS role-to-role messaging) remaining for full publishable parity.
 
 ### [H2A — Human-to-Agent](protocols/h2a.md)
 
@@ -60,7 +60,7 @@ Status: production-stable since 2026-04. Schema documented inline in the role ya
 
 ## Honest scope
 
-These specs describe **what is currently shipped**, not what is aspirational. Where a primitive is queued (Phase C saga, Phase 3 supply-chain) the spec says so explicitly. Adopters who read these docs to understand what they would integrate against can rely on every "shipped" claim being backed by tests in `cognitive-firm/tests/`. Test counts per primitive are listed in each protocol spec.
+These specs describe **what is currently shipped**, not what is aspirational. Where a primitive is queued (MCP Phase 3 supply-chain pinning, MCP Phase 4 IdP federation, A2A remote adapter) the spec says so explicitly. Adopters who read these docs to understand what they would integrate against can rely on every "shipped" claim being backed by tests in `cognitive-firm/tests/`. Test counts per primitive are listed in each protocol spec.
 
 ## Threat-model coverage
 

@@ -3,7 +3,7 @@
 **Status:** Phase 1 (outbox-relay) + Phase 1.5 (transport + Linear binding) + Phase 2 (capability tokens) shipped. Phase 3 (supply-chain pinning) + Phase 4 (IdP federation) deferred until concrete adopter demand.
 **Module:** `cognitive_firm.role_extensions.mcp_bridge`
 **Tests:** 27 across `tests/test_mcp_outbox_relay.py` (6) + `tests/test_mcp_linear_server.py` (6) + `tests/test_mcp_capabilities.py` (15).
-**Companion seam:** `figs_activist_loop/research_areas/private/seams/mission/GP-231_*` — three-panel verdict (enterprise-security architect + distributed-systems skeptic + M-Form invariant auditor) shaped this design.
+**Design provenance:** the architecture below was selected by a three-panel adversarial review (enterprise-security architect + distributed-systems skeptic + M-Form invariant auditor) before any code was written.
 
 MCP defines how role offices reach external enterprise systems (Linear, Salesforce, ERPs, ticketing, comms) without filesystem-as-truth contortions. The kernel governs **action**, not state — the world's state stays where the world keeps it.
 

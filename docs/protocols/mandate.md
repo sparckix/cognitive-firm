@@ -138,4 +138,4 @@ This is the same separation that makes legal contracts effective: the boilerplat
 | Mandate version control via git | shipped | shipped |
 | Mandate signing (cryptographic, beyond git commit signing) | not needed | **queued** Phase 3 if needed |
 | Multi-principal mandate (joint signing) | not needed | **queued** if multi-principal mode lands |
-| EU AI Act deploy-gate (mandate field `t2_deployment: bool`) | not needed | **queued** task #206 |
+| EU AI Act deploy-gate | shipped (`src/cognitive_firm/orchestration/eu_ai_act_deploy_gate.py`) | shipped — load-bearing for T2 |

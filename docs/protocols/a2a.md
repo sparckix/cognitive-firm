@@ -162,19 +162,19 @@ The work-discovery scanner calls `is_awaits_satisfied(awaits)` and treats tasks 
 - `check_dependency_cycles(awaits_by_task, promises_by_task)` → DFS-based static cycle detection. Returns cycle paths (empty list = clean DAG).
 - `artifact_key_concentration(window_hours=168)` → biological-panel calibration nudge: warns when one artifact_key dominates ≥ 70% of recent fulfillments. Trail-reinforcement bias monitor.
 
-## Phase C: saga compensation (queued)
+## Phase C: saga compensation (shipped)
 
-A saga is a sequence of obligations across roles that must either all succeed or all be undone. cognitive-firm has the prerequisite primitive (`parent_obligation_id`) but not yet the rollback resolver.
+A saga is a sequence of obligations across roles that must either all succeed or all be undone. cognitive-firm uses the Phase A `parent_obligation_id` as the chain backbone and ships the rollback resolver in `src/cognitive_firm/orchestration/saga_compensation.py` (tests in `tests/test_saga_compensation.py`).
 
-**What Phase C ships:** when an obligation transitions to `refused` or `expired`, walk the `parent_obligation_id` chain and emit compensating actions. Concretely:
+**What Phase C ships:** when an obligation transitions to `refused` or `expired`, the kernel walks the `parent_obligation_id` chain back to the root. For each ancestor in `fulfilled` state, it emits a compensating `request` to the ancestor's original actor, carrying the failed terminal's id as the new `parent_obligation_id`. The compensation request body explains *why* (the downstream chain failed) but does not prescribe *how* — only the original role knows what undoing its action means. The compensations form their own chain, so a refused compensation can itself surface a `saga_compensation_unfulfilled` damage signal for principal review.
 
-1. The kernel reads the chain `child → parent → grandparent → …`
-2. For each ancestor in `fulfilled` state, emit a `request` to the original actor with `kind="request"`, body describing the compensation, and `parent_obligation_id` pointing back to the failed terminal obligation.
-3. Mark the chain as `compensating` until each ancestor either fulfills its compensation or refuses.
+Public API:
 
-**Why it matters:** without saga, partial-failure recovery is manual git-revert. Acceptable for T1 (single principal, trusted hardware, low-stakes). Unacceptable for T2 (regulated enterprise, where some actions have external side effects that git cannot revert — Salesforce activity records, money movement, external notifications).
+- `compensate_failed_obligation(role_id, message_id, reason)` → returns the list of compensation messages emitted.
+- `list_active_sagas(window_hours)` → returns chains with at least one in-flight compensation; consumed by Orbit.
+- `check_compensation_freshness(stale_after_hours=24)` → returns compensation requests stuck in `pending` past their staleness window — these fire `saga_compensation_unfulfilled`.
 
-**Why it's queued, not shipped:** Phase A + B are load-bearing for T1 today; Phase C lands when a concrete T2 adopter signals interest, so the compensation semantics can be co-designed against their actual workflow. Speculatively designing saga semantics tends to over-fit the wrong adversary.
+**Why it matters:** without saga, partial-failure recovery is manual git-revert. Acceptable for T1 (single principal, trusted hardware, low-stakes). Unacceptable for T2 (regulated enterprise, where some actions have external side effects that git cannot revert — Salesforce activity records, money movement, external notifications). T2 reactivation depends on this primitive.
 
 ## Agent-card projection
 
@@ -192,11 +192,11 @@ A saga is a sequence of obligations across roles that must either all succeed or
 | Obligation lifecycle (Phase A) | shipped | shipped |
 | Artifact dependencies (Phase B) | shipped | shipped |
 | Predicate-hash drift detection | shipped | shipped |
-| Saga compensation (Phase C) | not needed (git-revert sufficient) | **queued** — load-bearing |
+| Saga compensation (Phase C) | shipped (overkill for T1 but exercised) | shipped — load-bearing |
 | Remote A2A/ACP adapter | not needed | **queued** — interop |
 | Idempotent at-least-once delivery | not needed (single-machine) | **queued** |
 | Conformance test suite | not needed (internal use) | **queued** for publishability |
 
 ## Distance to publishable reference implementation
 
-Per the 2026-05-07 audit panel: ~80-120 agent-hours from local primitive to "submittable as a 2026 A2A reference implementation." Phase A + B account for ~32 of those hours and shipped this session. Remaining ~50-90 hours: remote adapter, performative expansion, idempotent delivery semantics, conformance suite, full spec doc — held until adopter signal.
+Per the 2026-05-07 audit panel: ~80-120 agent-hours from local primitive to "submittable as a 2026 A2A reference implementation." Phase A + B + C account for ~40 of those hours and shipped. Remaining ~40-80 hours: remote adapter, performative expansion, idempotent delivery semantics, conformance suite, full spec doc — held until adopter signal.
