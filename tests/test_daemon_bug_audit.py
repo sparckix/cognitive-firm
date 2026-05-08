@@ -38,7 +38,7 @@ class TestSubprocessEnvScrub(unittest.TestCase):
             "GOOGLE_API_KEY": "kept",
             "TELEGRAM_BOT_TOKEN": "kept",
             "PATH": "/usr/bin:/bin",
-            "HOME": "/home/ztare",
+            "HOME": "/home/cognitive",
         }
         # Apply the scrub logic verbatim (extracted to test it in isolation)
         subprocess_env = {k: v for k, v in fake_env.items()
@@ -54,8 +54,8 @@ class TestSubprocessEnvScrub(unittest.TestCase):
         """claude CLI reads ~/.claude/.credentials.json; HOME must survive."""
         fake_env = {
             "ANTHROPIC_API_KEY": "drop-me",
-            "HOME": "/home/ztare",
-            "USER": "ztare",
+            "HOME": "/home/cognitive",
+            "USER": "cognitive",
         }
         scrubbed = {k: v for k, v in fake_env.items()
                     if k not in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")}
@@ -122,10 +122,9 @@ class TestScopeFilter(unittest.TestCase):
 
 
 # ── 3. substrate_portfolio registry loader ─────────────────────────────────
-# NOTE: cognitive_firm.research_director was kept in figs_activist_loop's
-# src/ztare/ tree per the cognitive-firm extraction scope; it is not part
-# of the public package. The substrate_portfolio + eigenquestion_generator
-# tests below skip when that module is unavailable.
+# NOTE: cognitive_firm.research_director is an optional tenant module and is
+# not part of the public kernel package. The substrate_portfolio +
+# eigenquestion_generator tests below skip when that module is unavailable.
 
 import importlib.util as _ilu
 _HAS_RESEARCH_DIRECTOR = _ilu.find_spec("cognitive_firm.research_director") is not None

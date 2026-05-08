@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup_vps.sh — seamless ZTARE Research Co (or any tenant) VPS bootstrap.
+# setup_vps.sh — seamless cognitive-firm VPS bootstrap.
 #
 # Run this from your LAPTOP, pointing at a fresh Ubuntu VPS:
 #
@@ -10,7 +10,7 @@
 #   2. Install OS deps (python 3.12+, git, build tools, jq, inotify-tools)
 #   3. Install Node 22 LTS via NodeSource (overrides Ubuntu's old Node 18)
 #   4. Install Claude Code CLI + OpenAI Codex CLI globally
-#   5. Create `ztare` user with passwordless sudo + same SSH key
+#   5. Create `cognitive` user with passwordless sudo + same SSH key
 #   6. Disable root password auth + harden sshd drop-ins
 #   7. Print the manual-step checklist that remains (deploy keys, OAuth tokens, etc.)
 #
@@ -34,17 +34,17 @@ Usage: $0 root@<vps-ip>
 
 Optional env:
   KEY_FILE=path/to/your/id_ed25519.pub   (default: ~/.ssh/id_ed25519.pub)
-  ZTARE_USER=ztare                        (default: ztare)
-  GITHUB_REPO=sparckix/ztare              (default: sparckix/ztare; the public kernel)
-  TENANT_REPO=sparckix/ztare-research-co  (default: ; private tenant overlay)
+  VPS_USER=cognitive                        (default: cognitive)
+  GITHUB_REPO=sparckix/cognitive-firm  (default: sparckix/cognitive-firm; the public kernel)
+  TENANT_REPO=<your-org>/<tenant>-research-co  (default: ; private tenant overlay)
 EOF
     exit 1
 fi
 
 VPS_TARGET="$1"
 KEY_FILE="${KEY_FILE:-$HOME/.ssh/id_ed25519.pub}"
-ZTARE_USER="${ZTARE_USER:-ztare}"
-GITHUB_REPO="${GITHUB_REPO:-sparckix/ztare}"
+VPS_USER="${VPS_USER:-cognitive}"
+GITHUB_REPO="${GITHUB_REPO:-sparckix/cognitive-firm}"
 TENANT_REPO="${TENANT_REPO:-}"
 
 if [[ ! -f "$KEY_FILE" ]]; then
@@ -57,11 +57,11 @@ PUBKEY="$(cat "$KEY_FILE")"
 VPS_HOST="${VPS_TARGET#*@}"
 
 echo "═══════════════════════════════════════"
-echo "  ZTARE VPS Bootstrap"
+echo "  cognitive-firm VPS Bootstrap"
 echo "═══════════════════════════════════════"
 echo "  Target:    $VPS_TARGET"
 echo "  Key file:  $KEY_FILE"
-echo "  User:      $ZTARE_USER"
+echo "  User:      $VPS_USER"
 echo "  Kernel:    https://github.com/$GITHUB_REPO"
 [[ -n "$TENANT_REPO" ]] && echo "  Overlay:   https://github.com/$TENANT_REPO"
 echo ""
@@ -136,32 +136,32 @@ fi
 echo '  ✓ codex:' \$(codex --version 2>&1 | head -1)
 "
 
-# ── Step 5: Create ztare user with passwordless sudo + clone repo ────────
+# ── Step 5: Create unprivileged user with passwordless sudo + clone repo ────────
 echo ""
-echo "── Step 5/5: Create $ZTARE_USER user + clone public kernel ──"
+echo "── Step 5/5: Create $VPS_USER user + clone public kernel ──"
 ssh "$VPS_TARGET" "
 set -e
-if ! id $ZTARE_USER &>/dev/null; then
-    useradd -m -s /bin/bash -G sudo $ZTARE_USER
-    mkdir -p /home/$ZTARE_USER/.ssh
-    cp /root/.ssh/authorized_keys /home/$ZTARE_USER/.ssh/
-    chown -R $ZTARE_USER:$ZTARE_USER /home/$ZTARE_USER/.ssh
-    chmod 700 /home/$ZTARE_USER/.ssh
-    chmod 600 /home/$ZTARE_USER/.ssh/authorized_keys
-    echo '$ZTARE_USER ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/$ZTARE_USER
-    chmod 440 /etc/sudoers.d/$ZTARE_USER
-    echo '  ✓ created $ZTARE_USER user with passwordless sudo'
+if ! id $VPS_USER &>/dev/null; then
+    useradd -m -s /bin/bash -G sudo $VPS_USER
+    mkdir -p /home/$VPS_USER/.ssh
+    cp /root/.ssh/authorized_keys /home/$VPS_USER/.ssh/
+    chown -R $VPS_USER:$VPS_USER /home/$VPS_USER/.ssh
+    chmod 700 /home/$VPS_USER/.ssh
+    chmod 600 /home/$VPS_USER/.ssh/authorized_keys
+    echo '$VPS_USER ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/$VPS_USER
+    chmod 440 /etc/sudoers.d/$VPS_USER
+    echo '  ✓ created $VPS_USER user with passwordless sudo'
 else
-    echo '  (user $ZTARE_USER already exists)'
+    echo '  (user $VPS_USER already exists)'
 fi
 "
 
-ssh "$ZTARE_USER@$VPS_HOST" "
+ssh "$VPS_USER@$VPS_HOST" "
 set -e
-if [[ ! -d ~/figs_activist_loop ]]; then
-    git clone https://github.com/$GITHUB_REPO ~/figs_activist_loop 2>&1 | tail -2
+if [[ ! -d ~/cognitive-firm ]]; then
+    git clone https://github.com/$GITHUB_REPO ~/cognitive-firm 2>&1 | tail -2
 fi
-cd ~/figs_activist_loop
+cd ~/cognitive-firm
 if [[ ! -d venv ]]; then
     python3 -m venv venv
 fi
@@ -172,7 +172,7 @@ echo '  ✓ public kernel cloned + python venv ready'
 
 # Generate deploy key for tenant overlay clone (if not yet present)
 if [[ ! -f ~/.ssh/github_deploy ]]; then
-    ssh-keygen -t ed25519 -f ~/.ssh/github_deploy -N '' -C 'ztare-vps-deploy' 2>&1 | tail -2
+    ssh-keygen -t ed25519 -f ~/.ssh/github_deploy -N '' -C 'cognitive-firm-vps-deploy' 2>&1 | tail -2
     cat > ~/.ssh/config <<'GHEOF'
 Host github-private
   HostName github.com
@@ -197,7 +197,7 @@ if [[ ! -f .env ]] && [[ -f .env.example ]]; then
     cp .env.example .env
     chmod 600 .env
 fi
-echo '  ✓ .env skeleton in place at ~/figs_activist_loop/.env'
+echo '  ✓ .env skeleton in place at ~/cognitive-firm/.env'
 
 # Install orbit deps
 if [[ -d orbit ]] && [[ ! -d orbit/node_modules ]]; then
@@ -207,7 +207,7 @@ fi
 "
 
 # ── Print remaining manual steps ──────────────────────────────────────────
-DEPLOY_PUBKEY=$(ssh "$ZTARE_USER@$VPS_HOST" "cat ~/.ssh/github_deploy.pub" 2>/dev/null || echo "<run setup again to generate>")
+DEPLOY_PUBKEY=$(ssh "$VPS_USER@$VPS_HOST" "cat ~/.ssh/github_deploy.pub" 2>/dev/null || echo "<run setup again to generate>")
 cat <<EOF
 
 ═══════════════════════════════════════════════════════════════════
@@ -216,9 +216,9 @@ cat <<EOF
 
 What's done:
   ✓ SSH key-only access; password auth disabled
-  ✓ ztare user with passwordless sudo
+  ✓ unprivileged service user with passwordless sudo
   ✓ OS deps + Node 22 + claude + codex CLIs
-  ✓ Public kernel cloned to ~/figs_activist_loop/
+  ✓ Public kernel cloned to ~/cognitive-firm/
   ✓ Python venv + requirements installed (incl. python-dotenv)
   ✓ Deploy key generated for tenant overlay
   ✓ systemd units staged (not enabled)
@@ -229,25 +229,25 @@ Remaining steps (interactive — principal must perform):
   1. Add deploy key to GitHub for tenant overlay clone:
 
          echo '$DEPLOY_PUBKEY' | gh repo deploy-key add - \\
-             --repo ${TENANT_REPO:-<your-org>/ztare-research-co} \\
-             --title 'ztare-vps-${VPS_HOST}'
+             --repo ${TENANT_REPO:-<your-org>/<tenant>-research-co} \\
+             --title 'cognitive-firm-vps-${VPS_HOST}'
 
   2. Drop API keys into VPS .env (use rsync from your local zshrc):
 
          grep -E '^export (ANTHROPIC|OPENAI|GOOGLE|GEMINI|HF_|VERCEL|WANDB|LAMBDA)' ~/.zshrc \\
              | sed 's/^export //' \\
-             | ssh $ZTARE_USER@$VPS_HOST 'cat >> ~/figs_activist_loop/.env'
+             | ssh $VPS_USER@$VPS_HOST 'cat >> ~/cognitive-firm/.env'
 
   3. Set up Telegram bot creds:
 
-         scp ~/figs_activist_loop/org/mandates/.telegram_creds \\
-             $ZTARE_USER@$VPS_HOST:~/figs_activist_loop/org/mandates/.telegram_creds
+         scp ~/cognitive-firm/org/mandates/.telegram_creds \\
+             $VPS_USER@$VPS_HOST:~/cognitive-firm/org/mandates/.telegram_creds
 
      (Or run scripts/telegram_setup.py interactively on VPS.)
 
   4. Run claude setup-token on VPS (interactive OAuth — needs your laptop browser):
 
-         ssh $ZTARE_USER@$VPS_HOST
+         ssh $VPS_USER@$VPS_HOST
          unset ANTHROPIC_API_KEY  # so claude prefers OAuth
          claude setup-token
          # Visit URL on laptop browser; paste code back; exit
@@ -255,44 +255,44 @@ Remaining steps (interactive — principal must perform):
   5. (Optional) Sync Codex CLI auth from local laptop:
 
          rsync -az ~/.codex/auth.json \\
-             $ZTARE_USER@$VPS_HOST:~/.codex/auth.json
+             $VPS_USER@$VPS_HOST:~/.codex/auth.json
 
   6. Clone tenant overlay + activate:
 
-         ssh $ZTARE_USER@$VPS_HOST
-         git clone git@github-private:${TENANT_REPO:-<your-org>/ztare-research-co} \\
-             ~/ztare-research-co
-         ~/ztare-research-co/scripts/setup_tenant.sh ~/figs_activist_loop
+         ssh $VPS_USER@$VPS_HOST
+         git clone git@github-private:${TENANT_REPO:-<your-org>/<tenant>-research-co} \\
+             ~/<tenant>-research-co
+         ~/<tenant>-research-co/scripts/setup_tenant.sh ~/cognitive-firm
 
   7. Verify everything works:
 
-         ssh $ZTARE_USER@$VPS_HOST 'cd ~/figs_activist_loop && \\
+         ssh $VPS_USER@$VPS_HOST 'cd ~/cognitive-firm && \\
              ./venv/bin/python scripts/org_role_preflight.py --role research_director'
 
   8. Enable + start daemons (when satisfied with preflight):
 
-         ssh $ZTARE_USER@$VPS_HOST 'sudo systemctl enable --now agent-daemon orbit-sync'
+         ssh $VPS_USER@$VPS_HOST 'sudo systemctl enable --now agent-daemon orbit-sync'
 
   9. Install mutagen on VPS for bidirectional sync (laptop ↔ VPS):
 
-         ssh $ZTARE_USER@$VPS_HOST 'cd /tmp && \\
+         ssh $VPS_USER@$VPS_HOST 'cd /tmp && \\
              curl -sL https://github.com/mutagen-io/mutagen/releases/download/v0.18.1/mutagen_linux_amd64_v0.18.1.tar.gz | tar xz && \\
              sudo mv mutagen /usr/local/bin/ && sudo chmod +x /usr/local/bin/mutagen'
 
          # On laptop (after installing mutagen locally):
-         mutagen sync create --name=ztare-vps-sync --sync-mode=two-way-resolved \\
+         mutagen sync create --name=cognitive-firm-vps-sync --sync-mode=two-way-resolved \\
              --ignore=venv --ignore=node_modules --ignore=__pycache__ \\
              --ignore="*.pyc" --ignore=".git" --ignore=".pytest_cache" \\
-             /path/to/local/figs_activist_loop \\
-             $ZTARE_USER@$VPS_HOST:/home/$ZTARE_USER/figs_activist_loop
+             /path/to/local/cognitive-firm \\
+             $VPS_USER@$VPS_HOST:/home/$VPS_USER/cognitive-firm
 
   10. Set up daily git push of org_overlay (GP-192 Axis 7 — recovery snapshot):
 
-         ssh $ZTARE_USER@$VPS_HOST 'crontab -e'
+         ssh $VPS_USER@$VPS_HOST 'crontab -e'
          # Add:
-         #   0 2 * * * cd ~/figs_activist_loop && git add -A && \\
+         #   0 2 * * * cd ~/cognitive-firm && git add -A && \\
          #     git commit -m "snap \$(date -u +%F)" --allow-empty && git push 2>&1 \\
-         #     | logger -t ztare-snap
+         #     | logger -t cognitive-firm-snap
 
 ═══════════════════════════════════════════════════════════════════
 EOF

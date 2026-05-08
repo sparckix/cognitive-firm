@@ -5,16 +5,17 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ztare
-WorkingDirectory=/home/ztare/figs_activist_loop/orbit
+# Replace `cognitive` with the unprivileged user that owns the checkout.
+User=cognitive
+WorkingDirectory=/home/cognitive/cognitive-firm/orbit
+EnvironmentFile=-/home/cognitive/cognitive-firm/.env
 ExecStart=/usr/bin/npm run sync
 Restart=on-failure
 RestartSec=30
-EnvironmentFile=-/home/ztare/figs_activist_loop/.env
 
 # Bind 127.0.0.1 by default — no public exposure. Use SSH port-forward
 # to access from your laptop:
-#   ssh -L 3001:localhost:3001 ztare@<vps-ip>
+#   ssh -L 3001:localhost:3001 cognitive@<vps-ip>
 #   then http://localhost:3001 in your browser
 Environment=ORBIT_BACKEND_HOST=127.0.0.1
 Environment=ORBIT_BACKEND_PORT=3001
