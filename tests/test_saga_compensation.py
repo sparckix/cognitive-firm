@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """GP-232 Phase C — saga compensation primitive tests.
 
 Properties under test:

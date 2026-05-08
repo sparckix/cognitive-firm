@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """GP-231 MCP bridge.
 
 The bridge sits at the App layer of the OS / Config / App decomposition.

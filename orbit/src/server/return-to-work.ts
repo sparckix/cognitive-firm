@@ -1,4 +1,3 @@
-// Licensed under Business Source License 1.1 — see LICENSE-BSL
 /**
  * Return-to-Work Summary Generator (Nardi, GP-167 Turn 3)
  *

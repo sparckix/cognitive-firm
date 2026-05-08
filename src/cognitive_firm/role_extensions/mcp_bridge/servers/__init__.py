@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """Concrete MCP server bindings.
 
 Each module in this package registers ONE MCP server's spec + projections

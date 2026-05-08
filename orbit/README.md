@@ -47,4 +47,4 @@ org/ (system of record, git-tracked)
 
 ## License
 
-Business Source License 1.1 — see LICENSE-BSL
+Apache-2.0 — see the top-level `LICENSE` and `NOTICE` files in the cognitive-firm repository.

@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """Property-based tests for the M-Form load-bearing invariants.
 
 Per `internal/competitive_adoption_verdicts.md` C2 verdict: REJECT formal

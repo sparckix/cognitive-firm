@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """Linear MCP server binding (Phase 1.5 — read-only).
 
 Why Linear first: Linear ships an official MCP server, the read surface

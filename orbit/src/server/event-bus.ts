@@ -1,4 +1,3 @@
-// Licensed under Business Source License 1.1 — see LICENSE-BSL
 /**
  * Event Bus — the communication layer for human-AI symbiotic orgs.
  *

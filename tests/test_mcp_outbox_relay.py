@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """Tests for the GP-231 MCP outbox-relay primitive.
 
 Three load-bearing properties under test (each one falsifiable):

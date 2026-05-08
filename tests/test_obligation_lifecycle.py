@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """GP-232 Phase A — obligation lifecycle on AgentMessage.
 
 The lifecycle is distinct from the envelope's `status` field:

@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 #!/usr/bin/env python3
 """Persistent Autonomous Agent Daemon — GP-128 Level 2.
 

@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """Deterministic projection functions: MCP response → transition class.
 
 Per GP-231 panel verdict (M-Form auditor, 2026-05-07): when an MCP server

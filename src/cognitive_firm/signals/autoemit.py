@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """Autonomous damage-signal emitters (GP-128 post-ship debate output).
 
 The GP-128 post-ship adversarial debate (2026-04-23) found that the

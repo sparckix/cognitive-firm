@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """General-purpose MCP transport for the outbox relay.
 
 MCP (Model Context Protocol) speaks JSON-RPC 2.0 over either:

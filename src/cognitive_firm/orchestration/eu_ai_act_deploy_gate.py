@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """C3 SHIP B — EU AI Act compliance deploy-gate primitive.
 
 WHAT THIS PRIMITIVE DOES, IN PLAIN ENGLISH:

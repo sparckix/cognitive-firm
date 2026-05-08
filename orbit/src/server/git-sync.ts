@@ -1,4 +1,3 @@
-// Licensed under Business Source License 1.1 — see LICENSE-BSL
 /**
  * Git-sync daemon — reads org/ directory, serves state via HTTP + WebSocket.
  *

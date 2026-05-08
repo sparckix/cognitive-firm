@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """Damage-signal stub (GP-129 pull-forward — Matzinger danger model).
 
 Identity-based authorization (src.cognitive_firm.roles.authorization) answers

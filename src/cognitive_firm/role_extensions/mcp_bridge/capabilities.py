@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """GP-231 Phase 2 — capability-token primitives for MCP dispatch.
 
 Per `internal/competitive_adoption_verdicts.md` C4 verdict: SHIP a

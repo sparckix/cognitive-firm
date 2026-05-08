@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """Pre-dispatch authorization gate for role-daemon tasks.
 
 This is deliberately conservative and local. It does not sandbox execution;

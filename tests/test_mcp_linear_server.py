@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """Tests for the Linear MCP server binding.
 
 Exercises:

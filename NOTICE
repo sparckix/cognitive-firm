@@ -1,0 +1,53 @@
+cognitive-firm
+Copyright 2026 Daniel Alami
+
+This product includes software developed by Daniel Alami.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may
+not use this file except in compliance with the License. You may obtain
+a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+------------------------------------------------------------------------
+
+This product includes typed-protocol design ideas adapted from public
+specifications:
+
+- Google Agent-to-Agent (A2A) discovery format — for the AgentCard
+  projection layer in src/cognitive_firm/orchestration/a2a_projection.py.
+  Used as a discovery format only; cognitive-firm does not adopt A2A's
+  routing-as-authority semantics.
+
+- Anthropic Model Context Protocol (MCP) — for the JSON-RPC transport
+  contract used by the outbox-relay in src/cognitive_firm/role_extensions/
+  mcp_bridge/. Both the stdio and HTTP transports follow the public MCP
+  specification.
+
+- IBM Agent Communication Protocol (ACP) discovery format — for
+  cross-compatibility of the AgentCard projection.
+
+These references are documented inline in their respective source files.
+No code is copied; only the public protocol surfaces are implemented.
+
+------------------------------------------------------------------------
+
+Theoretical grounding for the M-form architecture, mandate primitive,
+and Holmström-style informativeness selection draws on:
+
+- Chandler, Alfred D. (1962). Strategy and Structure: Chapters in the
+  History of the Industrial Enterprise. MIT Press.
+- Holmström, Bengt (1979). Moral Hazard and Observability. Bell Journal
+  of Economics, 10(1), 74-91.
+- Tirole, Jean (1999). Incomplete Contracts: Where Do We Stand?
+  Econometrica, 67(4), 741-781.
+- Nelson, Richard R., & Winter, Sidney G. (1982). An Evolutionary Theory
+  of Economic Change. Belknap Press.
+
+These works are cited; no text is reproduced.
