@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """Canonical local transition log writer for the org runtime.
 
 This is the solo/local projection of the enterprise event outbox. Every
@@ -29,9 +28,19 @@ def append_transition(
     subject: str,
     payload: dict[str, Any] | None = None,
     causality_id: str | None = None,
-    log_path: Path = TRANSITIONS_LOG,
+    log_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Append one canonical org transition and return the record."""
+    """Append one canonical org transition and return the record.
+
+    log_path defaults to the module-level TRANSITIONS_LOG, resolved at call
+    time (not at function-definition time) so monkeypatching the module
+    constant in tests propagates to every call site without the test
+    needing to thread log_path through every primitive.
+    """
+    # Resolve default at call time so monkeypatching TRANSITIONS_LOG works.
+    import sys
+    if log_path is None:
+        log_path = sys.modules[__name__].TRANSITIONS_LOG
     record = {
         "schema_version": 1,
         "event_id": str(uuid.uuid4()),

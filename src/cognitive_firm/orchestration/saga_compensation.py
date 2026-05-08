@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """GP-232 Phase C — saga compensation primitive.
 
 WHAT THIS PRIMITIVE DOES, IN PLAIN ENGLISH:
@@ -253,13 +252,15 @@ def compensate_failed_obligation(
 
 def list_active_sagas(
     *,
-    log_path: Path = TRANSITIONS_LOG,
+    log_path: Path | None = None,
     window_hours: float = 168.0,
 ) -> list[dict[str, Any]]:
     """Return active sagas — chains that have a saga.compensation_emitted
     row but no corresponding fulfillment of every compensation in the
     chain. Used by Orbit to render saga state.
     """
+    if log_path is None:
+        log_path = TRANSITIONS_LOG
     if not log_path.exists():
         return []
 
@@ -315,13 +316,15 @@ def list_active_sagas(
 
 def check_compensation_freshness(
     *,
-    log_path: Path = TRANSITIONS_LOG,
+    log_path: Path | None = None,
     stale_after_hours: float = 24.0,
 ) -> list[dict[str, Any]]:
     """Find compensation requests whose obligation has not transitioned
     away from `pending` within `stale_after_hours`. These are the events
     that should fire `saga_compensation_unfulfilled` damage signals.
     """
+    if log_path is None:
+        log_path = TRANSITIONS_LOG
     cutoff = datetime.now(timezone.utc).timestamp() - stale_after_hours * 3600
     stale: list[dict[str, Any]] = []
     for saga in list_active_sagas(log_path=log_path):

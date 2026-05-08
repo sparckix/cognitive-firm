@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """Outbox relay for MCP calls.
 
 Per GP-231 panel verdict (distributed-systems skeptic, 2026-05-07):
@@ -128,8 +127,10 @@ def _send_mcp_request(
 # ── public API ─────────────────────────────────────────────────────────
 
 
-def pending_count(log_path: Path = TRANSITIONS_LOG) -> int:
+def pending_count(log_path: Path | None = None) -> int:
     """Return the count of `mcp_call_requested` rows that have no follow-up."""
+    if log_path is None:
+        log_path = TRANSITIONS_LOG
     log = _read_log(log_path)
     pending = 0
     for row in log:
@@ -142,7 +143,7 @@ def pending_count(log_path: Path = TRANSITIONS_LOG) -> int:
 
 def dispatch_pending(
     *,
-    log_path: Path = TRANSITIONS_LOG,
+    log_path: Path | None = None,
     max_dispatches: int = 5,
     transport=None,
 ) -> list[dict[str, Any]]:
@@ -157,6 +158,8 @@ def dispatch_pending(
         transport: optional (server, tool, request, key, timeout) -> dict
             callable used in tests; defaults to `_send_mcp_request`.
     """
+    if log_path is None:
+        log_path = TRANSITIONS_LOG
     transport = transport or _send_mcp_request
     log = _read_log(log_path)
     appended: list[dict[str, Any]] = []

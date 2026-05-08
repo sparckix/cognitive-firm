@@ -1,4 +1,3 @@
-# Licensed under Business Source License 1.1 — see LICENSE-BSL
 """GP-232 Phase B — content-addressed artifact-dependency primitive.
 
 Three adversarial panels (distributed-systems engineer, biological-systems
@@ -87,12 +86,14 @@ def promise_artifact(
     predicate: str,
     expires_at_utc: Optional[str] = None,
     causality_id: Optional[str] = None,
-    log_path: Path = TRANSITIONS_LOG,
+    log_path: Path | None = None,
 ) -> dict[str, Any]:
     """Emit task.artifact.promised. The producer commits to producing
     artifact_key satisfying the predicate; consumers' awaits filter against
     this row's predicate_hash. Expires_at_utc supports TTL semantics
     (the biological panel's calibration nudge — markers must decay)."""
+    if log_path is None:
+        log_path = TRANSITIONS_LOG
     return append_transition(
         event="task.artifact.promised",
         actor=role_id,
@@ -121,13 +122,15 @@ def fulfill_artifact(
     predicate: str,
     causality_id: Optional[str] = None,
     supersedes: Optional[list[str]] = None,
-    log_path: Path = TRANSITIONS_LOG,
+    log_path: Path | None = None,
 ) -> dict[str, Any]:
     """Emit task.artifact.fulfilled. Carries the content hash + per-clause
     eval of the predicate so the audit trail records WHAT was produced
     and that it satisfied each named clause. Downstream consumers'
     awaits filter against this row's predicate_hash + the eval.
     """
+    if log_path is None:
+        log_path = TRANSITIONS_LOG
     return append_transition(
         event="task.artifact.fulfilled",
         actor=role_id,
@@ -155,7 +158,7 @@ def is_awaits_satisfied(
     awaits: list[dict[str, str]],
     *,
     now: Optional[datetime] = None,
-    log_path: Path = TRANSITIONS_LOG,
+    log_path: Path | None = None,
 ) -> tuple[bool, list[str]]:
     """Return (all_satisfied, missing_descriptions).
 
@@ -164,6 +167,8 @@ def is_awaits_satisfied(
     AND every clause of predicate_eval must be true AND any TTL on the
     matching promise must not be expired.
     """
+    if log_path is None:
+        log_path = TRANSITIONS_LOG
     if not awaits:
         return True, []
     now = now or datetime.now(timezone.utc)
@@ -218,7 +223,7 @@ def is_awaits_satisfied(
 
 def rebuild_artifact_index(
     *,
-    log_path: Path = TRANSITIONS_LOG,
+    log_path: Path | None = None,
 ) -> dict[str, list[int]]:
     """Rebuild the artifact_key → [fulfillment offsets] index from the log.
 
@@ -226,6 +231,8 @@ def rebuild_artifact_index(
     startup; it is a projection, not a separate truth. Same pattern as
     the GP-231 outbox-relay's pending-row scan.
     """
+    if log_path is None:
+        log_path = TRANSITIONS_LOG
     if not log_path.exists():
         return {}
     out: dict[str, list[int]] = defaultdict(list)
@@ -309,7 +316,7 @@ def check_dependency_cycles(
 
 def artifact_key_concentration(
     *,
-    log_path: Path = TRANSITIONS_LOG,
+    log_path: Path | None = None,
     window_hours: float = 168.0,
 ) -> dict[str, Any]:
     """Surface trail-reinforcement bias: if one artifact_key dominates
@@ -317,6 +324,8 @@ def artifact_key_concentration(
     coordination path. Returns {top_key, top_share, total, distribution}.
     Threshold of 0.7 is the biological panel's recommended alarm level.
     """
+    if log_path is None:
+        log_path = TRANSITIONS_LOG
     rows = _read_log(log_path)
     cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
     counts: dict[str, int] = defaultdict(int)
