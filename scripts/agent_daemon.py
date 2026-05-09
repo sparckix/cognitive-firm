@@ -464,6 +464,52 @@ def _format_bootstrap_chain_for_prompt(*, role_id: str) -> str:
     if not isinstance(manifest, dict):
         return fallback
 
+    # ── pre_tick_scripts hook (added 2026-05-09) ─────────────────────
+    # Run scripts whose `only_for_roles` matches role_id BEFORE
+    # formatting required_reads. Capture stdout to `output_to` so
+    # subsequent required_reads can reference the regenerated artifact
+    # (e.g., RD-tick-brief feeding analytics/RD_TICK_BRIEF.md). Per
+    # `failure_action`: "block" aborts the tick on non-zero exit;
+    # "warn" (default) logs and proceeds; "ignore" never blocks.
+    pre_scripts = manifest.get("pre_tick_scripts") or []
+    for entry in pre_scripts:
+        if not isinstance(entry, dict):
+            continue
+        only = entry.get("only_for_roles") or []
+        if only and role_id not in only:
+            continue
+        script_rel = entry.get("script")
+        out_rel = entry.get("output_to")
+        if not script_rel or not out_rel:
+            continue
+        script_path = REPO_ROOT / script_rel
+        out_path = REPO_ROOT / out_rel
+        extra_args = entry.get("args") or []
+        if not isinstance(extra_args, list):
+            extra_args = []
+        if not script_path.exists():
+            continue
+        try:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            result = subprocess.run(
+                [sys.executable, str(script_path), *extra_args],
+                capture_output=True, text=True, timeout=60,
+            )
+            out_path.write_text(result.stdout, encoding="utf-8")
+            failure_action = (entry.get("failure_action") or "warn").lower()
+            if result.returncode != 0 and failure_action == "block":
+                raise RuntimeError(
+                    f"pre_tick_script {script_rel} exited {result.returncode} "
+                    f"(failure_action=block); aborting tick. stderr: "
+                    f"{(result.stderr or '')[:200]}"
+                )
+        except RuntimeError:
+            raise
+        except Exception:                                                       # noqa: BLE001
+            # Script crashed; fail-open at this level. Tighten via
+            # failure_action: "block" in the manifest if needed.
+            continue
+
     lines: list[str] = []
     required = manifest.get("required_reads") or []
     if required:

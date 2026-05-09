@@ -37,6 +37,39 @@ required_reads:
   - path: "org/preferences/principal.yaml"
     purpose: "Principal's research-taste routing preferences. Versioned; read each tick because principal may have edited."
 
+  - path: "analytics/RD_TICK_BRIEF.md"
+    only_for_roles: ["research_director"]
+    purpose: "Auto-regenerated tick brief — monoculture flag + recent catches + open PLs + predispatch checklist. Produced by `scripts/rd_tick_brief.py` via `pre_tick_scripts` hook below. Read FIRST every research_director tick (the brief lists which patterns are over-deployed and which blind-spot patterns to deploy next)."
+    optional_for_roles: ["manager", "engineer", "reviewer", "research_scientist", "skeptic", "product_manager"]
+    fallback_when_absent: "If absent, the role is not research_director or the pre_tick_scripts hook didn't fire; agents in non-RD roles ignore."
+
+# ── Pre-tick scripts (added 2026-05-09 per RD-discipline kernel-tick hook) ───
+#
+# Scripts run BEFORE required_reads are formatted. Output (stdout) is
+# written to `output_to`; `required_reads` then references the output
+# path normally (so the agent reads the regenerated brief). Scoped via
+# `only_for_roles` so e.g. RD-tick-brief runs only for research_director
+# tick, not for manager / engineer / reviewer ticks.
+#
+# `failure_action`:
+#   - "block": exit code != 0 aborts the tick (e.g. monoculture-flag firing).
+#   - "warn":  exit code != 0 logged but tick proceeds (default).
+#   - "ignore": exit code never blocks.
+#
+# Implementation: `scripts/agent_daemon.py::_format_bootstrap_chain`
+# checks for `pre_tick_scripts`, filters by role_id, runs them, captures
+# stdout, writes to `output_to`, then proceeds to format required_reads.
+
+pre_tick_scripts:
+  - script: "scripts/rd_tick_brief.py"
+    only_for_roles: ["research_director"]
+    output_to: "analytics/RD_TICK_BRIEF.md"
+    args: ["--short"]
+    failure_action: "warn"   # exit 1 (monoculture firing) is informational
+                              # not blocking; agent reads the brief and acts.
+                              # Set to "block" for stricter VPS-agent gates.
+    purpose: "Surface monoculture flag + blind-spot patterns + recent catches + open PLs + predispatch checklist before each RD tick. Forces RD discipline at the kernel layer instead of trusting the agent to self-enforce."
+
 # ── Conditional reads ────────────────────────────────────────────────
 #
 # Read when the agent's task references the topic. Not required on every
