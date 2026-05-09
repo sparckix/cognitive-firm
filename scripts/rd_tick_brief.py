@@ -210,6 +210,54 @@ def render_open_pls(tenant: Path, n: int) -> None:
         print(f"      Q: {question}")
 
 
+def render_calibration(tenant: Path) -> None:
+    """Surface PL calibration state. Added 2026-05-10 per operator catch
+    'I haven't seen u update the predictions in terms of estimation etc.'
+    VPS agents must SEE calibration drift every tick, not on-demand.
+    """
+    scorer = tenant / "scripts/score_prediction_ledger_calibration.py"
+    summary_path = tenant / "analytics/prediction_ledger_calibration_summary.json"
+    if not scorer.exists():
+        print("  (no calibration scorer in tenant)")
+        return
+    try:
+        subprocess.run(
+            ["python", str(scorer)],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception:
+        pass
+    if not summary_path.exists():
+        print("  (calibration summary unavailable)")
+        return
+    try:
+        s = json.loads(summary_path.read_text(encoding="utf-8"))
+    except Exception:
+        print("  (calibration summary parse failed)")
+        return
+    cross = s.get("cross_predictor", {})
+    effort = s.get("effort_ratio", {})
+    cost = s.get("cost_ratio", {})
+    demo = s.get("demotion_check", {})
+    n_scored = s.get("n_rows_brier_scored", 0)
+    print(f"  N resolved scored: {n_scored} (gate: 20)")
+    if cross:
+        best = cross.get("best_predictor", "NA")
+        worst = cross.get("worst_predictor", "NA")
+        bbrier = cross.get("best_brier_mean", 0)
+        wbrier = cross.get("worst_brier_mean", 0)
+        print(f"  Cross-predictor Brier: best {best}={bbrier:.3f}, worst {worst}={wbrier:.3f}")
+    print(f"  Effort-ratio (predicted_min/actual_min) mean={effort.get('mean', 0):.2f} median={effort.get('median', 0):.2f} (in-band [0.5, 2.0])")
+    pred_effort = effort.get('per_predictor', {})
+    out_of_band = [p for p, d in pred_effort.items()
+                   if isinstance(d, dict) and d.get('out_of_band')]
+    if out_of_band:
+        print(f"  Predictors OUT-OF-BAND on effort: {', '.join(out_of_band[:3])}")
+    print(f"  Cost-ratio mean={cost.get('mean', 0):.2f} (in-band [0.5, 2.0])")
+    if s.get('demote_now'):
+        print(f"  !!! DEMOTION RULE TRIGGERED — review before more PL forecasts !!!")
+
+
 def render_predispatch_checklist() -> None:
     print("  Before any dispatch (cold-shot or internal-Claude agent):")
     print("    1. Run: python scripts/predispatch_check.py \\")
@@ -259,7 +307,10 @@ def main() -> int:
     section(f"5. Last {args.last_n_pls} unresolved PLs")
     render_open_pls(tenant, args.last_n_pls)
 
-    section("6. Pre-dispatch checklist")
+    section("6. PL calibration state")
+    render_calibration(tenant)
+
+    section("7. Pre-dispatch checklist")
     render_predispatch_checklist()
 
     print()
