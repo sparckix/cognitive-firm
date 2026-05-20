@@ -5,12 +5,7 @@
  * compares to per-role daily caps (from role yaml). Renders inside
  * the Orbit dashboard or as a modal.
  *
- * Per GP-167 panel verdict (Tufte data-ink + Edward's small multiples),
- * the layout is dense + monochrome with one accent color per cap-bucket.
- *
- * Ref: deploy/README.md "Auth model — important to understand"
- *      docs/concepts/ztare_research_company_architecture.md §"Backend Decision"
- *      research_areas/private/seams/protocol/GP-192_enterprise_grade_org_runtime_seam.md §Axis 7
+ * The layout is dense with one accent color per cap bucket.
  */
 import { useEffect, useState } from 'react'
 import type { Role } from '../types/org'

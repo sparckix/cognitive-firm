@@ -3,7 +3,7 @@
  *
  * Surfaces the two write endpoints that exist on the git-sync server but had
  * no UI before Org-5: `/api/directive` and `/api/control`. See
- * docs/internal/orbit_dashboard_audit_2026-04-30.md S1.
+ * the app surface should remain a projection over kernel state.
  *
  * Kernel discipline (per GP-191): this component is domain-neutral. It lists
  * roles and lets the principal send a typed directive or a typed control

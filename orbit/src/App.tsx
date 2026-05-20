@@ -6,7 +6,7 @@
  *   Center: Agent constellation (working) — faces, review queue
  *   Right:  Damage signals (fast) — real-time feed, attention budget
  */
-import { useState, useCallback } from 'react'
+import { lazy, Suspense, useState, useCallback } from 'react'
 import { useOrgState } from './lib/useOrgState'
 import { GovernancePane } from './components/GovernancePane'
 import { AgentTile } from './components/AgentTile'
@@ -18,14 +18,18 @@ import { MetaConfigPane } from './components/MetaConfigPane'
 import { FrontierStatePane } from './components/FrontierStatePane'
 import { SpendPane } from './components/SpendPane'
 import { BatchGateReview } from './components/BatchGateReview'
-import { SpatialCanvas } from './components/SpatialCanvas'
 import { ChatPane } from './components/ChatPane'
+import { HumanWorkPane } from './components/HumanWorkPane'
+
+const SpatialCanvas = lazy(() =>
+  import('./components/SpatialCanvas').then(module => ({ default: module.SpatialCanvas }))
+)
 
 // Optional Bearer token for the orbit API (matches ORBIT_API_TOKEN on the
-// server). When empty (default), the server treats requests as authorized,
-// which is the right behavior for solo-principal localhost. When set, the
-// frontend sends `Authorization: Bearer <token>` on all POSTs. Configure via
-// `VITE_ORBIT_API_TOKEN` in `.env.local` for a production deployment.
+// server). Writes require both `ORBIT_API_TOKEN` on the server and matching
+// `VITE_ORBIT_API_TOKEN` in the frontend environment. Configure
+// `ORBIT_SURFACE_MODE=kernel_intents` when Orbit should submit typed intents;
+// the default projection-only mode is read-only.
 const API_TOKEN: string = (import.meta as any).env?.VITE_ORBIT_API_TOKEN ?? ''
 
 async function apiPost(path: string, body: unknown): Promise<Response> {
@@ -237,10 +241,12 @@ export function App() {
       )}
 
       {spatialCanvasOpen && (
-        <SpatialCanvas
-          state={state}
-          onClose={() => setSpatialCanvasOpen(false)}
-        />
+        <Suspense fallback={null}>
+          <SpatialCanvas
+            state={state}
+            onClose={() => setSpatialCanvasOpen(false)}
+          />
+        </Suspense>
       )}
 
       {chatOpen && (
@@ -438,6 +444,12 @@ export function App() {
             gates={state.gates ?? []}
             agentMessages={openAgentMessages}
             onResolveGate={resolveGate}
+          />
+          <div style={{ borderTop: '1px solid #1e2030' }} />
+          <HumanWorkPane
+            sessions={state.human_work_sessions ?? []}
+            roles={state.roles}
+            apiPost={apiPost}
           />
           <div style={{ borderTop: '1px solid #1e2030' }} />
           <DamageSignalFeed signals={state.damage_signals} />

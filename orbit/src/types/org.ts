@@ -28,7 +28,7 @@ export interface Role {
   /** Optional agent-CLI utilization caps. Added 2026-05-02 to track
    * Claude-Code / Codex / Gemini-CLI capacity per role per day,
    * orthogonal to USD spend. Consumed by
-   * src/ztare/supervisor/agent_utilization_tracker.py. */
+   * the kernel-backed role utilization surface. */
   agent_utilization?: AgentUtilization
   mandate_path: string
 }
@@ -61,7 +61,7 @@ export interface AgentUtilization {
 
 /** Live utilization snapshot for the GovernancePane bar chart. Shape
  * mirrors get_daily_totals() return + per-role-per-cli rollup from the
- * tracker's persisted JSON at ztare_workspace/agent_utilization/<date>.json. */
+ * tracker's persisted JSON at workspace/agent_utilization/<date>.json. */
 export interface AgentUtilizationSnapshot {
   date: string             // 'YYYY-MM-DD'
   by_role: Record<string, AgentUtilizationBucket>
@@ -223,6 +223,59 @@ export interface AgentMessage {
   metadata?: Record<string, unknown>
 }
 
+export interface A2HWorkPressure {
+  agent_counterparty_role: string
+  bottleneck_class: string
+  active_count: number
+  waiting_count: number
+  missing_receipt_count: number
+  stale_count: number
+  session_ids: string[]
+  recommendation: string
+}
+
+export interface HumanWorkSession {
+  session_id: string
+  created_at_utc: string
+  updated_at_utc: string
+  requested_by: string
+  human_actor: string
+  objective: string
+  work_mode: 'source_check' | 'edit' | 'external_action' | 'judgment' | 'relationship' | 'data_entry' | 'taste_call' | 'other'
+  bottleneck_class: 'authority' | 'access' | 'taste' | 'relationship' | 'cognition' | 'labor' | 'safety' | 'other'
+  state: 'requested' | 'claimed' | 'in_progress' | 'blocked' | 'handed_off' | 'completed' | 'abandoned' | 'integrated'
+  tenant_id?: string | null
+  project_id?: string | null
+  collaborating_roles?: string[]
+  artifact_refs?: string[]
+  observability?: 'digital_artifact' | 'external_system' | 'human_attested' | 'unobservable'
+  receipt_required?: boolean
+  receipt_type?: 'note' | 'artifact_ref' | 'external_ref' | 'witness' | 'none'
+  receipt?: string | null
+  confidence?: 'low' | 'medium' | 'high'
+  sample_for_review?: boolean
+  obligation_id?: string | null
+  deadline_utc?: string | null
+  completion_summary?: string | null
+  integration_ref?: string | null
+  interaction_surface?: 'offline' | 'cli' | 'orbit' | 'telegram' | 'external_system' | 'mixed'
+  agent_counterparty_role?: string | null
+  human_deliverable?: string | null
+  agent_followup_required?: boolean
+  agent_followup_ref?: string | null
+  notes?: { ts: string; actor: string; note: string; artifact_refs?: string[] }[]
+  interaction_events?: {
+    ts: string
+    actor: string
+    event_type: string
+    surface: string
+    summary: string
+    artifact_refs?: string[]
+    blocker?: string | null
+  }[]
+  metadata?: Record<string, unknown>
+}
+
 /**
  * Computed pressure for a task or KR — convenience type the UI
  * derives locally rather than storing on disk.
@@ -245,5 +298,6 @@ export interface OrgState {
   tasks: Task[]
   gates: Gate[]
   agent_messages: AgentMessage[]
+  human_work_sessions: HumanWorkSession[]
   last_sync: string
 }

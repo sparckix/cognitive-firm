@@ -1,17 +1,13 @@
 /**
  * Telegram bot — push channel for the principal (GP-168 addendum 2026-04-27).
  *
- * Watches `ztare_workspace/gates/pending/` (the single executive inbox per
+ * Watches the configured workspace gates inbox (the single executive inbox per
  * Panel A synthesis) and pushes notifications to the principal. Renders
  * a daily/on-demand OKR tree digest by joining `org/objectives/`,
  * `org/key_results/`, and `org/tasks/`.
  *
- * The bot owns NO state. Every action it accepts (inline-button ack,
- * /done, /abandon, /extend) is translated into either:
- *   1. a write into the appropriate gate's resolution metadata, OR
- *   2. an entry in the transitions.jsonl write-ahead log,
- * so that the GP-070 orchestrator (or a follow-up agent) can apply
- * the actual mutation on the underlying artifact.
+ * The bot owns only local polling cursor state. Governance mutations are
+ * delegated to the kernel service.
  *
  * Verbs accepted:
  *   /digest, digest             → OKR tree summary
@@ -29,8 +25,8 @@
  *   TELEGRAM_BOT_TOKEN   — from @BotFather
  *   TELEGRAM_CHAT_ID     — your chat with the bot (private)
  *   ORG_ROOT             — path to org/ (default: ./org)
- *   GATES_DIR            — path to executive inbox (default: ./ztare_workspace/gates/pending)
- *   TRANSITIONS_LOG      — path to write-ahead log (default: ./ztare_workspace/transitions.jsonl)
+ *   GATES_DIR            — path to executive inbox (default: ./cognitive_firm_workspace/gates/pending)
+ *   COGNITIVE_FIRM_KERNEL_SERVICE_URL — kernel service URL (default: http://127.0.0.1:8765)
  *
  * Run:
  *   tsx orbit/src/server/telegram-bot.ts
@@ -40,18 +36,16 @@ import {
   readdirSync,
   writeFileSync,
   existsSync,
-  mkdirSync,
-  appendFileSync,
-  renameSync,
 } from 'fs'
-import { join, basename, dirname } from 'path'
+import { join } from 'path'
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID
 const ORG_ROOT = process.env.ORG_ROOT || './org'
-const GATES_DIR = process.env.GATES_DIR || './ztare_workspace/gates/pending'
-const GATES_RESOLVED_DIR = process.env.GATES_RESOLVED_DIR || './ztare_workspace/gates/resolved'
-const TRANSITIONS_LOG = process.env.TRANSITIONS_LOG || './ztare_workspace/transitions.jsonl'
+const WORKSPACE_DIR = process.env.COGNITIVE_FIRM_WORKSPACE || './cognitive_firm_workspace'
+const GATES_DIR = process.env.GATES_DIR || join(WORKSPACE_DIR, 'gates', 'pending')
+const KERNEL_SERVICE_URL = (process.env.COGNITIVE_FIRM_KERNEL_SERVICE_URL || 'http://127.0.0.1:8765').replace(/\/+$/, '')
+const KERNEL_SERVICE_TOKEN = process.env.COGNITIVE_FIRM_KERNEL_TOKEN || ''
 const POLL_SECONDS = Number(process.env.POLL_SECONDS || 30)
 const LONG_POLL_TIMEOUT = Number(process.env.LONG_POLL_TIMEOUT || 25)
 const STATE_PATH = join(ORG_ROOT, '.telegram_bot_state.json')
@@ -59,10 +53,32 @@ const STATE_PATH = join(ORG_ROOT, '.telegram_bot_state.json')
 // Drop inbound messages and callbacks that are not from the configured operator
 // chat. Replies always go to CHAT_ID (operator) regardless of sender, so this
 // is not a confidentiality fix — it is an abuse / resource-waste guard. See
-// docs/internal/telegram_bot_audit_2026-04-30.md S1.
+// Provider adapter: delivery errors stay visible and do not mutate kernel state.
 function isAuthorizedChatId(chatId: number | string | undefined | null): boolean {
   if (chatId == null || CHAT_ID == null) return false
   return String(chatId) === String(CHAT_ID)
+}
+
+async function callKernelService(path: string, payload: Record<string, unknown>): Promise<any> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (KERNEL_SERVICE_TOKEN) headers.Authorization = `Bearer ${KERNEL_SERVICE_TOKEN}`
+  const response = await fetch(`${KERNEL_SERVICE_URL}${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      ...payload,
+      actor_context: {
+        actor_id: 'human.principal',
+        actor_kind: 'human',
+        surface: 'telegram',
+      },
+    }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok || body.ok === false) {
+    throw new Error(String(body.error || `kernel service returned HTTP ${response.status}`))
+  }
+  return body
 }
 
 // Escape Telegram Markdown (legacy mode, used by parse_mode: 'Markdown'). The
@@ -365,25 +381,10 @@ async function handleCallback(callback_query: any, _state: BotState): Promise<vo
     }
     const gate = readJson<Gate>(src)
     if (!gate) return
-    const resolved: any = {
-      ...gate,
-      status: 'resolved',
-      resolution: {
-        chosen_option: action,
-        resolved_utc: new Date().toISOString(),
-        resolved_by: 'telegram',
-      },
-    }
-    if (!existsSync(GATES_RESOLVED_DIR)) mkdirSync(GATES_RESOLVED_DIR, { recursive: true })
-    writeFileSync(join(GATES_RESOLVED_DIR, `${id}.json`), JSON.stringify(resolved, null, 2))
-    try { renameSync(src, src + '.handled') } catch {}
-    appendFileSync(TRANSITIONS_LOG, JSON.stringify({
-      ts: new Date().toISOString(),
-      event: 'gate.resolved',
-      gate_id: id,
+    await callKernelService(`/kernel/gates/${id}/resolve`, {
       chosen_option: action,
       resolved_by: 'telegram',
-    }) + '\n')
+    })
     await tg('sendMessage', { chat_id: CHAT_ID, text: `Recorded: ${id} → ${action}` })
   } else if (kind === 'open') {
     await tg('sendMessage', { chat_id: CHAT_ID, text: `Open Orbit: http://localhost:5173 (search "${id}")` })
@@ -434,7 +435,7 @@ async function main() {
   }
   console.log(
     `[telegram-bot] starting (org_root=${ORG_ROOT}, gates=${GATES_DIR}, ` +
-    `transitions=${TRANSITIONS_LOG}, long_poll=${LONG_POLL_TIMEOUT}s, ` +
+    `kernel=${KERNEL_SERVICE_URL}, long_poll=${LONG_POLL_TIMEOUT}s, ` +
     `gate_scan=${POLL_SECONDS}s)`,
   )
   const state = loadState()

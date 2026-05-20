@@ -7,33 +7,40 @@
  *   - WebSocket /ws → push updates on file changes
  *
  * This is the local/solo control-plane projection. It reads org/ and
- * ztare_workspace/, exposes state to Orbit, and writes approved governance
+ * the configured workspace, exposes state to Orbit, and writes approved governance
  * decisions back into the canonical filesystem backend. Git is audit/sync/
  * rollback, not the low-latency coordination substrate.
  */
 
-import { readFileSync, readdirSync, existsSync, statSync, writeFileSync, mkdirSync, renameSync } from 'fs'
-import { dirname, join, resolve } from 'path'
+import { readFileSync, readdirSync, existsSync, statSync } from 'fs'
+import { join, resolve } from 'path'
 import { createServer } from 'http'
 import { parse as parseYaml } from 'yaml'
 import { WebSocketServer, WebSocket } from 'ws'
 import { watch } from 'chokidar'
+import { loadAppSurfacePolicy, surfaceWriteAllowed, type SurfaceWriteClass } from './app-surface-policy.js'
 
 import type {
   OrgState, Member, Role, Assignment, Session, DamageSignal, WorkCandidate,
-  Objective, KeyResult, Task, Gate, AgentMessage
+  Objective, KeyResult, Task, Gate, AgentMessage, HumanWorkSession
 } from '../types/org.js'
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..', '..')
-const ORG_DIR = join(REPO_ROOT, 'org')
-const GATES_DIR = join(REPO_ROOT, 'ztare_workspace', 'gates', 'pending')
-const GATES_RESOLVED_DIR = join(REPO_ROOT, 'ztare_workspace', 'gates', 'resolved')
-const TRANSITIONS_LOG = join(REPO_ROOT, 'ztare_workspace', 'transitions.jsonl')
+const ORG_DIR = resolve(process.env.ORG_ROOT || join(REPO_ROOT, 'org'))
+const WORKSPACE_DIR = resolve(
+  process.env.COGNITIVE_FIRM_WORKSPACE ||
+  join(REPO_ROOT, 'cognitive_firm_workspace'),
+)
+const GATES_DIR = resolve(process.env.GATES_DIR || join(WORKSPACE_DIR, 'gates', 'pending'))
 const CHANNELS_DIR = join(ORG_DIR, 'channels')
+const HUMAN_WORK_LOG = join(ORG_DIR, 'human_work', 'human_work.jsonl')
 const PORT = Number(process.env.ORBIT_BACKEND_PORT || 3001)
 const HOST = process.env.ORBIT_BACKEND_HOST || '127.0.0.1'
 const CORS_ORIGIN = process.env.ORBIT_CORS_ORIGIN || 'http://localhost:5173'
 const API_TOKEN = process.env.ORBIT_API_TOKEN || ''
+const SURFACE_POLICY = loadAppSurfacePolicy()
+const KERNEL_SERVICE_URL = (process.env.COGNITIVE_FIRM_KERNEL_SERVICE_URL || 'http://127.0.0.1:8765').replace(/\/+$/, '')
+const KERNEL_SERVICE_TOKEN = process.env.COGNITIVE_FIRM_KERNEL_TOKEN || ''
 
 // ── Markdown frontmatter reader (GP-168 OKR layer uses md+YAML) ─────
 
@@ -61,6 +68,20 @@ function readJson<T>(path: string): T | null {
   try {
     return JSON.parse(readFileSync(path, 'utf-8')) as T
   } catch { return null }
+}
+
+function readJsonl<T>(path: string): T[] {
+  if (!existsSync(path)) return []
+  try {
+    return readFileSync(path, 'utf-8')
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map(line => {
+        try { return JSON.parse(line) as T } catch { return null }
+      })
+      .filter((row): row is T => !!row)
+  } catch { return [] }
 }
 
 // ── Org state builder ──────────────────────────────────────────────
@@ -198,7 +219,7 @@ function buildState(): OrgState {
     }
   }
 
-  // GP-168 single executive inbox at ztare_workspace/gates/pending/
+  // GP-168 single executive inbox at workspace/gates/pending/
   const gates: Gate[] = []
   if (existsSync(GATES_DIR)) {
     for (const f of readdirSync(GATES_DIR).filter(f => f.endsWith('.json'))) {
@@ -226,6 +247,9 @@ function buildState(): OrgState {
   }
   agentMessages.sort((a, b) => b.created_utc.localeCompare(a.created_utc))
 
+  const humanWorkSessions = readJsonl<HumanWorkSession>(HUMAN_WORK_LOG)
+    .sort((a, b) => b.updated_at_utc.localeCompare(a.updated_at_utc))
+
   return {
     members,
     roles,
@@ -238,6 +262,7 @@ function buildState(): OrgState {
     tasks,
     gates,
     agent_messages: agentMessages.slice(0, 50),
+    human_work_sessions: humanWorkSessions.slice(0, 100),
     last_sync: new Date().toISOString(),
   }
 }
@@ -257,7 +282,11 @@ function walkDir(dir: string, cb: (path: string) => void) {
 let cachedState: OrgState = buildState()
 
 function requestAuthorized(req: any, res: any): boolean {
-  if (!API_TOKEN) return true
+  if (!API_TOKEN) {
+    res.writeHead(401, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: false, error: 'ORBIT_API_TOKEN is required for write requests' }))
+    return false
+  }
   const expected = `Bearer ${API_TOKEN}`
   if (req.headers.authorization === expected) return true
   res.writeHead(401, { 'Content-Type': 'application/json' })
@@ -265,8 +294,75 @@ function requestAuthorized(req: any, res: any): boolean {
   return false
 }
 
+function surfaceWriteAuthorized(res: any, writeClass: SurfaceWriteClass): boolean {
+  const verdict = surfaceWriteAllowed(SURFACE_POLICY, writeClass)
+  if (verdict.ok) return true
+  res.writeHead(409, { 'Content-Type': 'application/json' })
+  res.end(JSON.stringify({
+    ok: false,
+    error: verdict.reason,
+    app_surface_policy: SURFACE_POLICY,
+  }))
+  return false
+}
+
 function validGateId(gateId: unknown): gateId is string {
   return typeof gateId === 'string' && /^[A-Za-z0-9_.:-]+$/.test(gateId)
+}
+
+function validHumanWorkId(sessionId: unknown): sessionId is string {
+  return typeof sessionId === 'string' && /^hws_[A-Za-z0-9_.:-]+$/.test(sessionId)
+}
+
+const VALID_HUMAN_WORK_STATES = new Set([
+  'requested', 'claimed', 'in_progress', 'blocked', 'handed_off', 'completed', 'abandoned', 'integrated',
+])
+const VALID_HUMAN_WORK_MODES = new Set([
+  'source_check', 'edit', 'external_action', 'judgment', 'relationship', 'data_entry', 'taste_call', 'other',
+])
+const VALID_BOTTLENECKS = new Set([
+  'authority', 'access', 'taste', 'relationship', 'cognition', 'labor', 'safety', 'other',
+])
+const VALID_OBSERVABILITY = new Set([
+  'digital_artifact', 'external_system', 'human_attested', 'unobservable',
+])
+const VALID_RECEIPT_TYPES = new Set([
+  'note', 'artifact_ref', 'external_ref', 'witness', 'none',
+])
+const VALID_INTERACTION_SURFACES = new Set([
+  'offline', 'cli', 'orbit', 'telegram', 'external_system', 'mixed',
+])
+function parseRequestBody(req: any): Promise<any> {
+  return new Promise((resolveBody, rejectBody) => {
+    let body = ''
+    req.on('data', (chunk: Buffer) => { body += chunk })
+    req.on('end', () => {
+      try { resolveBody(JSON.parse(body || '{}')) }
+      catch (err) { rejectBody(err) }
+    })
+  })
+}
+
+async function callKernelService(path: string, payload: Record<string, unknown>): Promise<any> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (KERNEL_SERVICE_TOKEN) headers.Authorization = `Bearer ${KERNEL_SERVICE_TOKEN}`
+  const response = await fetch(`${KERNEL_SERVICE_URL}${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      ...payload,
+      actor_context: {
+        actor_id: 'human.principal',
+        actor_kind: 'human',
+        surface: 'orbit',
+      },
+    }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok || body.ok === false) {
+    throw new Error(String(body.error || `kernel service returned HTTP ${response.status}`))
+  }
+  return body
 }
 
 const server = createServer((req, res) => {
@@ -287,7 +383,13 @@ const server = createServer((req, res) => {
 
   if (req.url === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ ok: true, last_sync: cachedState.last_sync }))
+    res.end(JSON.stringify({ ok: true, last_sync: cachedState.last_sync, app_surface_policy: SURFACE_POLICY }))
+    return
+  }
+
+  if (req.url === '/api/app_surface') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, policy: SURFACE_POLICY }))
     return
   }
 
@@ -325,11 +427,10 @@ const server = createServer((req, res) => {
 
   if (req.url === '/api/chat/send' && req.method === 'POST') {
     if (!requestAuthorized(req, res)) return
-    let body = ''
-    req.on('data', chunk => { body += chunk })
-    req.on('end', () => {
+    if (!surfaceWriteAuthorized(res, 'kernel_intent')) return
+    parseRequestBody(req).then(async payload => {
       try {
-        const { role_id, text } = JSON.parse(body)
+        const { role_id, text } = payload
         if (!role_id || typeof role_id !== 'string' || !/^[A-Za-z0-9_]+$/.test(role_id)) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: 'invalid role_id' }))
@@ -340,21 +441,15 @@ const server = createServer((req, res) => {
           res.end(JSON.stringify({ ok: false, error: 'text required (≤4000 chars)' }))
           return
         }
-        const day = new Date().toISOString().slice(0, 10)
-        const chatDir = join(REPO_ROOT, 'org', 'sessions', role_id, 'chat')
-        mkdirSync(chatDir, { recursive: true })
-        const chatFile = join(chatDir, `${day}.jsonl`)
-        const msg = {
-          id: Math.random().toString(36).substring(2, 14),
-          ts: new Date().toISOString(),
-          sender: 'principal',
+        const kernel = await callKernelService('/kernel/chat/messages', {
+          role_id,
           text,
-        }
-        writeFileSync(chatFile, JSON.stringify(msg) + '\n', { flag: 'a' })
+          sender: 'principal',
+        })
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, message: msg }))
+        res.end(JSON.stringify({ ok: true, message: kernel.result.message }))
       } catch (err) {
-        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ ok: false, error: String(err) }))
       }
     })
@@ -362,11 +457,11 @@ const server = createServer((req, res) => {
   }
 
   // ── /api/spend/today — Orbit v2 SpendPane ─────────────────────────
-  // Reads ztare_workspace/spend/<today>.json and aggregates by category +
+  // Reads workspace/spend/<today>.json and aggregates by category +
   // by model. Frontend can compare against per-role budget caps from cachedState.roles.
   if (req.url === '/api/spend/today') {
     const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
-    const spendFile = join(REPO_ROOT, 'ztare_workspace', 'spend', `${today}.json`)
+    const spendFile = join(WORKSPACE_DIR, 'spend', `${today}.json`)
     if (!existsSync(spendFile)) {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ date: today, total_usd: 0, entries: [], by_category: {}, by_model: {} }))
@@ -409,68 +504,193 @@ const server = createServer((req, res) => {
 
   // ── ACTION ENDPOINTS (write to canonical filesystem backend) ──────
 
+  if (req.url === '/api/human_work/create' && req.method === 'POST') {
+    if (!requestAuthorized(req, res)) return
+    if (!surfaceWriteAuthorized(res, 'kernel_intent')) return
+    parseRequestBody(req).then(async payload => {
+      const objective = String(payload.objective || '').trim()
+      const requestedBy = String(payload.requested_by || 'principal').trim()
+      const humanActor = String(payload.human_actor || 'principal').trim()
+      const workMode = String(payload.work_mode || 'other')
+      const bottleneckClass = String(payload.bottleneck_class || 'other')
+      const observability = String(payload.observability || 'human_attested')
+      const receiptType = String(payload.receipt_type || 'none')
+      const interactionSurface = String(payload.interaction_surface || 'mixed')
+      const coordinationPattern = String(payload.coordination_pattern || '')
+      const isA2H = coordinationPattern === 'a2h_work_request'
+      const humanDeliverable = String(payload.human_deliverable || '').trim()
+      if (!objective || objective.length > 1000) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'objective required (<=1000 chars)' }))
+        return
+      }
+      if (isA2H && (!requestedBy.startsWith('role.') || !humanDeliverable)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'A2H requests require role.* requested_by and human_deliverable' }))
+        return
+      }
+      if (
+        !VALID_HUMAN_WORK_MODES.has(workMode) ||
+        !VALID_BOTTLENECKS.has(bottleneckClass) ||
+        !VALID_OBSERVABILITY.has(observability) ||
+        !VALID_RECEIPT_TYPES.has(receiptType) ||
+        !VALID_INTERACTION_SURFACES.has(interactionSurface)
+      ) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'invalid human work enum value' }))
+        return
+      }
+      const kernel = await callKernelService('/kernel/human-work', {
+        coordination_pattern: isA2H ? 'a2h_work_request' : undefined,
+        requested_by: requestedBy,
+        human_actor: humanActor,
+        objective,
+        work_mode: workMode,
+        bottleneck_class: bottleneckClass,
+        human_deliverable: humanDeliverable || undefined,
+        observability,
+        receipt_required: Boolean(payload.receipt_required),
+        receipt_type: receiptType,
+        interaction_surface: interactionSurface,
+        sample_for_review: Boolean(payload.sample_for_review),
+        tenant_id: payload.tenant_id,
+        project_id: payload.project_id,
+        collaborating_roles: payload.collaborating_roles,
+        artifact_refs: payload.artifact_refs,
+        obligation_id: payload.obligation_id,
+        deadline_utc: payload.deadline_utc,
+        confidence: payload.confidence,
+        agent_followup_ref: payload.agent_followup_ref,
+        receipt: payload.receipt,
+        agent_counterparty_role: payload.agent_counterparty_role,
+        agent_followup_required: Boolean(payload.agent_followup_required),
+      })
+      const session = kernel.session as HumanWorkSession
+      cachedState = buildState()
+      broadcast(cachedState)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, session }))
+    }).catch(err => {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: String(err) }))
+    })
+    return
+  }
+
+  if (req.url === '/api/human_work/update-state' && req.method === 'POST') {
+    if (!requestAuthorized(req, res)) return
+    if (!surfaceWriteAuthorized(res, 'kernel_intent')) return
+    parseRequestBody(req).then(async payload => {
+      const sessionId = payload.session_id
+      const nextState = String(payload.state || '')
+      if (!validHumanWorkId(sessionId) || !VALID_HUMAN_WORK_STATES.has(nextState)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'invalid session_id or state' }))
+        return
+      }
+      const rows = readJsonl<HumanWorkSession>(HUMAN_WORK_LOG)
+      let updated: HumanWorkSession | null = null
+      if (!rows.some(row => row.session_id === sessionId)) {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'session not found' }))
+        return
+      }
+      const kernel = await callKernelService(`/kernel/human-work/${sessionId}/state`, {
+        state: nextState,
+        completion_summary: payload.completion_summary,
+        integration_ref: payload.integration_ref,
+        receipt: payload.receipt,
+        confidence: payload.confidence,
+        agent_followup_ref: payload.agent_followup_ref,
+        agent_followup_required: payload.agent_followup_required,
+      })
+      updated = kernel.session as HumanWorkSession
+      cachedState = buildState()
+      broadcast(cachedState)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, session: updated }))
+    }).catch(err => {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: String(err) }))
+    })
+    return
+  }
+
+  if (req.url === '/api/human_work/interaction' && req.method === 'POST') {
+    if (!requestAuthorized(req, res)) return
+    if (!surfaceWriteAuthorized(res, 'kernel_intent')) return
+    parseRequestBody(req).then(async payload => {
+      const sessionId = payload.session_id
+      const actor = String(payload.actor || '').trim()
+      const eventType = String(payload.event_type || '').trim()
+      const summary = String(payload.summary || '').trim()
+      const surface = String(payload.surface || 'mixed')
+      if (!validHumanWorkId(sessionId) || !actor || !eventType || !summary || !VALID_INTERACTION_SURFACES.has(surface)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'invalid interaction payload' }))
+        return
+      }
+      const rows = readJsonl<HumanWorkSession>(HUMAN_WORK_LOG)
+      let updated: HumanWorkSession | null = null
+      if (!rows.some(row => row.session_id === sessionId)) {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'session not found' }))
+        return
+      }
+      const kernel = await callKernelService(`/kernel/human-work/${sessionId}/interaction`, {
+        actor,
+        event_type: eventType,
+        summary,
+        surface,
+        artifact_refs: payload.artifact_refs,
+        blocker: payload.blocker,
+        agent_followup_required: payload.agent_followup_required,
+      })
+      updated = kernel.session as HumanWorkSession
+      cachedState = buildState()
+      broadcast(cachedState)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, session: updated }))
+    }).catch(err => {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: String(err) }))
+    })
+    return
+  }
+
   // Gate approval: POST /api/gate/resolve
   if (req.url === '/api/gate/resolve' && req.method === 'POST') {
     if (!requestAuthorized(req, res)) return
-    let body = ''
-    req.on('data', chunk => { body += chunk })
-    req.on('end', () => {
+    if (!surfaceWriteAuthorized(res, 'kernel_intent')) return
+    parseRequestBody(req).then(async payload => {
       try {
-        const { gate_id, option_id, verdict, reason } = JSON.parse(body)
+        const { gate_id, option_id, verdict, reason } = payload
         if (!validGateId(gate_id)) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: 'invalid gate_id' }))
           return
         }
-        const srcPath = join(GATES_DIR, `${gate_id}.json`)
-        const outPath = join(GATES_RESOLVED_DIR, `${gate_id}.json`)
-        if (existsSync(outPath)) {
-          res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: true, path: outPath, already_resolved: true }))
-          return
-        }
-        if (!existsSync(srcPath)) {
-          res.writeHead(404, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ ok: false, error: 'pending gate not found' }))
-          return
-        }
-        const gate = readJson<any>(srcPath) || { gate_id }
         const chosen = option_id ?? verdict ?? 'resolved'
-        const tmpPath = `${outPath}.tmp`
-
-        mkdirSync(GATES_RESOLVED_DIR, { recursive: true })
-        mkdirSync(dirname(TRANSITIONS_LOG), { recursive: true })
-        writeFileSync(tmpPath, JSON.stringify({
-          ...gate,
-          status: 'resolved',
-          resolution: {
-            chosen_option: chosen,
-            reason: reason ?? '',
-            resolved_by: 'orbit',
-            resolved_utc: new Date().toISOString(),
-          },
-        }, null, 2))
-        renameSync(tmpPath, outPath)
-        try { renameSync(srcPath, `${srcPath}.handled`) } catch {}
-        writeFileSync(
-          TRANSITIONS_LOG,
-          JSON.stringify({
-            ts: new Date().toISOString(),
-            event: 'gate.resolved',
-            gate_id,
-            chosen_option: chosen,
-            resolved_by: 'orbit',
-          }) + '\n',
-          { flag: 'a' },
-        )
+        const kernel = await callKernelService(`/kernel/gates/${gate_id}/resolve`, {
+          chosen_option: chosen,
+          reason: reason ?? '',
+          resolved_by: 'orbit',
+        })
         cachedState = buildState()
         broadcast(cachedState)
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, path: outPath }))
+        res.end(JSON.stringify({
+          ok: true,
+          path: kernel.result.path,
+          already_resolved: Boolean(kernel.result.already_resolved),
+        }))
       } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ ok: false, error: String(e) }))
       }
+    }).catch(err => {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: String(err) }))
     })
     return
   }
@@ -478,27 +698,24 @@ const server = createServer((req, res) => {
   // Directive: POST /api/directive
   if (req.url === '/api/directive' && req.method === 'POST') {
     if (!requestAuthorized(req, res)) return
-    let body = ''
-    req.on('data', chunk => { body += chunk })
-    req.on('end', () => {
+    if (!surfaceWriteAuthorized(res, 'kernel_intent')) return
+    parseRequestBody(req).then(async payload => {
       try {
-        const { target_role, message } = JSON.parse(body)
-        const ts = new Date().toISOString().replace(/[:.]/g, '-')
-        const outDir = join(ORG_DIR, 'directives')
-        
-        mkdirSync(outDir, { recursive: true })
-        writeFileSync(join(outDir, `${ts}_${target_role}.json`), JSON.stringify({
-          target_role, message,
+        const { target_role, message } = payload
+        const kernel = await callKernelService('/kernel/directives', {
+          target_role,
+          message,
           from: 'principal',
-          created_utc: new Date().toISOString(),
-          consumed: false,
-        }, null, 2))
+        })
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: true }))
+        res.end(JSON.stringify({ ok: true, path: kernel.result.path }))
       } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ ok: false, error: String(e) }))
       }
+    }).catch(err => {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: String(err) }))
     })
     return
   }
@@ -506,30 +723,29 @@ const server = createServer((req, res) => {
   // Control: POST /api/control (STOP/PAUSE/RESUME)
   if (req.url === '/api/control' && req.method === 'POST') {
     if (!requestAuthorized(req, res)) return
-    let body = ''
-    req.on('data', chunk => { body += chunk })
-    req.on('end', () => {
+    if (!surfaceWriteAuthorized(res, 'kernel_intent')) return
+    parseRequestBody(req).then(async payload => {
       try {
-        const { target_role, action } = JSON.parse(body)
+        const { target_role, action } = payload
         if (!['STOP', 'PAUSE', 'RESUME'].includes(action)) {
           res.writeHead(400)
           res.end(JSON.stringify({ ok: false, error: 'action must be STOP, PAUSE, or RESUME' }))
           return
         }
-        const outDir = join(ORG_DIR, 'controls')
-        
-        mkdirSync(outDir, { recursive: true })
-        writeFileSync(join(outDir, `${target_role}.json`), JSON.stringify({
-          action, target_role,
+        const kernel = await callKernelService('/kernel/controls', {
+          action,
+          target_role,
           issued_by: 'principal',
-          issued_utc: new Date().toISOString(),
-        }, null, 2))
+        })
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, action, target_role }))
+        res.end(JSON.stringify({ ok: true, action, target_role, path: kernel.result.path }))
       } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ ok: false, error: String(e) }))
       }
+    }).catch(err => {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: String(err) }))
     })
     return
   }
@@ -551,12 +767,12 @@ const server = createServer((req, res) => {
   }
 
   // ── Frontier-state (RD-1.12, 2026-05-02) ─────────────────────────
-  // Reads ztare_workspace/frontier_state/<slug>.json so the FrontierStatePane
+  // Reads workspace/frontier_state/<slug>.json so the FrontierStatePane
   // can render route ranking / obstruction counters / pending actions / history.
 
   // GET /api/frontier_state → { projects: [{ slug, state }] }
   if (req.url === '/api/frontier_state' || req.url?.startsWith('/api/frontier_state?')) {
-    const dir = join(REPO_ROOT, 'ztare_workspace', 'frontier_state')
+    const dir = join(WORKSPACE_DIR, 'frontier_state')
     const projects: Array<{ slug: string, state: any }> = []
     if (existsSync(dir)) {
       try {
@@ -584,7 +800,7 @@ const server = createServer((req, res) => {
       return
     }
     const slug = m[1]
-    const path = join(REPO_ROOT, 'ztare_workspace', 'frontier_state', `${slug}.json`)
+    const path = join(WORKSPACE_DIR, 'frontier_state', `${slug}.json`)
     if (!existsSync(path)) {
       res.writeHead(404, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: false, error: 'not found', slug }))
@@ -610,7 +826,7 @@ const server = createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`)
     const dateParam = url.searchParams.get('date')
     const date = dateParam || new Date().toISOString().slice(0, 10)
-    const utilPath = join(REPO_ROOT, 'ztare_workspace', 'agent_utilization', `${date}.json`)
+    const utilPath = join(WORKSPACE_DIR, 'agent_utilization', `${date}.json`)
     if (!existsSync(utilPath)) {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
@@ -632,9 +848,10 @@ const server = createServer((req, res) => {
   }
 
   // POST /api/role/<role_id>/agent_utilization
-  // Body: AgentUtilization (the cap block). Writes back to org/roles/<role>.yaml.
+  // Body: AgentUtilization (the cap block). Delegates the write to kernel service.
   if (req.url?.startsWith('/api/role/') && req.url.endsWith('/agent_utilization') && req.method === 'POST') {
     if (!requestAuthorized(req, res)) return
+    if (!surfaceWriteAuthorized(res, 'kernel_intent')) return
     const m = req.url.match(/^\/api\/role\/([a-z_]+)\/agent_utilization$/)
     if (!m) {
       res.writeHead(400, { 'Content-Type': 'application/json' })
@@ -642,17 +859,14 @@ const server = createServer((req, res) => {
       return
     }
     const roleId = m[1]
-    const rolePath = join(REPO_ROOT, 'org', 'roles', `${roleId}.yaml`)
+    const rolePath = join(ORG_DIR, 'roles', `${roleId}.yaml`)
     if (!existsSync(rolePath)) {
       res.writeHead(404, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: false, error: `role ${roleId} not found` }))
       return
     }
-    let body = ''
-    req.on('data', chunk => { body += chunk })
-    req.on('end', () => {
+    parseRequestBody(req).then(async caps => {
       try {
-        const caps = JSON.parse(body)
         // Validate required numeric keys
         const required = [
           'daily_cap_seconds', 'daily_cap_output_tokens', 'daily_cap_turn_count',
@@ -665,45 +879,25 @@ const server = createServer((req, res) => {
             return
           }
         }
-        // Read role yaml as text, parse, splice in agent_utilization, write back.
-        // We use the yaml package's full parse+stringify to preserve top-level
-        // structure but lose comments — acceptable for this dogfood pass.
-        const yamlPkg = require('yaml')
-        const text = readFileSync(rolePath, 'utf8')
-        const data = yamlPkg.parse(text) || {}
-        data.agent_utilization = {
-          daily_cap_seconds: caps.daily_cap_seconds,
-          daily_cap_output_tokens: caps.daily_cap_output_tokens,
-          daily_cap_turn_count: caps.daily_cap_turn_count,
-          session_cap_seconds: caps.session_cap_seconds,
-          absolute_ceiling_seconds: caps.absolute_ceiling_seconds,
-          warn_threshold_frac: caps.warn_threshold_frac,
-        }
-        const newText = yamlPkg.stringify(data)
-        const tmpPath = `${rolePath}.tmp`
-        writeFileSync(tmpPath, newText)
-        renameSync(tmpPath, rolePath)
-        // Audit trail in transitions.jsonl
-        mkdirSync(dirname(TRANSITIONS_LOG), { recursive: true })
-        writeFileSync(
-          TRANSITIONS_LOG,
-          JSON.stringify({
-            ts: new Date().toISOString(),
-            event: 'role.agent_utilization.updated',
-            role_id: roleId,
-            new_caps: data.agent_utilization,
-            updated_by: 'orbit',
-          }) + '\n',
-          { flag: 'a' },
-        )
+        const kernel = await callKernelService(`/kernel/roles/${roleId}/agent-utilization`, {
+          agent_utilization: caps,
+          updated_by: 'orbit',
+        })
         cachedState = buildState()
         broadcast(cachedState)
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, path: rolePath, agent_utilization: data.agent_utilization }))
+        res.end(JSON.stringify({
+          ok: true,
+          path: kernel.result.path,
+          agent_utilization: kernel.result.payload.agent_utilization,
+        }))
       } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ ok: false, error: String(e) }))
       }
+    }).catch(err => {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: String(err) }))
     })
     return
   }

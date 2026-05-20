@@ -1,17 +1,20 @@
 /**
- * Event Bus — the communication layer for human-AI symbiotic orgs.
+ * Event Bus — optional Orbit-side projection broadcast utility.
  *
- * Every action in the system is an immutable Event. Events are:
+ * This is not the kernel event ledger. Kernel mutations flow through
+ * cognitive_firm.kernel_service and the Python primitives. This utility exists
+ * for Orbit-local UI experiments that need append-only projection events:
  *   - Written to org/events/ as append-only JSONL (the event store)
  *   - Broadcast to all connected clients via WebSocket (real-time)
  *   - Routed to subscribers based on event type + target role
  *   - Persisted in git (audit trail)
  *
- * This replaces:
- *   - org/gates/pending/ and org/gates/resolved/ (now gate.proposed / gate.resolved events)
- *   - org/directives/ (now directive.issued events)
- *   - org/controls/ (now control.issued events)
- *   - Telegram inbound (now directive.issued from telegram source)
+ * It does not replace:
+ *   - workspace/gates/pending/ and workspace/gates/resolved/
+ *   - org/directives/
+ *   - org/controls/
+ *   - the transition log or kernel event envelope
+ *   - provider-specific inbound channels
  *
  * Architecture:
  *   Event producers (dashboard, telegram, daemon, agents)
@@ -25,10 +28,9 @@
  * This is Event Sourcing (Fowler) + Content-Based Routing (Hohpe) +
  * Lamport Timestamps (Lamport) in one module.
  *
- * Why not Kafka/Redis/NATS? Because the invariant is: git is the
- * system of record. Events must be files in a git repo. Any external
- * broker is a cache, not a source of truth. This module IS the broker,
- * backed by the filesystem.
+ * Why not Kafka/Redis/NATS? Because this is a T1 local projection helper. At
+ * T2, durable event transport belongs behind the state-backend/EventSource
+ * abstraction, not in Orbit.
  */
 
 import { readFileSync, appendFileSync, mkdirSync, existsSync, readdirSync } from 'fs'

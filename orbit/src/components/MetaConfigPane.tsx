@@ -4,15 +4,14 @@
  * Houses configuration that doesn't belong on a single role's card but
  * needs an editing UI:
  *   - Per-role agent-CLI utilization caps (capacity dimension, separate
- *     from USD spend; see src/ztare/supervisor/agent_utilization_tracker.py)
+ *     from USD spend; exposed through the kernel-backed role utilization surface)
  *   - (Future) Per-role budget caps editor
  *   - (Future) Notification channel preferences (Telegram on/off, etc.)
  *   - (Future) Sync architecture flags (laptop ↔ VPS exec node)
  *
  * Edit semantics: Orbit POSTs to git-sync's /api/role/<role>/agent_utilization
- * endpoint; the server writes back to org/roles/<role>.yaml and broadcasts
- * the new state via WebSocket. Audit trail lands in
- * ztare_workspace/transitions.jsonl.
+ * endpoint; the backend delegates the mutation to the kernel service and then
+ * broadcasts the refreshed projection via WebSocket.
  */
 import { useEffect, useState } from 'react'
 import type { Role, AgentUtilization, AgentUtilizationSnapshot } from '../types/org'
