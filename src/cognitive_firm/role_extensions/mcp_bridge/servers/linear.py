@@ -14,7 +14,7 @@ Auth: set environment variable LINEAR_API_KEY before the daemon starts.
 The transport reads this via ServerSpec.auth_env_var; the kernel never
 holds the token in `org/`.
 
-Network: HTTP + JSON-RPC (Linear's MCP server is HTTPS).
+Network: Streamable HTTP (Linear's MCP server is HTTPS).
 
 To enable in a tenant, add to mandate.authorized_mcp_servers:
     - linear
@@ -24,6 +24,7 @@ And import this module once at daemon boot:
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from cognitive_firm.role_extensions.mcp_bridge.projections import (
@@ -41,8 +42,8 @@ from cognitive_firm.role_extensions.mcp_bridge.transport import (
 
 LINEAR_SPEC = ServerSpec(
     name="linear",
-    transport="http",
-    url="https://mcp.linear.app/rpc",
+    transport="streamable_http",
+    url="https://mcp.linear.app/mcp",
     auth_env_var="LINEAR_API_KEY",
     timeout_seconds_default=30.0,
 )
@@ -64,7 +65,7 @@ def _project_list_issues(response: dict[str, Any]) -> ProjectionResult:
             normalized_payload={},
             rejection_reason="missing 'result' in JSON-RPC response",
         )
-    result = response.get("result") or {}
+    result = _extract_result_payload(response)
     issues = result.get("issues")
     if not isinstance(issues, list):
         return ProjectionResult(
@@ -77,7 +78,7 @@ def _project_list_issues(response: dict[str, Any]) -> ProjectionResult:
             "id": str(it.get("id", "")),
             "identifier": str(it.get("identifier", "")),
             "title": str(it.get("title", ""))[:200],
-            "state": str(it.get("state", "")),
+            "state": _name_or_string(it.get("state")),
             "priority": int(it.get("priority", 0)) if isinstance(it.get("priority"), (int, float)) else None,
         }
         for it in issues if isinstance(it, dict)
@@ -95,7 +96,7 @@ def _project_get_issue(response: dict[str, Any]) -> ProjectionResult:
             normalized_payload={},
             rejection_reason="missing 'result' in JSON-RPC response",
         )
-    result = response.get("result") or {}
+    result = _extract_result_payload(response)
     issue = result.get("issue") if isinstance(result, dict) else None
     if not isinstance(issue, dict):
         return ProjectionResult(
@@ -109,7 +110,7 @@ def _project_get_issue(response: dict[str, Any]) -> ProjectionResult:
             "id": str(issue.get("id", "")),
             "identifier": str(issue.get("identifier", "")),
             "title": str(issue.get("title", ""))[:200],
-            "state": str(issue.get("state", "")),
+            "state": _name_or_string(issue.get("state")),
             "description_present": bool(issue.get("description")),
         },
     )
@@ -122,7 +123,7 @@ def _project_list_projects(response: dict[str, Any]) -> ProjectionResult:
             normalized_payload={},
             rejection_reason="missing 'result' in JSON-RPC response",
         )
-    result = response.get("result") or {}
+    result = _extract_result_payload(response)
     projects = result.get("projects")
     if not isinstance(projects, list):
         return ProjectionResult(
@@ -134,7 +135,7 @@ def _project_list_projects(response: dict[str, Any]) -> ProjectionResult:
         {
             "id": str(p.get("id", "")),
             "name": str(p.get("name", ""))[:200],
-            "state": str(p.get("state", "")),
+            "state": _name_or_string(p.get("state") or p.get("status")),
         }
         for p in projects if isinstance(p, dict)
     ][:50]
@@ -142,6 +143,41 @@ def _project_list_projects(response: dict[str, Any]) -> ProjectionResult:
         transition_class="mcp_call_dispatched",
         normalized_payload={"count": len(summary), "projects": summary},
     )
+
+
+def _extract_result_payload(response: dict[str, Any]) -> dict[str, Any]:
+    """Return Linear payload from direct JSON or MCP content text.
+
+    Linear's Streamable HTTP MCP endpoint currently returns tool output as
+    ``result.content[].text`` containing a JSON string. Older local tests and
+    some MCP servers return the payload directly under ``result``. Keep both
+    shapes accepted, but only when the extracted payload is a JSON object.
+    """
+
+    result = response.get("result") or {}
+    if not isinstance(result, dict):
+        return {}
+    content = result.get("content")
+    if isinstance(content, list):
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+    return result
+
+
+def _name_or_string(value: Any) -> str:
+    if isinstance(value, dict):
+        return str(value.get("name") or value.get("type") or "")
+    return str(value or "")
 
 
 # ── module-load registration ──────────────────────────────────────────

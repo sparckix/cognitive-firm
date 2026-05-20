@@ -7,11 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-import anthropic
-from google import genai
-from openai import OpenAI
-
-
 def _bootstrap_dotenv_if_needed() -> None:
     """Load .env from the project root when API keys are absent from os.environ.
 
@@ -453,7 +448,7 @@ def pricing_model_name(model_name: str | None) -> str | None:
         return "o1"
     # OpenAI reasoning models: SDK returns dated ids like "o3-2025-04-01",
     # "o3-mini-2025-01-31", "o4-mini-2026-01-15". Normalize to the canonical
-    # family key in supervisor/model_pricing.json. Ordering matters — match
+    # family key in the model pricing registry. Ordering matters — match
     # the most-specific prefix first (o3-pro before o3-mini before o3 before o4-mini).
     # Fixes "unavailable (pricing disabled or unknown model)" telemetry for
     # every o3/o4-family run. Bug report 2026-04-24 — gp140 o3/o3 run cost
@@ -516,16 +511,22 @@ class LLMRuntime:
 
     def gemini_client(self):
         if self._gemini_client is None and os.environ.get("GEMINI_API_KEY"):
+            from google import genai
+
             self._gemini_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
         return self._gemini_client
 
     def anthropic_client(self):
         if self._anthropic_client is None and os.environ.get("ANTHROPIC_API_KEY"):
+            import anthropic
+
             self._anthropic_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
         return self._anthropic_client
 
     def openai_client(self):
         if self._openai_client is None and os.environ.get("OPENAI_API_KEY"):
+            from openai import OpenAI
+
             self._openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
         return self._openai_client
 
@@ -750,7 +751,7 @@ class LLMRuntime:
         timeout_wait_seconds: int = 15,
     ) -> LLMTextResponse:
         candidate_model_ids = [model_id]
-        if os.environ.get("ZTARE_DISABLE_MODEL_FALLBACK") == "1":
+        if os.environ.get("COGNITIVE_FIRM_DISABLE_MODEL_FALLBACK") == "1":
             # Hard lock: no cross-model fallback. The caller has declared that
             # an off-family silent failover would invalidate the run (e.g. a
             # pre-registered experiment where the runtime family is sealed).

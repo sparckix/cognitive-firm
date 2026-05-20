@@ -1,9 +1,8 @@
-"""GP-231 Phase 2 — capability-token primitives for MCP dispatch.
+"""Capability-token primitives for MCP dispatch.
 
-Per `internal/competitive_adoption_verdicts.md` C4 verdict: SHIP a
-directory-scoped capability lifetime (skip full per-action capability
-grants per H3 historical analog — seL4-style verification overhead
-exceeds the marginal safety gain outside high-assurance regimes).
+The reference implementation uses role-scoped capability lifetimes. Full
+per-action capability grants can be added by high-assurance deployments, but
+the default path keeps capability state small enough for routine adoption.
 
 A capability is granted at task-dispatch and revoked at task-close;
 mid-task mandate edits queue a "rescope on next task boundary" rather

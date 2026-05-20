@@ -2,17 +2,16 @@
 
 MCP (Model Context Protocol) speaks JSON-RPC 2.0 over either:
   - stdio (subprocess; the server is a local executable the kernel spawns)
-  - HTTP+SSE (the server is a remote HTTPS endpoint with streaming responses)
-  - WebSocket (less common; some servers expose this)
+  - Streamable HTTP (remote HTTP endpoint with session/version headers)
+  - legacy HTTP JSON-RPC endpoints where a server still exposes them
 
 This module provides a `call_mcp_tool` function that dispatches to the
 appropriate transport given a server registration. Servers are described
 by a `ServerSpec` and a registry maps server_name → ServerSpec.
 
-Phase 1 supports the stdio + HTTP transports because every shipped MCP
-server today supports at least one of those. Phase 3 will pin server
-images by digest; for now the registry holds an explicit command/url plus
-an env-var name for the API token.
+Phase 1 supports stdio, legacy HTTP, and Streamable HTTP. Phase 3 will pin
+server images by digest; for now the registry holds an explicit command/url
+plus an env-var name for the API token.
 
 Crucially, the transport is **dumb**. It knows how to JSON-RPC; it does
 NOT know what any tool means. All semantic interpretation is the
@@ -28,7 +27,7 @@ import urllib.error
 import urllib.request
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 
 log = logging.getLogger(__name__)
@@ -43,7 +42,7 @@ class ServerSpec:
 
     Phase 1 fields:
       name: stable identifier used in mandate.authorized_mcp_servers
-      transport: "stdio" | "http"
+      transport: "stdio" | "http" | "streamable_http"
       command: for stdio, the executable + args (e.g., ["mcp-linear"])
       url: for http, the JSON-RPC endpoint (e.g., "https://mcp.linear.app/rpc")
       auth_env_var: name of the env var holding the bearer token / API key
@@ -118,6 +117,8 @@ def call_mcp_tool(
 
     if spec.transport == "stdio":
         return _stdio_call(spec, payload, timeout_seconds)
+    elif spec.transport == "streamable_http":
+        return _streamable_http_call(spec, payload, timeout_seconds)
     elif spec.transport == "http":
         return _http_call(spec, payload, timeout_seconds)
     else:
@@ -185,3 +186,111 @@ def _http_call(spec: ServerSpec, payload: dict, timeout: float) -> dict[str, Any
             f"http server {spec.name} returned {exc.code}: {body_text}"
         ) from exc
     return json.loads(data)
+
+
+def _streamable_http_call(spec: ServerSpec, payload: dict, timeout: float) -> dict[str, Any]:
+    """Call a Streamable HTTP MCP endpoint.
+
+    This is intentionally minimal: initialize, send the initialized
+    notification when a session is provided, then issue the single tools/call.
+    It supports JSON and simple event-stream responses.
+    """
+    if not spec.url:
+        raise ValueError(f"streamable_http server {spec.name} has empty url")
+    session_id: str | None = None
+    initialize_payload = {
+        "jsonrpc": "2.0",
+        "id": str(uuid.uuid4()),
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "cognitive-firm", "version": "0.1.0"},
+        },
+    }
+    initialize_response, initialize_headers = _http_jsonrpc_post(
+        spec,
+        initialize_payload,
+        timeout,
+        session_id=None,
+    )
+    session_id = _header_value(initialize_headers, "mcp-session-id")
+    if "error" in initialize_response:
+        raise RuntimeError(f"streamable_http server {spec.name} initialize failed: {initialize_response['error']}")
+
+    if session_id:
+        initialized_payload = {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {},
+        }
+        _http_jsonrpc_post(spec, initialized_payload, timeout, session_id=session_id)
+
+    response, _ = _http_jsonrpc_post(spec, payload, timeout, session_id=session_id)
+    return response
+
+
+def _http_jsonrpc_post(
+    spec: ServerSpec,
+    payload: dict[str, Any],
+    timeout: float,
+    *,
+    session_id: str | None,
+) -> tuple[dict[str, Any], Mapping[str, str]]:
+    headers = {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": "2025-06-18",
+    }
+    if session_id:
+        headers["Mcp-Session-Id"] = session_id
+    if spec.auth_env_var:
+        import os
+        token = os.environ.get(spec.auth_env_var)
+        if not token:
+            raise RuntimeError(
+                f"http server {spec.name} requires env var "
+                f"{spec.auth_env_var} but it is unset"
+            )
+        headers["Authorization"] = f"Bearer {token}"
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(spec.url, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = resp.read().decode("utf-8", errors="replace")
+            response_headers = dict(resp.headers.items())
+    except urllib.error.HTTPError as exc:
+        body_text = exc.read().decode("utf-8", errors="replace")[:500] if exc.fp else ""
+        raise RuntimeError(
+            f"http server {spec.name} returned {exc.code}: {body_text}"
+        ) from exc
+    return _parse_mcp_http_response(data), response_headers
+
+
+def _parse_mcp_http_response(data: str) -> dict[str, Any]:
+    stripped = data.strip()
+    if not stripped:
+        return {}
+    if stripped.startswith("{"):
+        parsed = json.loads(stripped)
+        if isinstance(parsed, dict):
+            return parsed
+    for line in stripped.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line[len("data:"):].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        parsed = json.loads(payload)
+        if isinstance(parsed, dict):
+            return parsed
+    raise RuntimeError("MCP HTTP response did not contain a JSON object")
+
+
+def _header_value(headers: Mapping[str, str], name: str) -> str | None:
+    target = name.lower()
+    for key, value in headers.items():
+        if key.lower() == target:
+            return value
+    return None

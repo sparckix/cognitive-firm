@@ -12,6 +12,8 @@ pandas>=2.0
 matplotlib>=3.10  # used by analytics/queries dashboards
 
 # I/O + config
+setuptools>=68
+wheel>=0.42
 python-dotenv>=1.0.0
 PyYAML>=6.0
 jsonschema>=4.0    # role yaml validation in scripts/org_role_preflight.py

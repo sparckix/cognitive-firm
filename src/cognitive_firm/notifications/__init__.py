@@ -1,12 +1,17 @@
-"""Notification primitives for GP-128 / GP-128b manager-agent seam.
+"""Notification primitives.
 
-Bidirectional Telegram channel as of 2026-04-25 (ntfy.sh retired).
-``push_notification`` is the legacy outbound API (now Telegram-backed);
-``poll_inbound`` and ``reply`` are the bidirectional Telegram primitives.
+``push_notification`` is the stable outbound API. The concrete provider is a
+channel adapter, with Telegram as the default provider.
 """
 
 from .push import push_notification, push_gate_escalation, NTFY_TOPIC
 from .telegram import poll_inbound, reply, InboundMessage
+from .channels import (
+    NotificationIntent,
+    build_notification_intent,
+    get_notification_channel,
+    send_notification,
+)
 
 __all__ = [
     "push_notification",
@@ -14,5 +19,9 @@ __all__ = [
     "poll_inbound",
     "reply",
     "InboundMessage",
+    "NotificationIntent",
+    "build_notification_intent",
+    "get_notification_channel",
+    "send_notification",
     "NTFY_TOPIC",  # legacy; always None after GP-128b
 ]

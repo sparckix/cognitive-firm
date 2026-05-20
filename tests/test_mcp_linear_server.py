@@ -35,9 +35,9 @@ def test_linear_server_registered_on_import():
     assert "linear" in registered_servers()
     spec = get_server_spec("linear")
     assert spec is not None
-    assert spec.transport == "http"
+    assert spec.transport == "streamable_http"
     assert spec.auth_env_var == "LINEAR_API_KEY"
-    assert spec.url and spec.url.startswith("https://")
+    assert spec.url == "https://mcp.linear.app/mcp"
 
 
 def test_list_issues_projection_well_formed():
@@ -86,6 +86,26 @@ def test_list_projects_projection():
     proj = project_response("linear", "list_projects", response)
     assert proj.transition_class == "mcp_call_dispatched"
     assert proj.normalized_payload["count"] == 1
+
+
+def test_list_projects_projection_accepts_streamable_content_text_shape():
+    response = {
+        "jsonrpc": "2.0",
+        "id": "abc",
+        "result": {
+            "content": [
+                {
+                    "type": "text",
+                    "text": '{"projects":[{"id":"p-live","name":"Live shape","status":{"name":"Backlog"}}]}',
+                }
+            ]
+        },
+    }
+    proj = project_response("linear", "list_projects", response)
+    assert proj.transition_class == "mcp_call_dispatched"
+    assert proj.normalized_payload["count"] == 1
+    assert proj.normalized_payload["projects"][0]["name"] == "Live shape"
+    assert proj.normalized_payload["projects"][0]["state"] == "Backlog"
 
 
 def test_end_to_end_linear_dispatch_with_fake_transport(tmp_path: Path):

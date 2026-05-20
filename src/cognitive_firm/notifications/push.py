@@ -1,9 +1,8 @@
-"""Push notification layer for GP-128 persistent-manager-agent escalations.
+"""Push notification compatibility API.
 
-As of 2026-04-25 (GP-128b unification), this module is a thin compat
-shim over ``telegram.py``. The original ntfy.sh transport was retired
-because Telegram is bidirectional (the principal can also send commands
-to the manager via the same bot — see GP-128b seam).
+This module keeps the historical ``push_notification`` entry point while
+routing through the generic notification-channel facade. Telegram is the
+default provider, but callers should treat the channel as replaceable.
 
 All existing call sites (``push_notification``, ``push_gate_escalation``,
 ``push_from_gate_json``) keep working without code changes; only the
@@ -25,9 +24,8 @@ Setup:
     python scripts/poll_telegram.py --consume   # ad-hoc inbound poll
 
 Deprecation notes:
-    * ``ZTARE_NTFY_TOPIC`` env var is ignored (kept here for grep
-      discoverability — the topic file ``org/mandates/.ntfy_topic`` is
-      no longer consulted).
+    * The old ntfy.sh topic file ``org/mandates/.ntfy_topic`` is no longer
+      consulted.
     * The ntfy.sh broker is no longer contacted by this module.
 """
 
@@ -38,14 +36,15 @@ import logging
 from pathlib import Path
 from typing import Iterable, Optional
 
-from cognitive_firm.notifications.telegram import (
-    push_notification as _telegram_push_notification,
+from cognitive_firm.notifications.channels import (
+    build_notification_intent,
+    send_notification,
 )
 
 
 # Legacy constants retained for any caller that imports them. They are
 # no longer functional after the GP-128b transport swap.
-NTFY_TOPIC_ENV = "ZTARE_NTFY_TOPIC"
+NTFY_TOPIC_ENV = "COGNITIVE_FIRM_NTFY_TOPIC"
 NTFY_TOPIC_FILE = Path("org/mandates/.ntfy_topic")
 NTFY_TOPIC: Optional[str] = None  # always None after retirement
 NTFY_URL: Optional[str] = None     # always None after retirement
@@ -64,17 +63,20 @@ def push_notification(
 ) -> bool:
     """Send a push notification to the principal.
 
-    API-compatible with the historical ntfy.sh implementation. The
-    transport is now Telegram (GP-128b). See ``telegram.py`` for
-    priority-prefix conventions. All failures are logged, never
-    raised — the filesystem inbox remains the authoritative channel.
+    API-compatible with the historical ntfy.sh implementation. The selected
+    provider is controlled by ``COGNITIVE_FIRM_NOTIFICATION_CHANNEL`` and
+    defaults to Telegram. All failures are logged, never raised; the filesystem
+    inbox remains authoritative.
     """
-    return _telegram_push_notification(
+    intent = build_notification_intent(
         title=title,
         message=message,
         priority=priority,
         tags=tags,
         click_url=click_url,
+    )
+    return send_notification(
+        intent,
         timeout_seconds=timeout_seconds,
     )
 
