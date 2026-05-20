@@ -1,11 +1,11 @@
-"""GP-070 Goal Orchestrator — CLI (C-20, C-22, C-23) + Slice B (C-21, C-26).
+"""Goal Orchestrator CLI.
 
 Commands:
-  ztare goal advance <slug> --to <next_stage> [--artifacts <path>...] [--git-commit]
-  ztare goal resume <slug> [--acknowledge-drift] [--git-commit]
-  ztare goal status [<slug>]
-  ztare goal create <name> --type <target_type> --description <desc>
-  ztare goal validate <config_path>
+  cognitive-firm goal advance <slug> --to <next_stage> [--artifacts <path>...] [--git-commit]
+  cognitive-firm goal resume <slug> [--acknowledge-drift] [--git-commit]
+  cognitive-firm goal status [<slug>]
+  cognitive-firm goal create <name> --type <target_type> --description <desc>
+  cognitive-firm goal validate <config_path>
 
 Usage:
   python -m src.cognitive_firm.orchestration.cli <command> [args]
@@ -464,7 +464,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        prog="ztare-goal",
+        prog="cognitive-firm goal",
         description="GP-070 Goal Orchestrator CLI",
     )
     sub = parser.add_subparsers(dest="command")

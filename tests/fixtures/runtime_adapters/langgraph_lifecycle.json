@@ -1,0 +1,39 @@
+[
+  {
+    "runtime_name": "langgraph",
+    "external_run_id": "thread-demo",
+    "kind": "started",
+    "owner_role": "role.manager",
+    "actor": "role.manager",
+    "objective": "run governed graph",
+    "tenant_id": "tenant-demo",
+    "project_id": "project-demo"
+  },
+  {
+    "runtime_name": "langgraph",
+    "external_run_id": "thread-demo",
+    "kind": "checkpointed",
+    "owner_role": "role.manager",
+    "actor": "role.manager",
+    "step_id": "retrieve",
+    "checkpoint_status": "completed",
+    "summary": "retrieved source packet",
+    "side_effect_key": "fetch:source:1"
+  },
+  {
+    "runtime_name": "langgraph",
+    "external_run_id": "thread-demo",
+    "kind": "state_changed",
+    "owner_role": "role.manager",
+    "actor": "role.manager",
+    "state": "completed"
+  },
+  {
+    "runtime_name": "langgraph",
+    "external_run_id": "thread-demo",
+    "kind": "started",
+    "owner_role": "role.manager",
+    "actor": "role.manager",
+    "objective": "run governed graph"
+  }
+]

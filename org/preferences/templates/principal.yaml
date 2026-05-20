@@ -1,0 +1,18 @@
+principal_id: example_principal
+notification_channel: null
+default_escalation: principal
+review_cadence: daily
+budget_policy:
+  daily_usd: 50.0
+  require_approval_above_usd: 10.0
+research_taste:
+  axes:
+    decisive_discriminator:
+      weight: 1.0
+      description: Prefer work that can clearly change a decision.
+    reversibility:
+      weight: 0.5
+      description: Prefer low-cost, reversible probes before irreversible work.
+surface_policy:
+  orbit_mode: projection_only
+  allow_direct_config_writes: false
