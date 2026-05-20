@@ -13,10 +13,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import WORKSPACE_DIR
+from cognitive_firm.orchestration.kernel_events import event_from_legacy_transition
+from cognitive_firm.orchestration.state_backends import EventSource
 
 
-TRANSITIONS_LOG = REPO_ROOT / "ztare_workspace" / "transitions.jsonl"
+TRANSITIONS_LOG = WORKSPACE_DIR / "transitions.jsonl"
 
 
 def append_transition(
@@ -29,6 +31,7 @@ def append_transition(
     payload: dict[str, Any] | None = None,
     causality_id: str | None = None,
     log_path: Path | None = None,
+    event_source: EventSource | None = None,
 ) -> dict[str, Any]:
     """Append one canonical org transition and return the record.
 
@@ -41,7 +44,7 @@ def append_transition(
     import sys
     if log_path is None:
         log_path = sys.modules[__name__].TRANSITIONS_LOG
-    record = {
+    record: dict[str, Any] = {
         "schema_version": 1,
         "event_id": str(uuid.uuid4()),
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -53,6 +56,10 @@ def append_transition(
         "causality_id": causality_id,
         "payload": payload or {},
     }
+    record["kernel_event"] = event_from_legacy_transition(record).as_dict()
+    if event_source is not None:
+        event_source.append_event("transitions", record)
+        return record
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, sort_keys=True) + "\n")

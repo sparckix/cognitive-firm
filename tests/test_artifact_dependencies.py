@@ -51,7 +51,7 @@ def test_promise_then_fulfill_satisfies_awaits(tmp_path: Path):
     fulfill_artifact(
         role_id="research_director", task_id="task_1",
         artifact_key="validator.results.X",
-        artifact_path="ztare_workspace/validator/X.json",
+        artifact_path="cognitive_firm_workspace/validator/X.json",
         sha256="9af3" * 16,
         predicate=predicate,
         predicate_eval={"schema_version_ge_2": True, "score_ge_0_7": True},

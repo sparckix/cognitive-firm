@@ -1,9 +1,8 @@
 """Property-based tests for the M-Form load-bearing invariants.
 
-Per `internal/competitive_adoption_verdicts.md` C2 verdict: REJECT formal
-proofs (Lean / Coq), ship property-based tests instead. Property-based
-testing via Hypothesis catches the bug class formal verification would
-catch at one-tenth the engineering cost for our threat model.
+These tests cover dispatch authorization edge cases where examples alone are
+too narrow: forbidden path precedence, explicit unattended scopes, budget
+caps, wildcard behavior, idempotency, and projection registration.
 
 Invariants under test (the 5-7 named in the verdict file):
 

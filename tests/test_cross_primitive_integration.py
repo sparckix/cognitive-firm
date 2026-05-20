@@ -180,7 +180,7 @@ def test_obligation_with_artifact_dependency_completes_no_saga(isolated_state):
         role_id="evidence_producer",
         task_id="task_evidence_compile_gp031",
         artifact_key="evidence_compile.gp031",
-        artifact_path="research_areas/private/seams/gp031/evidence_v3.md",
+        artifact_path="org/artifacts/gp031/evidence_v3.md",
         sha256="abc123def456" * 5 + "0123",
         predicate=predicate,
         predicate_eval={"score_ge_0_7": True},

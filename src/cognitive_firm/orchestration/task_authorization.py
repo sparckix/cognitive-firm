@@ -19,6 +19,7 @@ except ModuleNotFoundError:  # pragma: no cover - bare Python product path.
     yaml = None
 
 from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import WORKSPACE_DIR
 
 
 ROLE_PATH_PREFIXES = (
@@ -29,10 +30,9 @@ ROLE_PATH_PREFIXES = (
     "src/",
     "scripts/",
     "papers/",
-    "ztare_workspace/",
+    f"{WORKSPACE_DIR.name}/",
     "rubrics/",
     "orbit/",
-    "supervisor/",
 )
 
 
@@ -148,7 +148,11 @@ def _extract_referenced_paths(text: str) -> tuple[str, ...]:
         for prefix in ROLE_PATH_PREFIXES:
             if match.startswith(prefix):
                 candidates.add(match)
-    for match in re.findall(r"\b(?:org|projects|research_areas|docs|src|scripts|papers|ztare_workspace|rubrics|orbit|supervisor)/[A-Za-z0-9_./-]+", text):
+    path_roots = "|".join(
+        re.escape(root.rstrip("/"))
+        for root in ROLE_PATH_PREFIXES
+    )
+    for match in re.findall(rf"\b(?:{path_roots})/[A-Za-z0-9_./-]+", text):
         candidates.add(match.rstrip(".,);:"))
     return tuple(sorted(candidates))
 

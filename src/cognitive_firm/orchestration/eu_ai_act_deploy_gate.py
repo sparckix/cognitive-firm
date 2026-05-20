@@ -1,24 +1,13 @@
-"""C3 SHIP B — EU AI Act compliance deploy-gate primitive.
+"""EU AI Act compliance deploy-gate primitive.
 
 WHAT THIS PRIMITIVE DOES, IN PLAIN ENGLISH:
 
-The EU AI Act (effective August 2026) requires high-risk AI systems to
-maintain documentation that maps the system's architecture, data sources,
-risk-management processes, and human-oversight surfaces to the Act's
-articles. Vendors who deploy without this documentation expose themselves
-to legal penalties and forced shutdowns.
+Some T2 deployments need an adopter-authored compliance mapping before a role
+can dispatch. The kernel does not ship legal advice or a vendor-authored
+mapping. It ships a deploy-gate primitive that can require the adopter to
+maintain a signed mapping artifact for high-risk roles.
 
-cognitive-firm originally REJECTED shipping a vendor-published EU AI Act
-mapping (per H4 historical analog: enterprise GRC teams rewrite vendor
-mappings anyway). The 2026-05-07 GP-230 substrate iter1 (score 92) flipped
-that verdict via a catastrophic-exposure argument: deferring mapping until
-requested creates an uncapped exposure window in which compliance failure
-can go undetected. If a T2 deployment lands before the mapping exists, no
-other technical control compensates for the gap.
-
-The fix is NOT to ship a vendor-published mapping. It is to ship the
-**deploy-gate primitive** that forces the adopter to author a mapping
-before deploying. Concretely:
+Concretely:
 
   1. The mandate gains a typed field: `t2_deployment: bool` (default false).
   2. When `t2_deployment: true`, the kernel pre-deploy gate refuses

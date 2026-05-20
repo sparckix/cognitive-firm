@@ -1,4 +1,4 @@
-"""C3 SHIP B — EU AI Act deploy-gate primitive tests.
+"""EU AI Act deploy-gate primitive tests.
 
 Properties under test:
   - t2_deployment: false → gate trivially passes (T1 is not subject)

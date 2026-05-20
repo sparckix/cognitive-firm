@@ -65,6 +65,10 @@ def isolated_channels(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(agent_channels, "CHANNELS_DIR", channels)
     monkeypatch.setattr(agent_channels, "ROLES_DIR", roles)
+    monkeypatch.setattr(
+        "cognitive_firm.orchestration.transition_log.TRANSITIONS_LOG",
+        tmp_path / "transitions.jsonl",
+    )
     yield tmp_path
 
 
