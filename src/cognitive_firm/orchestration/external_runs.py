@@ -14,10 +14,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import WORKSPACE_DIR
 
 
-EXTERNAL_RUNS_ROOT = REPO_ROOT / "ztare_workspace" / "external_runs"
+EXTERNAL_RUNS_ROOT = WORKSPACE_DIR / "external_runs"
 
 
 def utc_now() -> str:

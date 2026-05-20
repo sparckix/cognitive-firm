@@ -41,7 +41,7 @@ from cognitive_firm.role_extensions import frontier_state as fs
 
 log = logging.getLogger(__name__)
 
-POLICY_PATH = Path("src/ztare/role_extensions/iter_action_policy.yaml")
+POLICY_PATH = Path(__file__).with_name("iter_action_policy.yaml")
 
 _NUMERIC_PATTERN_RE = re.compile(r"^(>=|<=|>|<|==)?\s*(-?\d+(?:\.\d+)?)$")
 

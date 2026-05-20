@@ -8,6 +8,10 @@ cheapest + highest-signal-density discovery sources from GP-131:
 2. Damage-scan — unresolved signals from cognitive_firm.signals.damage
 3. Agent-channel — durable messages sent from one persistent role office
    to another
+4. Evidence gaps + human work sessions — typed learning carriers that need
+   collection, review, human execution, or integration
+5. Approved learning events — active behavior changes future role work should
+   encounter before repeating old failure modes
 
 Each source produces Candidate objects with a scarcity signal and an
 "intent" field (not "procedure" — GP-129 Godfrey-Smith pull-forward).
@@ -29,7 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
-from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import REPO_ROOT, WORKSPACE_DIR
 from cognitive_firm.orchestration.execution_routing import infer_execution_route
 from cognitive_firm.signals import damage
 
@@ -257,6 +261,161 @@ def discover_agent_channel_messages(
     return out
 
 
+def discover_evidence_gaps(
+    *,
+    assigned_to: Optional[str] = None,
+    max_per_source: int = 10,
+) -> list[Candidate]:
+    """Surface open evidence gaps as work candidates.
+
+    Evidence gaps are not passive notes. Blocking gaps should interrupt normal
+    work; useful gaps become collection/review work when assigned to a role or
+    when discovery runs without a role filter.
+    """
+    from cognitive_firm.orchestration.evidence_gaps import list_evidence_gaps
+
+    role_match = (
+        assigned_to.split(".", 1)[1]
+        if assigned_to and assigned_to.startswith("role.")
+        else assigned_to
+    )
+    out: list[Candidate] = []
+    for gap in list_evidence_gaps()[: max_per_source * 3]:
+        if gap.status == "closed":
+            continue
+        if role_match and gap.owner_role and gap.owner_role not in {assigned_to, role_match}:
+            continue
+        if role_match and not gap.owner_role and gap.severity != "blocking":
+            continue
+        severity = "critical" if gap.severity == "blocking" else "warn"
+        out.append(Candidate(
+            source="evidence-gap",
+            intent=f"resolve evidence gap for {gap.target}",
+            origin_path=None,
+            scarcity_signal=(
+                f"{gap.severity} evidence gap is {gap.status}"
+                + (f"; owner_role={gap.owner_role}" if gap.owner_role else "")
+            ),
+            raw_text=gap.description,
+            age_days=None,
+            severity=severity,
+            metadata={
+                "gap_id": gap.gap_id,
+                "gap_type": gap.gap_type,
+                "target": gap.target,
+                "status": gap.status,
+                "severity": gap.severity,
+                "fetch_query": gap.fetch_query,
+                "owner_role": gap.owner_role,
+                "tenant_id": gap.tenant_id,
+                "project_id": gap.project_id,
+                "adversarial_direction": gap.adversarial_direction,
+            },
+        ))
+        if len(out) >= max_per_source:
+            break
+    return out
+
+
+def discover_human_work_sessions(
+    *,
+    assigned_to: Optional[str] = None,
+    max_per_source: int = 10,
+) -> list[Candidate]:
+    """Surface human work sessions that need coordination or integration."""
+    from cognitive_firm.orchestration.human_work import list_human_work_sessions
+
+    role_match = (
+        assigned_to.split(".", 1)[1]
+        if assigned_to and assigned_to.startswith("role.")
+        else assigned_to
+    )
+    actionable_states = {"requested", "blocked", "handed_off", "completed"}
+    out: list[Candidate] = []
+    for session in list_human_work_sessions()[: max_per_source * 3]:
+        if session.state not in actionable_states:
+            continue
+        is_a2h = (
+            session.metadata.get("coordination_pattern") == "a2h_work_request"
+            or bool(session.agent_counterparty_role and session.agent_followup_required)
+        )
+        if is_a2h and session.state == "requested":
+            continue
+        if role_match:
+            role_names = set(session.collaborating_roles)
+            role_names.update(
+                role.split(".", 1)[1]
+                for role in session.collaborating_roles
+                if role.startswith("role.")
+            )
+            if session.agent_counterparty_role:
+                role_names.add(session.agent_counterparty_role)
+                if session.agent_counterparty_role.startswith("role."):
+                    role_names.add(session.agent_counterparty_role.split(".", 1)[1])
+            if (
+                assigned_to not in role_names
+                and role_match not in role_names
+                and session.requested_by not in {assigned_to, role_match}
+            ):
+                continue
+        receipt_missing = session.receipt_required and not (session.receipt or "").strip()
+        severity = (
+            "critical"
+            if session.state == "completed" and session.agent_followup_required
+            else "warn"
+            if session.state in {"blocked", "completed"} or receipt_missing
+            else "info"
+        )
+        action = (
+            "integrate completed human work"
+            if session.state == "completed"
+            else "coordinate human work"
+        )
+        if (
+            session.agent_followup_required
+            and session.agent_counterparty_role
+            and session.state in {"handed_off", "completed"}
+        ):
+            action = f"A2H follow-up for {session.agent_counterparty_role}"
+        out.append(Candidate(
+            source="human-work",
+            intent=f"{action}: {session.objective}",
+            origin_path=None,
+            scarcity_signal=(
+                f"human work session is {session.state}; "
+                f"mode={session.work_mode}; bottleneck={session.bottleneck_class}"
+                + ("; receipt missing" if receipt_missing else "")
+                + ("; agent follow-up required" if session.agent_followup_required else "")
+            ),
+            raw_text=session.completion_summary or session.objective,
+            age_days=None,
+            severity=severity,
+            metadata={
+                "session_id": session.session_id,
+                "state": session.state,
+                "requested_by": session.requested_by,
+                "human_actor": session.human_actor,
+                "agent_counterparty_role": session.agent_counterparty_role,
+                "human_deliverable": session.human_deliverable,
+                "agent_followup_required": session.agent_followup_required,
+                "coordination_pattern": session.metadata.get("coordination_pattern"),
+                "work_mode": session.work_mode,
+                "bottleneck_class": session.bottleneck_class,
+                "observability": session.observability,
+                "receipt_required": session.receipt_required,
+                "receipt_type": session.receipt_type,
+                "receipt": session.receipt,
+                "confidence": session.confidence,
+                "sample_for_review": session.sample_for_review,
+                "tenant_id": session.tenant_id,
+                "project_id": session.project_id,
+            },
+        ))
+        if len(out) >= max_per_source:
+            break
+    return out
+
+
 def discover_resolved_pending_execution(
     *,
     assigned_to: Optional[str] = None,
@@ -282,7 +441,7 @@ def discover_resolved_pending_execution(
     else:
         owner_match = None
 
-    resolved_dir = REPO_ROOT / "ztare_workspace" / "gates" / "resolved"
+    resolved_dir = WORKSPACE_DIR / "gates" / "resolved"
     if not resolved_dir.exists():
         return out
 
@@ -340,43 +499,35 @@ def discover_open_debates(
     idle_threshold_hours: float = 6.0,
     max_per_source: int = 5,
 ) -> list[Candidate]:
-    """GP-195 — surface seam-debate work for the debate_runner role.
+    """Surface stale seam-debate work for the debate-runner role.
 
-    Scans research_areas/private/seams/ for *.md files that are tagged as
-    active debates, have not had a turn appended in the last
-    `idle_threshold_hours`, and have not reached CONVERGED or
-    ESCALATED_CAP per supervisor_findings_debate.read_debate_state.
+    Scans the configured debate carrier root for Markdown files that are
+    tagged as active debates, have not had a turn appended in the last
+    `idle_threshold_hours`, and have not reached CONVERGED or ESCALATED_CAP
+    in an embedded debate-state marker.
 
     Returns a list of Candidate objects with kind="debate_turn". The
     daemon dispatches these as resolved-pending-execution candidates;
-    the actual debate-turn machinery lives in supervisor_findings_runner.
+    the actual debate-turn machinery lives in the tenant/app layer.
 
     Discovery heuristic:
       - File contains a `<!-- debate_state:` comment OR the file ends
         with a turn marker (e.g., "## Turn N — <speaker>") AND
       - Last modification time exceeds idle_threshold_hours AND
-      - File path is under research_areas/private/seams/.
+      - File path is under the configured debate carrier root.
 
-    Soft-fails: if supervisor_findings_debate is not importable (legacy
-    layout), this discoverer returns []. The role can be reactivated
-    once #195 implementation completes the wiring.
+    This is intentionally shallow. Rich debate parsing belongs in a tenant
+    adapter; the kernel only detects stale open debate carriers.
     """
     import time
     from datetime import datetime, timedelta, timezone
 
     out: list[Candidate] = []
-    seams_root = REPO_ROOT / "research_areas" / "private" / "seams"
+    seams_root = SEAMS_ROOT
     if not seams_root.exists():
         return out
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=idle_threshold_hours)
-
-    try:
-        from cognitive_firm.supervisor.supervisor_findings_debate import read_debate_state  # type: ignore
-    except Exception:  # noqa: BLE001
-        # Legacy layout missing — return empty rather than crash; the role
-        # remains scaffolded and the daemon discovers nothing for it.
-        return out
 
     for seam_path in seams_root.rglob("*.md"):
         try:
@@ -386,22 +537,25 @@ def discover_open_debates(
             text = seam_path.read_text(encoding="utf-8", errors="ignore")
             if "debate_state:" not in text and "## Turn " not in text:
                 continue
-            try:
-                state = read_debate_state(str(seam_path))
-            except Exception:  # noqa: BLE001
-                continue
-            verdict = getattr(state, "verdict", None) or state.get("verdict") if isinstance(state, dict) else None
+            verdict = _extract_debate_verdict(text)
             if verdict in ("CONVERGED", "ESCALATED_CAP"):
                 continue
+            try:
+                seam_ref = str(seam_path.relative_to(REPO_ROOT))
+            except ValueError:
+                seam_ref = str(seam_path)
             out.append(Candidate(
                 source="open_debate",
-                kind="debate_turn",
-                ref=str(seam_path.relative_to(REPO_ROOT)),
-                title=f"Append turn to stagnant debate: {seam_path.name}",
+                intent=f"Append turn to stagnant debate: {seam_path.name}",
+                origin_path=seam_path,
+                scarcity_signal="stagnant_open_debate",
+                raw_text=seam_ref,
                 metadata={
                     "assigned_to": assigned_to or "debate_runner",
+                    "kind": "debate_turn",
+                    "ref": seam_ref,
                     "idle_hours": (datetime.now(timezone.utc) - mtime).total_seconds() / 3600,
-                    "execution_route": "supervisor_findings_runner",
+                    "execution_route": "tenant_debate_runner",
                     "priority": "P1",
                 },
             ))
@@ -411,6 +565,17 @@ def discover_open_debates(
             continue
 
     return out
+
+
+def _extract_debate_verdict(text: str) -> str | None:
+    marker = "debate_state:"
+    if marker not in text:
+        return None
+    after = text.split(marker, 1)[1][:500]
+    for token in ("CONVERGED", "ESCALATED_CAP", "OPEN", "ACTIVE", "PENDING"):
+        if token in after:
+            return token
+    return None
 
 
 def discover_substrate_portfolio_opportunities(
@@ -517,10 +682,163 @@ def discover_substrate_portfolio_opportunities(
     return out
 
 
+def discover_relevant_learning_events(
+    *,
+    assigned_to: Optional[str] = None,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    cue: str | None = None,
+    max_per_source: int = 5,
+) -> list[Candidate]:
+    """Surface active approved learning events for a future work surface.
+
+    Learning events are not tasks by themselves. They are decision context that
+    future work must encounter before repeating a known failure mode or routing
+    pattern.
+    """
+    if not assigned_to:
+        return []
+
+    try:
+        from cognitive_firm.orchestration.learning_events import replay_learning_events
+
+        events = replay_learning_events(
+            role=assigned_to,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            cue=cue,
+        )
+    except Exception:  # noqa: BLE001
+        return []
+
+    out: list[Candidate] = []
+    for event in events[:max_per_source]:
+        out.append(Candidate(
+            source="learning-event-replay",
+            intent=(
+                f"apply approved learning before future work: "
+                f"{event.future_application_cue}"
+            )[:240],
+            origin_path=None,
+            scarcity_signal="active approved learning event matched this role/context",
+            raw_text=event.decision_use,
+            severity="info",
+            metadata={
+                "learning_event_id": event.learning_event_id,
+                "learning_unit_kind": event.learning_unit_kind,
+                "owner_role": event.owner_role,
+                "tenant_id": event.tenant_id,
+                "project_id": event.project_id,
+                "approval_ref": event.approval_ref,
+                "source_carrier_refs": event.source_carrier_refs,
+                "kind": "learning-event-replay",
+            },
+        ))
+    return out
+
+
+def attach_learning_context(
+    candidate: Candidate,
+    *,
+    assigned_to: Optional[str],
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    record_encounter: bool = False,
+) -> Candidate:
+    """Attach approved learning events that match a discovered work item."""
+    if not assigned_to or candidate.source == "learning-event-replay":
+        return candidate
+    candidate_tenant_id = tenant_id or candidate.metadata.get("tenant_id")
+    candidate_project_id = project_id or candidate.metadata.get("project_id")
+    cue = " ".join(
+        part
+        for part in [
+            candidate.intent,
+            candidate.raw_text,
+            candidate.scarcity_signal,
+        ]
+        if part
+    ).strip()
+    if not cue:
+        return candidate
+    try:
+        from cognitive_firm.orchestration.learning_events import (
+            record_learning_event_encounter,
+            replay_learning_events,
+        )
+
+        events = replay_learning_events(
+            role=assigned_to,
+            tenant_id=candidate_tenant_id,
+            project_id=candidate_project_id,
+            cue=cue,
+        )
+    except Exception:  # noqa: BLE001
+        return candidate
+    if not events:
+        return candidate
+    refs = [event.learning_event_id for event in events]
+    if record_encounter:
+        work_ref = _candidate_work_ref(candidate)
+        for event in events:
+            try:
+                record_learning_event_encounter(
+                    learning_event_id=event.learning_event_id,
+                    role=assigned_to,
+                    cue=cue[:500],
+                    outcome="encountered",
+                    work_ref=work_ref,
+                    tenant_id=candidate_tenant_id,
+                    project_id=candidate_project_id,
+                    evidence_refs=[candidate.source],
+                    metadata={"candidate_source": candidate.source},
+                )
+            except Exception:  # noqa: BLE001
+                continue
+    next_metadata = dict(candidate.metadata)
+    next_metadata["learning_event_refs"] = refs
+    next_metadata["learning_event_context"] = [
+        {
+            "learning_event_id": event.learning_event_id,
+            "decision_use": event.decision_use,
+            "future_application_cue": event.future_application_cue,
+            "approval_ref": event.approval_ref,
+        }
+        for event in events
+    ]
+    return Candidate(
+        source=candidate.source,
+        intent=candidate.intent,
+        origin_path=candidate.origin_path,
+        scarcity_signal=candidate.scarcity_signal,
+        raw_text=candidate.raw_text,
+        age_days=candidate.age_days,
+        severity=candidate.severity,
+        metadata=next_metadata,
+    )
+
+
+def _candidate_work_ref(candidate: Candidate) -> str:
+    if candidate.origin_path:
+        return str(candidate.origin_path)
+    for key, prefix in [
+        ("gap_id", "evidence-gap"),
+        ("session_id", "human-work"),
+        ("goal_id", "principal-goal"),
+        ("message_id", "agent-channel"),
+        ("resolved_gate_id", "resolved-gate"),
+        ("learning_event_id", "learning-event"),
+    ]:
+        value = candidate.metadata.get(key)
+        if value:
+            return f"{prefix}:{value}"
+    return candidate.source
+
+
 def _is_in_role_scope(candidate: Candidate, assigned_to: Optional[str]) -> bool:
     """GP-228 / SRO scope filter — keep candidates that match the role's mandate.
 
-    For self_recursive_orchestrator, only ztare_on_ztare_* work passes. For
+    For self_recursive_orchestrator, only recursive-organization-review work passes. For
     other roles, falls through (no filtering — the role's existing logic owns
     its scope). Role-scope mandates live in tenants/<id>/mandates/; this
     function encodes the predicate for the SRO mandate's "OUT-OF-SCOPE
@@ -546,16 +864,16 @@ def _is_in_role_scope(candidate: Candidate, assigned_to: Optional[str]) -> bool:
     # 4. Damage signals emitted by SRO-related components
     if candidate.source == "damage-scan":
         text = (candidate.intent or "").lower() + " " + (candidate.raw_text or "").lower()
-        if "ztare_on_ztare" in text or "self_recursive_orchestrator" in text or "sro" in text:
+        if "recursive org" in text or "self_recursive_orchestrator" in text or "sro" in text:
             return True
-    # 5. Text corpus mentions ztare_on_ztare_* (TODO-scan + others)
+    # 5. Text corpus mentions recursive organization review (TODO-scan + others)
     text_corpus = " ".join((
         candidate.intent or "",
         candidate.scarcity_signal or "",
         str(candidate.origin_path or ""),
         candidate.raw_text or "",
     )).lower()
-    if "ztare_on_ztare" in text_corpus:
+    if "recursive org" in text_corpus or "recursive organization" in text_corpus:
         return True
     return False
 
@@ -564,22 +882,29 @@ def discover_all(
     *,
     max_per_source: int = 10,
     assigned_to: Optional[str] = None,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    cue: str | None = None,
+    record_learning_encounters: bool = False,
 ) -> list[Candidate]:
     """Run all implemented discovery sources and return combined list.
 
-    Ordering: critical damage signals first, then principal goals, then
-    agent-channel obligations, then non-critical damage, then TODO-scan,
-    then substrate-portfolio (GP-228 — director-level work). The ranker
-    downstream decides which to propose; this function keeps host damage
-    ahead of routine work.
+    Ordering: critical damage/evidence signals first, then approved gates,
+    explicit principal goals, agent-channel obligations, human work, ordinary
+    gaps, non-critical damage, TODO-scan, and portfolio work. The ranker
+    downstream decides which to propose; this function keeps host damage and
+    blocking learning carriers ahead of routine work.
 
     Role-scope filtering: candidates outside the calling role's mandate
     are dropped via `_is_in_role_scope`. For self_recursive_orchestrator,
-    only ztare_on_ztare_* work passes; for other roles, no filter applied.
+    only recursive-organization-review work passes; for other roles, no filter applied.
     """
     out: list[Candidate] = []
     damage_candidates = discover_damage_signals(max_per_source=max_per_source)
     out.extend([c for c in damage_candidates if c.severity == "critical"])
+    evidence_candidates = discover_evidence_gaps(
+        assigned_to=assigned_to, max_per_source=max_per_source)
+    out.extend([c for c in evidence_candidates if c.severity == "critical"])
     # Resolved-but-unexecuted approved gates rank ABOVE most other sources
     # because the principal already approved them — they're load-bearing.
     out.extend(discover_resolved_pending_execution(
@@ -588,6 +913,17 @@ def discover_all(
         assigned_to=assigned_to, max_per_source=max_per_source))
     out.extend(discover_agent_channel_messages(
         assigned_to=assigned_to, max_per_source=max_per_source))
+    if cue:
+        out.extend(discover_relevant_learning_events(
+            assigned_to=assigned_to,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            cue=cue,
+            max_per_source=max_per_source,
+        ))
+    out.extend(discover_human_work_sessions(
+        assigned_to=assigned_to, max_per_source=max_per_source))
+    out.extend([c for c in evidence_candidates if c.severity != "critical"])
     out.extend([c for c in damage_candidates if c.severity != "critical"])
     out.extend(discover_open_todos(max_per_source=max_per_source))
     out.extend(discover_substrate_portfolio_opportunities(
@@ -598,7 +934,17 @@ def discover_all(
             assigned_to=assigned_to or "debate_runner", max_per_source=max_per_source))
 
     # Apply per-role scope filter (SRO is the only role with a tight scope today)
-    return [c for c in out if _is_in_role_scope(c, assigned_to)]
+    scoped = [c for c in out if _is_in_role_scope(c, assigned_to)]
+    return [
+        attach_learning_context(
+            c,
+            assigned_to=assigned_to,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            record_encounter=record_learning_encounters,
+        )
+        for c in scoped
+    ]
 
 
 def format_candidate_for_inbox(c: Candidate) -> str:

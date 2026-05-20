@@ -19,6 +19,7 @@ ROUTES = {
     "synthesis_review",
     "scripted_run",
     "artifact_build",
+    "joint_work",
     "experiment_loop",
     "docs_records",
     # RD-1.12 (2026-05-02): research_director's standard route. Live
@@ -39,8 +40,11 @@ ROUTE_ALIASES = {
     "big_picture": "synthesis_review",
     "script_or_gpu": "scripted_run",
     "substrate_build": "artifact_build",
-    "ztare_loop": "experiment_loop",
+    "tenant_loop": "experiment_loop",
     "paper_or_docs": "docs_records",
+    "human_work": "joint_work",
+    "human_agent": "joint_work",
+    "co_work": "joint_work",
     "live_co_drive": "frontier_co_drive",
     "live_codrive": "frontier_co_drive",
     "rd_live": "frontier_co_drive",
@@ -52,7 +56,7 @@ class ExecutionRoute:
     route: str
     confidence: str
     rationale: str
-    ztare_allowed: bool
+    tenant_loop_allowed: bool
     experiment_loop_allowed: bool
     artifact_build_allowed: bool
     substrate_build_allowed: bool
@@ -66,7 +70,7 @@ class ExecutionRoute:
             "route": self.route,
             "confidence": self.confidence,
             "rationale": self.rationale,
-            "ztare_allowed": self.ztare_allowed,
+            "tenant_loop_allowed": self.tenant_loop_allowed,
             "experiment_loop_allowed": self.experiment_loop_allowed,
             "artifact_build_allowed": self.artifact_build_allowed,
             "substrate_build_allowed": self.substrate_build_allowed,
@@ -111,7 +115,7 @@ def infer_execution_route(
 
     Explicit frontmatter wins. Heuristics are intentionally conservative:
     absent a stable contract, default to manual-agent routing rather than
-    launching ZTARE or paid infrastructure.
+    launching a tenant loop or paid infrastructure.
     """
     fm = dict(frontmatter or {})
     text = f"{body}\n{fm}".lower()
@@ -155,14 +159,14 @@ def infer_execution_route(
         route = "synthesis_review"
         confidence = "medium"
         rationale = "task asks for RD-1.10 de-anchored synthesis before more local slicing"
-    elif "generate_substrate" in text or "substrate" in text and "ztare" in text:
+    elif "generate_substrate" in text or ("substrate" in text and "tenant loop" in text):
         route = "artifact_build"
         confidence = "medium"
         rationale = "task discusses building a reusable artifact/contract for a repeatable loop"
-    elif "ztare" in text and any(k in text for k in ("experiment-loop", "make loop", "mutator", "gate_harness", "many candidate")):
+    elif "tenant loop" in text and any(k in text for k in ("experiment-loop", "make loop", "mutator", "gate_harness", "many candidate")):
         route = "experiment_loop"
         confidence = "medium"
-        rationale = "task names the inner ZTARE loop and repeatable gated candidate search"
+        rationale = "task names an inner tenant loop and repeatable gated candidate search"
     elif any(k in text for k in ("gpu", "jax", "nohup", "ssh", "solver", "simulation", "batch")):
         route = "scripted_run"
         confidence = "medium"
@@ -171,6 +175,10 @@ def infer_execution_route(
         route = "expert_review"
         confidence = "medium"
         rationale = "task calls for adversarial interpretation or expert review"
+    elif any(k in text for k in ("human work", "joint work", "needs human", "human must")):
+        route = "joint_work"
+        confidence = "medium"
+        rationale = "task requires bounded human work alongside a role office"
     elif any(k in text for k in ("paper", "ssrn", "readme", "docs", "ledger", "manual")):
         route = "docs_records"
         confidence = "medium"
@@ -187,14 +195,14 @@ def infer_execution_route(
     # utilization budgets at execution time (not by the routing layer).
     is_co_drive = route == "frontier_co_drive"
     experiment_loop_allowed = (route == "experiment_loop") or is_co_drive
-    ztare_allowed = experiment_loop_allowed
+    tenant_loop_allowed = experiment_loop_allowed
     artifact_build_allowed = (route == "artifact_build") or is_co_drive
     substrate_allowed = artifact_build_allowed
     live_api_allowed = (route == "expert_review") or is_co_drive
     gpu_allowed = (route == "scripted_run") or is_co_drive
 
     experiment_loop_allowed = _bool_frontmatter(fm, "experiment_loop_allowed", experiment_loop_allowed)
-    ztare_allowed = _bool_frontmatter(fm, "ztare_allowed", ztare_allowed)
+    tenant_loop_allowed = _bool_frontmatter(fm, "tenant_loop_allowed", tenant_loop_allowed)
     artifact_build_allowed = _bool_frontmatter(fm, "artifact_build_allowed", artifact_build_allowed)
     substrate_allowed = _bool_frontmatter(fm, "substrate_build_allowed", substrate_allowed)
     live_api_allowed = _bool_frontmatter(fm, "live_api_allowed", live_api_allowed)
@@ -209,6 +217,7 @@ def infer_execution_route(
             "synthesis_review": "workspace/deanchored_synthesis_checkpoint.md",
             "scripted_run": "workspace/run_packet.md",
             "artifact_build": "workspace/artifact_build_spec.md",
+            "joint_work": "workspace/human_work_session.md",
             "experiment_loop": "workspace/preflight_substrate_audit.md",
             "docs_records": "workspace/doc_edit_plan.md",
             "frontier_co_drive": "workspace/frontier_co_drive_log.md",
@@ -221,11 +230,11 @@ def infer_execution_route(
         elif route == "artifact_build":
             escalation = "Director roles may specify the artifact, but implementation must be assigned to an authorized builder role."
         elif route == "synthesis_review":
-            escalation = "Write the de-anchored synthesis checkpoint before recommending paid API/GPU or another ZTARE iteration."
+            escalation = "Write the de-anchored synthesis checkpoint before recommending paid API/GPU or another tenant-loop iteration."
         elif route in {"expert_review", "scripted_run"}:
             escalation = "Escalate before live spend above the task budget cap or if static replay can answer the question."
         else:
-            escalation = "Escalate if the task requires paid API/GPU, substrate mutation, or ZTARE launch not explicitly allowed."
+            escalation = "Escalate if the task requires paid API/GPU, substrate mutation, or tenant-loop launch not explicitly allowed."
 
     # The Research Director is a reviewer/director by mandate, not the entity
     # that silently edits substrates or runs the inner loop.
@@ -236,7 +245,7 @@ def infer_execution_route(
         route=route,
         confidence=confidence,
         rationale=rationale,
-        ztare_allowed=ztare_allowed,
+        tenant_loop_allowed=tenant_loop_allowed,
         experiment_loop_allowed=experiment_loop_allowed,
         artifact_build_allowed=artifact_build_allowed,
         substrate_build_allowed=substrate_allowed,
@@ -255,7 +264,7 @@ def render_route_contract(route: ExecutionRoute) -> str:
         f"- confidence: {route.confidence}\n"
         f"- rationale: {route.rationale}\n"
         f"- experiment_loop_allowed: {str(route.experiment_loop_allowed).lower()}\n"
-        f"- ztare_allowed: {str(route.ztare_allowed).lower()}\n"
+        f"- tenant_loop_allowed: {str(route.tenant_loop_allowed).lower()}\n"
         f"- artifact_build_allowed: {str(route.artifact_build_allowed).lower()}\n"
         f"- substrate_build_allowed: {str(route.substrate_build_allowed).lower()}\n"
         f"- live_api_allowed: {str(route.live_api_allowed).lower()}\n"

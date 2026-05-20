@@ -1,7 +1,7 @@
 # RD-1.12 iter-to-action policy (2026-05-02)
 #
 # Maps "what just happened in the iter loop" → "what the Research Director
-# should do next". Loaded by src/ztare/role_extensions/iter_action_policy.py
+# should do next". Loaded by cognitive_firm.role_extensions.iter_action_policy
 # at daemon-tick time. Policy is hot-reloadable: edit this file, the next
 # tick picks up changes.
 #
@@ -30,11 +30,8 @@
 #   escalate_to_principal
 #       params: { title, body, severity }
 #
-# Every action is subject to the role's USD spend gate
-# (src/ztare/supervisor/spend_tracker.check_budget_allows) and agent-CLI
-# utilization gate (agent_utilization_tracker.check_utilization_allows)
-# at execution time. The policy file describes WHEN; the budget gates
-# decide IF.
+# Every action is subject to the tenant/app safety adapters available at
+# execution time. The policy file describes WHEN; safety adapters decide IF.
 
 schema_version: 1
 last_updated: "2026-05-02"
@@ -64,12 +61,12 @@ rules:
     do:
       action_kind: create_lean_cage
       params:
-        cage_dir: "ztare_proofs/cages/"
+        cage_dir: "proof_cages/"
     reason: |
       A verified axiom (per gate_harness + judge approval) becomes a Lean
       theorem cage so the claim is mechanized. RD-1.11 mandate authorizes
       this. The cage is a separate artifact track from the project's
-      workspace; it lives under ztare_proofs/.
+      workspace; it lives under proof_cages/.
 
   - id: native_route_collapse_demote
     when:

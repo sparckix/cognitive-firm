@@ -79,7 +79,7 @@ def cmd_show(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="ztare goals",
+        prog="cognitive-firm goals",
         description="List or show principal-goals (GP-132)."
     )
     sub = parser.add_subparsers(dest="cmd", required=True)

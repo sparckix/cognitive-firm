@@ -1,16 +1,8 @@
-"""Research Director role extension (GP-172).
+"""Research Director role extension.
 
-Per the Research Director mandate (`org/roles/research_director.md`,
-`research_areas/private/seams/protocol/GP-172_research_director_mform_role_seam.md`),
-the Director is responsible for verifying any quantitative claim from
-an offline sub-agent or apparatus iteration against published literature
-anchors before it enters verified_axioms.json.
-
-This module is the role's executable extension. It is NOT imported by
-autoresearch_loop or any apparatus code path. It is loaded only by the
-role's runtime — currently a Claude Code session (the human Director
-embodied as Claude); in future, an org-OS daemon process bound to the
-role definition.
+The role is responsible for checking quantitative claims against external
+anchors before they are promoted into tenant-owned verified-result ledgers.
+This module is a reference executable extension for that role.
 
 PUBLIC API
 ----------
@@ -40,8 +32,8 @@ The triangulation record is persisted to
 
 ARCHITECTURAL BOUNDARY
 ----------------------
-- Apparatus (`src/ztare/validator/autoresearch_loop.py`): substrate-
-  agnostic ZTARE loop. Does NOT call triangulate.
+- App runtime: tenant or project-specific loop. Does NOT call triangulate
+  unless its policy explicitly binds this extension.
 - Role extension (this file): substrate-aware logic the Director runs
   as part of its session work.
 - Role mandate (`org/roles/research_director.md`): markdown config the
@@ -181,7 +173,8 @@ def write_record(
         f"**Verdict**: {summary['verdict']} ({summary['n_disagreements']}/{len(summary['anchors'])} disagree)",
         f"**Generated**: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}",
         f"**Authority**: RD-1.1-TRIANGULATION (GP-172 mandate)",
-        f"**Loaded by**: Research Director role extension (src/ztare/role_extensions/research_director.py)",
+        "**Loaded by**: Research Director role extension "
+        "(cognitive_firm.role_extensions.research_director)",
         "",
         "| Anchor | x | Expected y | Predicted y | log10(ratio) | Tol (dex) | Status |",
         "|---|---|---|---|---|---|---|",
@@ -263,7 +256,7 @@ def validate_experiment_launch_contract(
     project_dir: Path | str,
     rubric_path: Path | str,
 ) -> dict[str, Any]:
-    """Validate rubric/project launch contract before recommending ZTARE.
+    """Validate rubric/project launch contract before recommending a loop run.
 
     This is the Research Director's lightweight mirror of the Makefile
     preflight. It catches the class of failure where a rubric advertises a hard

@@ -9,10 +9,11 @@ import yaml
 from pathlib import Path
 from typing import Any
 
+from cognitive_firm.common.paths import ORG_ROOT_DIR
 from cognitive_firm.orchestration.core import GoalConfig, StageDefinition, validate_stage_graph
 from cognitive_firm.orchestration.predicates import validate_predicate_schema
 
-GOAL_TYPES_DIR = Path("research_areas/private/goal_types")
+GOAL_TYPES_DIR = ORG_ROOT_DIR / "goal_types"
 
 REGISTERED_ADAPTERS = {
     "agent",

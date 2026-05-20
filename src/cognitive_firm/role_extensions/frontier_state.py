@@ -16,7 +16,7 @@ Tracks per-project:
                                     the daemon hasn't executed yet (audit trail).
   - history : list[dict]          — append-only log of state transitions.
 
-Storage: ztare_workspace/frontier_state/<project_slug>.json (atomic
+Storage: configured workspace/frontier_state/<project_slug>.json (atomic
 write via .tmp + rename). Mirrors spend_tracker + agent_utilization_tracker
 patterns so the existing rsync ownership rules apply (Tree-B, VPS-owned,
 laptop pulls read-only).
@@ -36,7 +36,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-STATE_ROOT = Path("ztare_workspace/frontier_state")
+from cognitive_firm.common.paths import WORKSPACE_DIR
+
+STATE_ROOT = WORKSPACE_DIR / "frontier_state"
 log = logging.getLogger(__name__)
 
 _VALID_SLUG_RE = re.compile(r"^[A-Za-z0-9_\-]{1,128}$")

@@ -8,7 +8,7 @@ description: >
   defined by the manager mandate.
 
 authorized_paths:
-  - "src/ztare/"
+  - "src/"
   - "projects/"
   - "research_areas/"
   - "papers/"
@@ -16,7 +16,7 @@ authorized_paths:
   - "tests/"
   - "docs/"
   - ".ip_protected/"
-  - "ztare_workspace/"
+  - "cognitive_firm_workspace/"
   - "org/roles/"                 # may propose edits with principal review
   - "org/mandates/"              # may read + propose edits
   - "org/sessions/"              # writes own session logs
@@ -45,7 +45,7 @@ budget:
 # Agent-CLI utilization caps (capacity dimension, separate from USD spend).
 # Manager is the always-on operational role; gets a higher daily cap than the
 # triggered Research Director. Warn-threshold emits Telegram push + damage
-# signal via src/ztare/supervisor/agent_utilization_tracker.py.
+# signal via the supervisor utilization tracker.
 agent_utilization:
   daily_cap_seconds: 14400         # 4 hours/day of agent-CLI wall clock
   daily_cap_output_tokens: 600000  # 600k output tokens/day

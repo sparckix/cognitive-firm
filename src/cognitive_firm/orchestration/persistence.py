@@ -18,9 +18,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
 
+from cognitive_firm.common.paths import ORG_ROOT_DIR
 from cognitive_firm.orchestration.core import GoalState, GoalStatus
 
-GOALS_ROOT = Path("research_areas/private/goals")
+GOALS_ROOT = ORG_ROOT_DIR / "goals"
 
 
 def goal_dir(slug: str) -> Path:

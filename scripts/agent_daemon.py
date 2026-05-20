@@ -31,7 +31,7 @@ engine.
 
 Prerequisites:
     1. python scripts/telegram_setup.py  (one-time)
-    2. Agent CLI installed and authenticated (`ZTARE_AGENT_CLI`, default: claude)
+    2. Agent CLI installed and authenticated (`COGNITIVE_FIRM_AGENT_CLI`, default: claude)
     3. ANTHROPIC_API_KEY / OPENAI_API_KEY in environment
 
 Usage:
@@ -62,23 +62,29 @@ from pathlib import Path
 
 # Make repo imports work
 REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "src"))
 os.chdir(REPO_ROOT)
 
-from src.cognitive_firm.orchestration.work_discovery import discover_all as discover_candidates, Candidate
-from src.cognitive_firm.orchestration.command_surface import command_surface_hint
-from src.cognitive_firm.orchestration.execution_routing import infer_execution_route, render_route_contract
-from src.cognitive_firm.orchestration.task_authorization import authorize_dispatch
-from src.cognitive_firm.orchestration.transition_log import append_transition
-from src.cognitive_firm.orchestration.daemon_continuity import (
+from cognitive_firm.orchestration.work_discovery import discover_all as discover_candidates, Candidate
+from cognitive_firm.orchestration.command_surface import command_surface_hint
+from cognitive_firm.orchestration.execution_routing import infer_execution_route, render_route_contract
+from cognitive_firm.orchestration.task_authorization import authorize_dispatch
+from cognitive_firm.orchestration.transition_log import append_transition
+from cognitive_firm.orchestration.daemon_continuity import (
     get_or_create_claude_session_id,
     note_tick as continuity_note_tick,
     write_task_checkpoint,
     read_task_checkpoint,
 )
-from src.cognitive_firm.signals.damage import emit as emit_damage, list_recent as recent_damage
-from src.cognitive_firm.sessions.enforce import ensure_session, require_no_conflict
-from src.cognitive_firm.signals.autoemit import check_mandate_drift
+from cognitive_firm.orchestration.runtime_adapters import (
+    COGNITIVE_FIRM_DAEMON_RUNTIME,
+    RuntimeEvent,
+    record_runtime_event,
+)
+from cognitive_firm.signals.damage import emit as emit_damage, list_recent as recent_damage
+from cognitive_firm.sessions.enforce import ensure_session, require_no_conflict
+from cognitive_firm.signals.autoemit import check_mandate_drift
+from cognitive_firm.common.paths import WORKSPACE_DIR
 
 logging.basicConfig(
     level=logging.INFO,
@@ -99,17 +105,39 @@ IDLE_TICK_INTERVAL = 1200    # 20 min; ~3 ticks/hr
 MANDATE_PATH = REPO_ROOT / "org" / "mandates" / "manager_mandate.md"
 MAX_TASK_DURATION = 3600  # 1 hour max per task
 PROPOSAL_TIMEOUT = 1800  # 30 min to wait for principal approval
-GATES_PENDING_DIR = REPO_ROOT / "ztare_workspace" / "gates" / "pending"
-GATES_RESOLVED_DIR = REPO_ROOT / "ztare_workspace" / "gates" / "resolved"
+GATES_PENDING_DIR = WORKSPACE_DIR / "gates" / "pending"
+GATES_RESOLVED_DIR = WORKSPACE_DIR / "gates" / "resolved"
 GATE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 AGENT_ADAPTERS = ("claude_print", "codex_exec")
+
+
+def _env_first(*names: str, default: str | None = None) -> str | None:
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return default
+
+
+def _daemon_external_run_id(role_id: str, session_id: str, candidate: Candidate) -> str:
+    """Stable runtime id for one daemon-dispatched unit of work."""
+    return f"{role_id}:{session_id}:{_candidate_subject(candidate)}"
+
+
+def _record_daemon_runtime_event(event: RuntimeEvent) -> dict | None:
+    """Best-effort projection of the daemon runtime into canonical run rows."""
+    try:
+        return record_runtime_event(event)
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"daemon runtime projection failed (non-fatal): {exc}")
+        return None
 
 
 # ── Telegram helpers ──────────────────────────────────────────────────
 
 def telegram_available() -> bool:
     try:
-        from src.cognitive_firm.notifications.telegram import _load_creds
+        from cognitive_firm.notifications.telegram import _load_creds
         _load_creds()
         return True
     except Exception:
@@ -120,7 +148,7 @@ def send_telegram(message: str, priority: str = "normal", gate_id: Optional[str]
     """Push to Telegram. If gate_id is provided, render APPROVE/SKIP/STOP
     inline buttons that the principal can tap (vs typing the command)."""
     try:
-        from src.cognitive_firm.notifications.telegram import push_notification
+        from cognitive_firm.notifications.telegram import push_notification
         buttons = None
         if gate_id:
             # Compact callback_data: action:gate_id_short (≤64 bytes total).
@@ -144,7 +172,7 @@ def send_telegram(message: str, priority: str = "normal", gate_id: Optional[str]
 
 def poll_telegram() -> list[dict]:
     try:
-        from src.cognitive_firm.notifications.telegram import authorized_messages, poll_inbound
+        from cognitive_firm.notifications.telegram import authorized_messages, poll_inbound
         messages = poll_inbound(consume=True)
         for msg in messages:
             if not getattr(msg, "authorized", False):
@@ -206,7 +234,7 @@ def _verify_post_tick_engagement(*, start_ts: float,
     """RD-1.12 post-tick verification (2026-05-02).
 
     True iff at least one of these advanced after start_ts:
-      - ztare_workspace/transitions.jsonl gained a new row (any new audit)
+      - the workspace transitions log gained a new row (any new audit)
       - frontier_state.<slug>.json updated_utc is past start_ts
       - frontier_state.<slug>.json history gained a new row
 
@@ -214,7 +242,7 @@ def _verify_post_tick_engagement(*, start_ts: float,
     agent returns successfully but actually did nothing.
     """
     advanced = False
-    transitions_path = REPO_ROOT / "ztare_workspace" / "transitions.jsonl"
+    transitions_path = WORKSPACE_DIR / "transitions.jsonl"
     if transitions_path.exists():
         try:
             mtime = transitions_path.stat().st_mtime
@@ -224,7 +252,7 @@ def _verify_post_tick_engagement(*, start_ts: float,
             pass
     if not advanced and project_slug:
         try:
-            state_path = REPO_ROOT / "ztare_workspace" / "frontier_state" / f"{project_slug}.json"
+            state_path = WORKSPACE_DIR / "frontier_state" / f"{project_slug}.json"
             if state_path.exists():
                 if state_path.stat().st_mtime > start_ts:
                     advanced = True
@@ -248,7 +276,7 @@ def _proactive_rd_candidates() -> list[Candidate]:
 
     # Source 1: pending_actions queues
     try:
-        from src.cognitive_firm.role_extensions.frontier_state import (
+        from cognitive_firm.role_extensions.frontier_state import (
             STATE_ROOT, load_state, _validate_slug,
         )
         if STATE_ROOT.exists():
@@ -269,7 +297,7 @@ def _proactive_rd_candidates() -> list[Candidate]:
                         intent=(
                             f"Drain {n_pending} pending action(s) for "
                             f"`{slug}` per iter_action_policy. Run: "
-                            f"`python -m src.cognitive_firm.role_extensions.iter_action_executor "
+                            f"`python -m cognitive_firm.role_extensions.iter_action_executor "
                             f"--project {slug} --drain`. "
                             f"After draining, advance the frontier or escalate."
                         ),
@@ -344,7 +372,7 @@ def _proactive_rd_candidates() -> list[Candidate]:
                         intent=(
                             f"Live co-drive review of `{proj.name}` "
                             f"(eval_history.jsonl modified {age_h:.1f}h ago). "
-                            f"Run: `python -m src.cognitive_firm.role_extensions.frontier_runner` "
+                            f"Run: `python -m cognitive_firm.role_extensions.frontier_runner` "
                             f"to scan for new events; then drain queued actions; "
                             f"if no actions queued, write a co-drive note to "
                             f"`projects/{proj.name}/workspace/frontier_co_drive_log.md` "
@@ -399,7 +427,8 @@ def build_agent_command(
     Codex: `--ask-for-approval never` (already set). Claude Code:
     `--permission-mode acceptEdits` (auto-accepts file edits; risky ops
     still escalate via the org/signals/damage/ channel rather than via the
-    CLI's permission prompt). Override via env ZTARE_CLAUDE_PERMISSION_MODE.
+    CLI's permission prompt). Override via env
+    COGNITIVE_FIRM_CLAUDE_PERMISSION_MODE.
 
     Cross-tick continuity (2026-05-05): when `claude_session_id` is provided
     and the adapter is claude_print, the command uses `--session-id` on
@@ -409,7 +438,10 @@ def build_agent_command(
     support resume; the codex_exec branch ignores the session params.
     """
     if adapter == "claude_print":
-        permission_mode = os.environ.get("ZTARE_CLAUDE_PERMISSION_MODE", "acceptEdits")
+        permission_mode = _env_first(
+            "COGNITIVE_FIRM_CLAUDE_PERMISSION_MODE",
+            default="acceptEdits",
+        )
         cmd = [agent_cli, "--print", "--permission-mode", permission_mode]
         if claude_session_id:
             if claude_session_is_new:
@@ -451,8 +483,8 @@ def _format_bootstrap_chain_for_prompt(*, role_id: str) -> str:
         f"Read org/roles/{role_id}.yaml for your durable role contract.\n"
         f"Read org/mandates/{role_id}_mandate.md for your scope and authorization.\n"
         "Read org/preferences/principal.yaml for the principal's current research-taste routing preferences.\n"
-        "Read docs/guides/org_runtime_quickstart.md if you need the role-daemon boot model.\n"
-        "Read docs/internal/agent_task_discipline_map.md for procedural requirements."
+        "Read docs/first-30-minutes.md if you need the role-daemon boot model.\n"
+        "Read docs/PROTOCOLS.md for procedural requirements."
     )
     if not manifest_path.exists():
         return fallback
@@ -624,10 +656,9 @@ IMPORTANT:
 - If the route is `route_only`, decide the route and create the next task; do not execute a live run.
 - If the route is `artifact_build` and you are a director/reviewer role, write the artifact_build_spec.md and a handoff task for an authorized builder role; do not silently edit implementation artifacts.
 - If the route is `experiment_loop`, run the implementation-specific preflight substrate audit first; do not launch if the contract/gates are unstable.
-- Conflict resolution: see `docs/internal/agent_conflict_resolution_table.md` (canonical priority is in `org/bootstrap_manifest.yaml` under `conflict_resolution_priority`). When in doubt, the role yaml `forbidden_paths` typed contract wins; AGENTS.md §0–§5b load-bearing rules win over §6+ reference sections; role mandate wins over task description for SCOPE; task description wins for SUBJECT MATTER.
-- Follow the experiment cookbook (docs/guides/experiment_cookbook.md)
+- Conflict resolution: canonical priority is in `org/bootstrap_manifest.yaml` under `conflict_resolution_priority`. When in doubt, the role yaml `forbidden_paths` typed contract wins; AGENTS.md §0–§5b load-bearing rules win over §6+ reference sections; role mandate wins over task description for SCOPE; task description wins for SUBJECT MATTER.
+- For experiment-style work, follow the project charter and `docs/field-validation-pilot.md`
 - Stay within the role's authorized paths and forbidden paths
-- Run validate_agent_task_discipline.py post <task_type> before declaring done
 - Record all findings in EXPERIMENT_TRACK_RECORD.md
 - Push-notify via telegram on completion or if you need a decision
 """
@@ -767,7 +798,7 @@ def pre_tick_checks(
     # ── Orbit chat — process pending principal messages for THIS role ──
     # Cheap-tier subscription LLM, idempotent (no reply if no pending).
     try:
-        from src.cognitive_firm.orchestration.chat_handler import generate_and_store_reply
+        from cognitive_firm.orchestration.chat_handler import generate_and_store_reply
         reply = generate_and_store_reply(role_id)
         if reply:
             warnings.append(
@@ -1143,7 +1174,7 @@ def _claim_candidate_task(
     goal_id = str(candidate.metadata.get("goal_id") or "")
     if not goal_id:
         return None
-    from src.cognitive_firm.orchestration.goals_inbox import claim_goal
+    from cognitive_firm.orchestration.goals_inbox import claim_goal
 
     claimed = claim_goal(
         goal_id=goal_id,
@@ -1169,7 +1200,7 @@ def _close_candidate_task(
             message_id = str(candidate.metadata.get("message_id") or "")
             to_role = str(candidate.metadata.get("to_role") or "")
             if message_id and to_role:
-                from src.cognitive_firm.orchestration.agent_channels import update_agent_message_status
+                from cognitive_firm.orchestration.agent_channels import update_agent_message_status
 
                 update_agent_message_status(
                     role_id=to_role,
@@ -1182,7 +1213,7 @@ def _close_candidate_task(
     goal_id = str(candidate.metadata.get("goal_id") or "")
     if not goal_id:
         return
-    from src.cognitive_firm.orchestration.goals_inbox import mark_goal_blocked, mark_goal_done
+    from cognitive_firm.orchestration.goals_inbox import mark_goal_blocked, mark_goal_done
 
     summary = (
         result.get("stdout")
@@ -1255,8 +1286,8 @@ def tick(
     # even if the agent is busy on a different project.
     if role_id == "research_director":
         try:
-            from src.cognitive_firm.role_extensions.frontier_runner import scan_all_active_projects
-            from src.cognitive_firm.role_extensions.iter_action_policy import dispatch_event
+            from cognitive_firm.role_extensions.frontier_runner import scan_all_active_projects
+            from cognitive_firm.role_extensions.iter_action_policy import dispatch_event
             events_by_project = scan_all_active_projects()
             n_events = sum(len(v) for v in events_by_project.values())
             n_queued = 0
@@ -1471,6 +1502,31 @@ def tick(
             payload={"error": str(e)},
         )
         return False
+    daemon_external_run_id = _daemon_external_run_id(role_id, _session_id(session), top)
+    runtime_start = _record_daemon_runtime_event(
+        RuntimeEvent(
+            runtime_name=COGNITIVE_FIRM_DAEMON_RUNTIME,
+            external_run_id=daemon_external_run_id,
+            kind="started",
+            owner_role=f"role.{role_id}",
+            actor="agent_daemon",
+            objective=top.intent,
+            project_id=(top.metadata or {}).get("project_slug"),
+        )
+    )
+    _record_daemon_runtime_event(
+        RuntimeEvent(
+            runtime_name=COGNITIVE_FIRM_DAEMON_RUNTIME,
+            external_run_id=daemon_external_run_id,
+            kind="checkpointed",
+            owner_role=f"role.{role_id}",
+            actor="agent_daemon",
+            step_id="dispatch_agent_cli",
+            checkpoint_status="started",
+            summary="daemon dispatched configured role-bearing agent runtime",
+            payload_ref=str(runtime_start.get("cognitive_run_id")) if runtime_start else None,
+        )
+    )
     result = execute_task(
         _execution_prompt(top),
         role_id=role_id,
@@ -1534,6 +1590,34 @@ def tick(
 
     # 6. Record
     log.info(f"Task complete. Success: {result['success']}")
+    _record_daemon_runtime_event(
+        RuntimeEvent(
+            runtime_name=COGNITIVE_FIRM_DAEMON_RUNTIME,
+            external_run_id=daemon_external_run_id,
+            kind="checkpointed",
+            owner_role=f"role.{role_id}",
+            actor="agent_daemon",
+            step_id="dispatch_agent_cli_result",
+            checkpoint_status="completed" if result["success"] else "failed",
+            summary=(
+                "agent CLI completed successfully"
+                if result["success"]
+                else str(result.get("error") or result.get("stderr") or "agent CLI failed")[:500]
+            ),
+            payload_ref="workspace/agent_daemon_log.jsonl",
+        )
+    )
+    _record_daemon_runtime_event(
+        RuntimeEvent(
+            runtime_name=COGNITIVE_FIRM_DAEMON_RUNTIME,
+            external_run_id=daemon_external_run_id,
+            kind="state_changed",
+            owner_role=f"role.{role_id}",
+            actor="agent_daemon",
+            state="completed" if result["success"] else "failed",
+            failure_reason=None if result["success"] else str(result.get("error") or result.get("stderr") or "")[:500],
+        )
+    )
     append_transition(
         event="daemon.task.completed" if result["success"] else "daemon.task.failed",
         actor="agent_daemon",
@@ -1604,7 +1688,7 @@ def main():
     parser.add_argument("--unattended", action="store_true",
                         help="Execute in-scope discovered work without Telegram approval")
     # Honor principal.yaml's preferred_agent_cli when no explicit env/CLI override.
-    # principal.yaml > ZTARE_AGENT_CLI env > 'claude' fallback.
+    # principal.yaml > COGNITIVE_FIRM_AGENT_CLI env > 'claude' fallback.
     def _principal_pref_agent_cli() -> str:
         try:
             import yaml
@@ -1622,17 +1706,17 @@ def main():
 
     parser.add_argument(
         "--member-id",
-        default=os.environ.get("ZTARE_MEMBER_ID", "claude"),
-        help="Persistent member/runtime identity recorded in sessions (default: ZTARE_MEMBER_ID or claude)",
+        default=_env_first("COGNITIVE_FIRM_MEMBER_ID", default="claude"),
+        help="Persistent member/runtime identity recorded in sessions (default: COGNITIVE_FIRM_MEMBER_ID or claude)",
     )
     parser.add_argument(
         "--agent-cli",
-        default=os.environ.get("ZTARE_AGENT_CLI", _principal_pref_agent_cli()),
-        help="Agent runtime command (default: ZTARE_AGENT_CLI > org/preferences/principal.yaml::preferences.preferred_agent_cli > claude)",
+        default=_env_first("COGNITIVE_FIRM_AGENT_CLI", default=_principal_pref_agent_cli()),
+        help="Agent runtime command (default: COGNITIVE_FIRM_AGENT_CLI > org/preferences/principal.yaml::preferences.preferred_agent_cli > claude)",
     )
     parser.add_argument(
         "--agent-adapter",
-        default=os.environ.get("ZTARE_AGENT_ADAPTER", "auto"),
+        default=_env_first("COGNITIVE_FIRM_AGENT_ADAPTER", default="auto"),
         choices=["auto", *AGENT_ADAPTERS],
         help="Runtime adapter: auto, claude_print, or codex_exec",
     )

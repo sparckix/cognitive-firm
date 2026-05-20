@@ -102,7 +102,7 @@ OPEN_GAPS: tuple[ExternalRunKernelGap, ...] = (
         severity="medium",
         current_state=(
             "A kernel-owned registry primitive now exists and the gp163d local monitor"
-            " writes contract/state/event records under ztare_workspace/external_runs."
+            " writes contract/state/event records under the configured workspace/external_runs."
             " But project launchers do not yet register runs generically at launch time,"
             " and other external-run paths do not automatically adopt it."
         ),

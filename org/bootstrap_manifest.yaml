@@ -8,8 +8,7 @@
 # Verified by `scripts/org_role_preflight.py` — all `required_reads` paths
 # must exist or preflight fails loud.
 #
-# Audience: internal engineering. Reference:
-# `docs/internal/agent_bootstrap_chain_2026-04-30.md`.
+# Audience: adopters running role daemons from this checkout or an overlay.
 
 schema_version: 1
 last_updated: "2026-04-30"
@@ -39,11 +38,11 @@ required_reads:
 
   - path: "analytics/RD_TICK_BRIEF.md"
     only_for_roles: ["research_director"]
-    purpose: "Auto-regenerated tick brief — monoculture flag + recent catches + open PLs + predispatch checklist. Produced by `scripts/rd_tick_brief.py` via `pre_tick_scripts` hook below. Read FIRST every research_director tick (the brief lists which patterns are over-deployed and which blind-spot patterns to deploy next)."
+    purpose: "Auto-regenerated generic tick brief. Produced by `scripts/rd_tick_brief.py` via `pre_tick_scripts` below. Read at the start of every research_director tick."
     optional_for_roles: ["manager", "engineer", "reviewer", "research_scientist", "skeptic", "product_manager"]
     fallback_when_absent: "If absent, the role is not research_director or the pre_tick_scripts hook didn't fire; agents in non-RD roles ignore."
 
-# ── Pre-tick scripts (added 2026-05-09 per RD-discipline kernel-tick hook) ───
+# ── Pre-tick scripts ─────────────────────────────────────────────────
 #
 # Scripts run BEFORE required_reads are formatted. Output (stdout) is
 # written to `output_to`; `required_reads` then references the output
@@ -52,8 +51,8 @@ required_reads:
 # tick, not for manager / engineer / reviewer ticks.
 #
 # `failure_action`:
-#   - "block": exit code != 0 aborts the tick (e.g. monoculture-flag firing).
-#   - "warn":  exit code != 0 logged but tick proceeds (default).
+#   - "block": exit code != 0 aborts the tick.
+#   - "warn":  exit code != 0 is logged but the tick proceeds (default).
 #   - "ignore": exit code never blocks.
 #
 # Implementation: `scripts/agent_daemon.py::_format_bootstrap_chain`
@@ -65,10 +64,8 @@ pre_tick_scripts:
     only_for_roles: ["research_director"]
     output_to: "analytics/RD_TICK_BRIEF.md"
     args: ["--short"]
-    failure_action: "warn"   # exit 1 (monoculture firing) is informational
-                              # not blocking; agent reads the brief and acts.
-                              # Set to "block" for stricter VPS-agent gates.
-    purpose: "Surface monoculture flag + blind-spot patterns + recent catches + open PLs + predispatch checklist before each RD tick. Forces RD discipline at the kernel layer instead of trusting the agent to self-enforce."
+    failure_action: "warn"
+    purpose: "Surface role scope, recent workspace state, and optional forecast/action-impact summaries before each research_director tick."
 
 # ── Conditional reads ────────────────────────────────────────────────
 #
@@ -76,35 +73,28 @@ pre_tick_scripts:
 # tick — referenced from the bootstrap prompt's IMPORTANT block.
 
 conditional_reads:
-  - path: "docs/guides/org_runtime_quickstart.md"
-    purpose: "Role-daemon boot model. Read if the agent needs the multi-rail context (executive inbox / A2A / Telegram)."
+  - path: "docs/protocols/kernel-service.md"
+    purpose: "Read before wiring app surfaces or scripts to typed kernel mutations."
 
-  - path: "docs/internal/agent_task_discipline_map.md"
-    purpose: "Procedural requirements: closure rows, validate_agent_task_discipline.py, escalation rules."
+  - path: "docs/protocols/actor-membership.md"
+    purpose: "Read before changing actor, role, tenant, or project authority."
 
-  - path: "docs/guides/experiment_cookbook.md"
-    purpose: "Experiment discipline. Read before launching any experimental loop."
+  - path: "docs/protocols/a2h.md"
+    purpose: "Read when designing agent-to-human work requests or handoff paths."
 
-  - path: "research_areas/EXPERIMENT_TRACK_RECORD.md"
-    purpose: "Closure-row destination. Append E-row + optional F-row when an experiment closes."
+  - path: "docs/protocols/h2a.md"
+    purpose: "Read when designing human-to-agent instruction and attestation paths."
 
-  - path: "docs/internal/agent_conflict_resolution_table.md"
-    purpose: "Canonical resolution table for AGENTS.md vs mandate, yaml vs prose, preferences vs mandate, etc."
+  - path: "docs/protocols/forecast-market.md"
+    purpose: "Read when consuming or adapting forecast-market summaries."
 
-  - path: "docs/internal/human_agent_flow_map_2026-04-30.md"
-    purpose: "End-to-end NL → typed gate → audit flow reference. Read when designing any new approval/escalation path."
-
-  - path: "analytics/queries/ztare_knowledge_graph.json"
-    purpose: "GP-216d artifact-network knowledge graph (354 nodes / 623 edges across seams + arch maps + ops + gates). Do NOT load the JSON on cold start — query it via `python scripts/query_graph.py --depends-on <seam>` / `--instantiates <op_id>` / `--hubs` / `--orphans` / `--connects A B`. Drift-validated by `make validate-knowledge-graph`. Use this to discover what depends on / instantiates / connects-to a seam, op, or gate BEFORE proposing a new artifact."
-
-  - path: "analytics/queries/decision_history_calibration.md"
-    purpose: "GP-217 empirical evidence base for role mandate scope. Read when proposing edits to `org/roles/*.yaml` `authorized_paths` or `org/mandates/*_mandate.md`; cite F-row counts as defense for any broadening. Re-runnable via `python scripts/mine_decision_history.py`."
+  - path: "docs/protocols/action-impact.md"
+    purpose: "Read when consuming or adapting measured action-impact summaries."
 
 # ── Conflict resolution priority ─────────────────────────────────────
 #
-# When two sources disagree, the higher-priority source wins. Matches
-# `docs/internal/agent_conflict_resolution_table.md`. Listed top-down,
-# stricter-wins-on-ties.
+# When two sources disagree, the higher-priority source wins. Listed
+# top-down, stricter-wins-on-ties.
 
 conflict_resolution_priority:
   - "role yaml `forbidden_paths` (typed hard veto)"

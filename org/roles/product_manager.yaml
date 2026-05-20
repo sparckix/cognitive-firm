@@ -2,13 +2,13 @@ schema_version: 1
 role_id: product_manager
 role_class: manager
 description: >
-  Product Manager of ZTARE Research Co. Owns the apparatus catalog
-  health: reflexive primitive ROI, seam corpus health, miner-script
-  ROI, decision-history calibration. Periodic reviewer who decides
-  what gets retired, promoted, or kept-on-watch. Distinct from
-  research_director (who owns scientific scope) and manager
-  (who owns runtime coordination) — PM owns "is the apparatus
-  delivering, or just accreting?"
+  Product manager for the tenant apparatus. Owns catalog health:
+  reflexive primitive ROI, seam or decision corpus health, miner-script
+  ROI, and decision-history calibration. Periodic reviewer who decides
+  what gets retired, promoted, or kept on watch. Distinct from
+  research_director (who owns research scope) and manager
+  (who owns runtime coordination), PM owns "is the apparatus delivering,
+  or just accreting?"
 
   Reads the four ROI scorecards on cadence:
     - reflexive_audit_report.json (GP-102, P14D)
@@ -30,8 +30,8 @@ description: >
   retirement discipline. The PM role is the explicit owner.
 
 authorized_paths:
-  - "research_areas/private/seams/"     # promote/close seam status fields
-  - "research_areas/private/seams/archive/"   # move retired seams here
+  - "tenant_overlay/seams/"     # promote/close seam status fields
+  - "tenant_overlay/seams/archive/"   # move retired seams here
   - "scripts/mining/archive/"           # move retired miners here
   - "analytics/queries/"                # write ROI-related artifacts
   - "org/sessions/"

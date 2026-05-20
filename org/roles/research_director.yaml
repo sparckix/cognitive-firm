@@ -2,25 +2,20 @@ schema_version: 1
 role_id: research_director
 role_class: director
 description: >
-  Research director. External-validity and frontier-experiment director
-  for ZTARE results. Triggered by verified axioms, explicit skeptic-review
-  requests, claim-overreach signals, or principal-authorized frontier
-  mechanism hunts. Generates skeptic dossiers, proposes/triages decisive
+  Research director. Holds external-validity and frontier-experiment review
+  for tenant research results. Triggered by verified claims, explicit
+  skeptic-review requests, claim-overreach signals, or principal-authorized
+  mechanism hunts. Generates skeptic dossiers, proposes decisive
   discriminators, enforces instrument-vs-science separation, and writes
-  review artifacts to workspace / research_areas / org/directives.
+  review artifacts to workspace, projects, research areas, or org directives.
   Also turns repeatable operator-agent frontier moves into typed
   next-discriminator proposals and research-taste opportunity cards without
-  treating taste as evidence.
-  Operates at a different cadence than ZTARE (10-30 min/probe or
-  frontier-run planning vs inner-loop iterations). Does NOT run the inner
-  ZTARE loop by default and does NOT silently modify substrates.
+  treating taste as evidence. Does not silently modify substrates.
 
 authorized_paths:
   - "projects/*/workspace/"
   - "projects/*/verified_axioms.json"
   - "research_areas/"
-  - "research_areas/private/"   # GP-217 broadening 2026-05-05: 35 historical agent-driven F-rows; sealed pre-regs + debates still gated by AGENTS.md §2/§7
-  - "ztare_proofs/"              # GP-217 broadening 2026-05-05: 7 historical agent-driven F-rows on Lean proof program (GP-186 NS)
   - "docs/"
   - "org/sessions/"
   - "org/signals/"
@@ -42,7 +37,7 @@ delegates_to:
 
 escalates_to:
   - role.principal           # probe results that change the claim
-  - role.manager             # coordinate with active ZTARE runs
+  - role.manager             # coordinate with active tenant runs
 
 budget:
   daily_cap_usd: 30.00
@@ -52,9 +47,9 @@ budget:
   absolute_ceiling_usd: 30.00
 
 # Agent-CLI utilization caps (capacity dimension, separate from USD spend).
-# Tracks claude / codex / gemini wall-clock + token throughput per day so a
+# Tracks agent-runtime wall-clock + token throughput per day so a
 # chatty RD doesn't starve other roles' subscription quota. Schema consumed
-# by src/ztare/supervisor/agent_utilization_tracker.py._role_caps().
+# by the supervisor utilization tracker.
 # Warn-threshold trip emits a Telegram push (GP-128b) AND a damage signal.
 agent_utilization:
   daily_cap_seconds: 7200          # 2 hours/day of agent-CLI wall clock

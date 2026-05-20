@@ -2,12 +2,12 @@
 
 Imperative side of the iter-action policy: takes a pending action from
 frontier_state.pending_actions and actually mutates the world. Each
-action passes through THREE non-negotiable safety rails before it
+action passes through local safety rails before it
 runs:
 
-  1. USD spend gate     — src.cognitive_firm.supervisor.spend_tracker.check_budget_allows
-  2. Agent-CLI util gate — src.cognitive_firm.supervisor.agent_utilization_tracker.check_utilization_allows
-  3. Damage-signal emit  — every mutation writes to org/signals/damage/
+  1. Budget gate adapter, if the tenant provides one
+  2. Agent-utilization gate adapter, if the tenant provides one
+  3. Damage-signal emit — every mutation writes to org/signals/damage/
 
 If any safety rail rejects the action, it's logged to history with
 status="blocked_by_safety_rail" and escalated to principal via Telegram
@@ -34,9 +34,9 @@ Each handler returns an outcome dict for the audit trail:
     }
 
 Two CLI entry points (so the agent can invoke from Bash):
-    python -m src.cognitive_firm.role_extensions.iter_action_executor \
+    python -m cognitive_firm.role_extensions.iter_action_executor \
         --project <slug> --drain
-    python -m src.cognitive_firm.role_extensions.iter_action_executor \
+    python -m cognitive_firm.role_extensions.iter_action_executor \
         --project <slug> --action-id <id>
 """
 from __future__ import annotations
@@ -68,7 +68,7 @@ def _check_safety_rails(action: dict, *, role_id: str = "research_director") -> 
     # USD gate
     if estimated_cost > 0:
         try:
-            from cognitive_firm.supervisor.spend_tracker import check_budget_allows
+            from cognitive_firm.safety.budget_gate import check_budget_allows
             allowed = check_budget_allows(
                 estimated_cost_usd=estimated_cost,
                 action=action.get("action_kind") or "<unknown>",
@@ -82,7 +82,7 @@ def _check_safety_rails(action: dict, *, role_id: str = "research_director") -> 
     # Agent utilization gate
     if estimated_seconds > 0:
         try:
-            from cognitive_firm.supervisor.agent_utilization_tracker import (
+            from cognitive_firm.safety.agent_utilization import (
                 check_utilization_allows,
             )
             ok, reasons = check_utilization_allows(
@@ -159,7 +159,7 @@ def _handle_create_lean_cage(action: dict) -> dict:
     proof scaffolding belongs in a separate authoring pass; this writes
     the cage skeleton + axiom statement for the operator to fill in."""
     params = action.get("params", {})
-    cage_dir = Path(params.get("cage_dir") or "ztare_proofs/cages")
+    cage_dir = Path(params.get("cage_dir") or "proof_cages")
     cage_dir.mkdir(parents=True, exist_ok=True)
     label = ((action.get("from_event") or {}).get("axiom_label")
              or "unnamed_axiom")

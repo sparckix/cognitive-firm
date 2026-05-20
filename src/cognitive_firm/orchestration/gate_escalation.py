@@ -11,7 +11,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-INBOX_DIR = Path("ztare_workspace/gates/pending")
+from cognitive_firm.common.paths import WORKSPACE_DIR
+
+INBOX_DIR = WORKSPACE_DIR / "gates" / "pending"
 
 
 def write_gate_escalation(

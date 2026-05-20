@@ -2,7 +2,7 @@
 
 This is not an MCP replacement. MCP exposes tools/context to an LLM host.
 This module records durable communications between role-bearing offices
-inside the ZTARE org runtime. External A2A/ACP/MCP adapters can project into
+inside a local org runtime. External A2A/ACP/MCP adapters can project into
 or out of this channel, but the local governance envelope remains canonical.
 """
 

@@ -2,14 +2,13 @@
 
 Each role in org/roles/ has a corresponding extension module here that
 implements the role's procedural duties as callable functions. The
-extensions are NOT imported by autoresearch_loop or any other apparatus
-code path; they are loaded ONLY by the role's runtime (today: a Claude
-Code session; in future: an org-OS daemon process).
+extensions are loaded by a role runtime or app adapter, not by the kernel's
+core mutation paths.
 
-This separation preserves the apparatus / role boundary:
-  - apparatus = substrate-agnostic ZTARE loop that runs on any project
-  - role extensions = per-role logic (Research Director triangulation,
-    Skeptic adversarial probes, Inverter forms, etc.)
+This separation preserves the app / role boundary:
+  - app runtime = tenant or project-specific execution loop
+  - role extensions = per-role logic such as triangulation, adversarial
+    probes, or inversion forms
   - mandates (org/roles/<role>.md) = the role's config / procedural rules
   - rubrics (rubrics/<project>.json) = per-substrate data the role reads
 

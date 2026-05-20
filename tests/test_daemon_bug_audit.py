@@ -95,7 +95,7 @@ class TestScopeFilter(unittest.TestCase):
         self.assertTrue(self.is_in_scope(c, "role.self_recursive_orchestrator"))
 
     def test_sro_principal_goal_passes(self):
-        # Even if intent doesn't mention ztare_on_ztare, principal-goal source passes
+        # Even if intent doesn't mention the recursive-org project, principal-goal source passes.
         c = self._cand(source="principal-goal",
                        intent="execute principal goal: sro_v3_first_run")
         self.assertTrue(self.is_in_scope(c, "role.self_recursive_orchestrator"))
@@ -104,9 +104,9 @@ class TestScopeFilter(unittest.TestCase):
         c = self._cand(source="agent-channel", intent="msg from manager")
         self.assertTrue(self.is_in_scope(c, "role.self_recursive_orchestrator"))
 
-    def test_sro_text_match_ztare_on_ztare(self):
+    def test_sro_text_match_recursive_org_review(self):
         c = self._cand(source="TODO-scan",
-                       intent="ZTARE_on_ZTARE v3 needs eigenquestion review")
+                       intent="recursive org review needs eigenquestion review")
         self.assertTrue(self.is_in_scope(c, "role.self_recursive_orchestrator"))
 
     def test_sro_unrelated_todo_filtered(self):
@@ -155,11 +155,11 @@ class TestSubstratePortfolio(unittest.TestCase):
             fp.write(textwrap.dedent("""
                 schema_version: 1
                 members:
-                  - slug: ztare_on_ztare_v2
+                  - slug: recursive_org_v2
                     eigenquestion_summary: test
                     primary_mechanism_family: foo
                     scaffolded: true
-                  - slug: ztare_on_ztare_v3
+                  - slug: recursive_org_v3
                     eigenquestion_summary: test2
                     scaffolded: false
             """))
@@ -167,7 +167,7 @@ class TestSubstratePortfolio(unittest.TestCase):
         try:
             members = load_registry(tmp_path)
             self.assertEqual(len(members), 2)
-            self.assertEqual(members[0]["slug"], "ztare_on_ztare_v2")
+            self.assertEqual(members[0]["slug"], "recursive_org_v2")
             self.assertTrue(members[0]["scaffolded"])
             self.assertFalse(members[1]["scaffolded"])
         finally:
