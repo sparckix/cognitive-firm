@@ -75,7 +75,7 @@ def main() -> int:
     _print("STEP 1 — Create the bot")
     _print("-" * 70)
     _print("Open Telegram, search for @BotFather, send /newbot.")
-    _print("Pick a name (anything) and a username ending in 'bot' (e.g. ztare_manager_bot).")
+    _print("Pick a name and a username ending in 'bot' (for example, org_manager_bot).")
     _print("@BotFather will reply with a token like '123456789:AABBCCDD...'")
     _print()
     token = input("Paste the bot token here: ").strip()

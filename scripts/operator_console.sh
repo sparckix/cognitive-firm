@@ -36,7 +36,7 @@ cd "${repo_root}"
 preflight() {
   local cli="$1"
   local missing=0
-  for path in AGENTS.md docs/guides/org_runtime_quickstart.md docs/concepts/ztare_research_company_architecture.md; do
+  for path in AGENTS.md docs/first-30-minutes.md docs/PROTOCOLS.md; do
     if [[ ! -f "${path}" ]]; then
       echo "missing required context file: ${path}" >&2
       missing=1
@@ -54,13 +54,13 @@ preflight() {
 banner() {
   local cli="$1"
   cat <<EOF
-ZTARE operator console
+cognitive-firm operator console
 repo: ${repo_root}
 agent: ${cli}
 
 This starts no daemon and runs no validator loop.
 The agent should read AGENTS.md, then use Mode A unless explicitly asked to
-enter the org runtime or ZTARE validator path.
+enter the org runtime or a tenant validator path.
 
 EOF
 }

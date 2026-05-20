@@ -165,10 +165,9 @@ def preflight(
         mandate_raw = role.get("mandate_path") or f"org/mandates/{role_id}_mandate.md"
         mandate_path = REPO_ROOT / str(mandate_raw)
         _check_exists(report, "mandate", mandate_path)
-    _check_exists(report, "org_runtime_quickstart", REPO_ROOT / "docs" / "guides" / "org_runtime_quickstart.md")
-    _check_exists(report, "task_template", REPO_ROOT / "org" / "tasks" / "templates" / "research_director_candidate_review.md")
-    _check_exists(report, "knowledge_graph", REPO_ROOT / "analytics" / "queries" / "ztare_knowledge_graph.json")
-    _check_exists(report, "knowledge_graph_query_helper", REPO_ROOT / "scripts" / "query_graph.py")
+    _check_exists(report, "first_30_minutes", REPO_ROOT / "docs" / "first-30-minutes.md")
+    _check_exists(report, "mandate_protocol", REPO_ROOT / "docs" / "protocols" / "mandate.md")
+    _check_exists(report, "runtime_adapter_protocol", REPO_ROOT / "docs" / "protocols" / "runtime-adapters.md")
 
     prefs_path = REPO_ROOT / "org" / "preferences" / "principal.yaml"
     _check_exists(report, "principal_preferences", prefs_path)
@@ -186,19 +185,11 @@ def preflight(
         except Exception as exc:  # noqa: BLE001
             report["errors"].append(f"principal_preferences_parse_failed: {exc}")
 
-    if role_id == "research_director":
-        required = [
-            "src/ztare/orchestrator/operator_replay_audit.py",
-            "src/ztare/orchestrator/discriminator_queue.py",
-            "src/ztare/orchestrator/research_taste.py",
-            "src/ztare/orchestrator/frontier_script_scaffold.py",
-            "src/ztare/orchestrator/promotion_guard.py",
-            "src/ztare/role_extensions/research_director.py",
-        ]
-        for rel in required:
-            _check_exists(report, f"research_director_dependency:{rel}", REPO_ROOT / rel)
-
-    cli_name = agent_cli or os.environ.get("ZTARE_AGENT_CLI") or "claude"
+    cli_name = (
+        agent_cli
+        or os.environ.get("COGNITIVE_FIRM_AGENT_CLI")
+        or "claude"
+    )
     agent_cli_path = shutil.which(cli_name)
     if agent_cli_path:
         report["checks"].append({"key": f"agent_cli:{cli_name}", "ok": True, "path": agent_cli_path})
@@ -221,7 +212,7 @@ def main() -> int:
     parser.add_argument(
         "--agent-cli",
         default=None,
-        help="Agent runtime command to check; defaults to ZTARE_AGENT_CLI or claude",
+        help="Agent runtime command to check; defaults to COGNITIVE_FIRM_AGENT_CLI or claude",
     )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()

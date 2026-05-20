@@ -1,0 +1,15 @@
+.git
+.pytest_cache
+**/__pycache__
+**/*.pyc
+.env
+org/preferences/principal.yaml
+.venv
+venv
+node_modules
+orbit/node_modules
+orbit/dist
+ztare_workspace
+cognitive_firm_workspace
+tenants/*/.git
+*.log
