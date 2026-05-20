@@ -1,35 +1,34 @@
-# `org/` — AI-Native M-Form Primitives
+# `org/` — Organizational Primitives
 
-**Seam:** GP-128 (Persistent Manager Agent / AI-Native M-Form)
-**Opened:** 2026-04-23
-
-This top-level folder houses the structural primitives for an AI-native
-organization: **roles** (persistent identity + authority), **mandates**
-(authorization scope per role), **delegation graph** (who-reports-to-whom),
+This top-level folder houses the structural primitives for an organization that
+uses persistent role offices: **roles** (identity and authority), **mandates**
+(authorization scope per role), **delegation graph** (who reports to whom),
 **tasks** (work packets), **execution routes** (how work should be handled),
-and **sessions** (per-role audit windows).
+**sessions** (per-role audit windows), and generic surfaces that tenant
+overlays can bind to project charters, evidence gaps, forecasts, and policy
+adapters.
 
 `org/` is domain-general. A travel agency, fintech startup, or scientific
-research lab should be able to reuse this skeleton. ZTARE-specific language
+research lab should be able to reuse this skeleton. Tenant-specific language
 belongs in role mandates, task bodies, project folders, or backend adapters,
 not in the core org primitive.
 
 Kernel rule: `org/` owns mechanisms, not policy. Roles, mandates, claims,
 routes, budgets, inboxes, and transitions are the stable kernel surface.
 Domain policy is loaded through roles, mandates, preferences, tasks, and
-backend adapters. If a generic primitive needs to say "science", "substrate",
-or "ZTARE" to make sense, it is probably not generic enough.
+backend adapters. If a generic primitive needs tenant-specific vocabulary to
+make sense, it is probably not generic enough.
 
-## Why this is a top-level folder (not under `research_areas/` or `supervisor/`)
+Human adopters can fork this kernel without adopting any local tenant. The
+adoption path is documented in `docs/adopting-cognitive-firm.md`; the short
+rule is to keep private roles, project content, evidence, and preferences in a
+tenant overlay while promoting only reusable mechanisms back into the kernel.
 
-Per `AGENTS.md` §4:
-- `research_areas/` = prose humans read/write (research notes, seams, specs)
-- `supervisor/` = JSON the supervisor reads/writes (program registry, manifest)
+## Why this is a top-level folder
 
-Org structure is neither. Roles are **configuration of the organization**,
-distinct from both the research corpus and the execution machinery. Placing
-them at the root makes the org primitives discoverable without burying them
-in content-addressed folders.
+Org structure is configuration of the organization, distinct from project
+content and runtime machinery. Placing it at the root makes roles, mandates,
+delegation, tasks, and sessions discoverable for humans and agents.
 
 ## Layout
 
@@ -49,6 +48,8 @@ org/
 │   ├── manager_mandate.md             # local/private
 │   └── research_director_mandate.md   # local/private
 ├── tasks/                     # work packets + execution-route frontmatter
+├── evidence_gaps/             # typed missing-evidence state
+├── human_work/                # bounded human work sessions
 └── sessions/                  # GITIGNORED: per-role audit windows
     └── <role_id>/<timestamp>/
         ├── transcript.md
@@ -63,7 +64,7 @@ org/
 Defined in `org/roles/<role_id>.yaml`. A role specifies:
 - Identity (role_id, display_name, description)
 - Classification (manager / worker / reviewer / specialist)
-- Substrates it can inhabit (Claude conversational, Claude daemon, Codex CLI, Gemini API, human)
+- Runtimes it can use (CLI agent, hosted model, daemon, human, or service)
 - Authorized / forbidden filesystem paths
 - Delegation outgoing edges (who this role may invoke)
 - Escalation outgoing edges (who this role escalates to)
@@ -71,9 +72,8 @@ Defined in `org/roles/<role_id>.yaml`. A role specifies:
 - SLA expectations and failure mode
 - Reference to the mandate document that expands the authorization
 
-A role persists indefinitely. The BODY (substrate) may come and go — a
-Claude session starts and ends, a daemon restarts — but the role
-definition is the contract that constrains all of them.
+A role persists indefinitely. A runtime may come and go, but the role
+definition is the contract that constrains every runtime acting in that role.
 
 ### 2. Mandate (authorization)
 
@@ -111,14 +111,39 @@ the organization wants done. The execution route says how it should be done:
 - `experiment_loop` — run a repeatable candidate-search loop after preflight.
 - `docs_records` — update documentation, ledgers, manuals, or public/private mirrors.
 
-These route names are intentionally generic. In this repo, `experiment_loop`
-often means the ZTARE loop and `artifact_build` may mean a scientific substrate.
-In another company, `experiment_loop` could mean a pricing A/B loop and
-`artifact_build` could mean a supplier onboarding workflow. The org layer
-should not know the domain; adapters and mandates bind the generic route to a
-local backend.
+These route names are intentionally generic. In one tenant, `experiment_loop`
+could mean a scientific candidate loop. In another company, it could mean a
+pricing A/B loop, and `artifact_build` could mean a supplier onboarding
+workflow. The org layer should not know the domain; adapters and mandates bind
+the generic route to a local backend.
 
-### 5. Filesystem State Backend (current dogfood implementation)
+### 5. Project Charter (tenant scope fidelity)
+
+Project charters are tenant/project artifacts, not public-kernel policy. The
+kernel documents the shape: core question, out-of-scope boundaries, end states,
+forecast type, inheritance, and anchor proxies. A tenant decides which projects
+need charters, which anchors are executable, and which validators can block
+dispatch.
+
+Recommended tenant path:
+
+```text
+tenants/<tenant_id>/projects/<project_id>/project_charter.md
+```
+
+See `docs/protocols/project-charter.md`.
+
+### 6. Organizational Learning Carriers
+
+Durable learning should land in a state object future roles must encounter:
+mandate updates, charter updates, evidence gaps, forecast calibration rows,
+damage signals, human work sessions, A2A obligations, artifact dependencies,
+route changes, or tenant policy adapter changes. Retrospectives and notes are
+useful, but they compound only after they alter one of these surfaces.
+
+See `docs/organizational_learning_loop.md`.
+
+### 7. Filesystem State Backend (current dogfood implementation)
 
 The org runtime is currently filesystem-backed. That is a design choice for
 inspectability and dogfood velocity, not a claim that every enterprise
@@ -130,8 +155,17 @@ The active state surfaces are:
 - `org/channels/` — role-to-role messages.
 - `org/sessions/` — session/audit windows and claims.
 - `org/signals/` — damage signals.
-- `ztare_workspace/gates/` — principal/executive decisions.
-- `ztare_workspace/transitions.jsonl` — append-only transition trail.
+- tenant workspace gates — principal/executive decisions.
+- tenant workspace transition log — append-only transition trail.
+- `org/evidence_gaps/` — missing evidence/comparator/adversarial checks.
+- `org/human_work/` — bounded human work and integration state.
+
+`cognitive_firm.orchestration.org_surface` reads across these surfaces and
+returns a tenant-neutral status brief for humans, agents, and dashboards.
+
+This checkout still contains some inherited workspace path names in code and
+examples. Treat those as adapter names, not kernel concepts. New public kernel
+docs and tools should prefer tenant-neutral names.
 
 Any daemon only sees the filesystem mounted into its process. If a task exists
 on your laptop but the daemon is running on a VPS, the VPS will not see it
@@ -150,38 +184,36 @@ Deployment choices:
 The kernel primitive is not "markdown files." The primitive is durable,
 inspectable, claimable work state. Markdown files are the current adapter.
 
-## Relationship to GP-070 (goal orchestration)
+## Relationship to Work Orchestration
 
-GP-070 tracks **work** (goals, stages, gates, closure). `org/` tracks
-**structure** (roles, mandates, delegation). These are ORTHOGONAL:
+Work orchestration tracks work items, stages, gates, and closure. `org/` tracks
+structure: roles, mandates, and delegation. These are separate:
 
-- A GP-070 goal has an `owner_role` pointing into `org/roles/`
+- A work item has an `owner_role` pointing into `org/roles/`
 - Gate signing authority per gate type is looked up via
   `org/delegation.yaml`
 - A session happens whenever a role acts, regardless of which goals
   it touches
 
-## Research Director vs. ZTARE
+## Tenant-Specific Roles
 
-The Research Director is not the ZTARE inner loop. The split is:
+The public kernel defines role and mandate mechanics. A tenant overlay decides
+which role offices exist and what domain work they perform.
 
-- **ZTARE / manager loop:** mutates candidates, scores candidates, runs gates,
-  writes telemetry, and closes experiments.
-- **Research Director:** reads durable artifacts, reconstructs the next
-  hostile discriminator, ranks candidate next moves against
-  `org/preferences/principal.yaml`, writes `next_discriminator_queue.jsonl`
-  or directives, enforces checkpoint/telemetry discipline for external
-  GPU/API runs, and escalates overclaim/instrument-risk signals.
-- **Principal:** owns taste, budget, public-claim approval, and final branch
-  closure.
+For example, one tenant might define a research director that reads durable
+artifacts, reconstructs the next hostile discriminator, ranks candidate next
+moves against `org/preferences/principal.yaml`, writes directives, enforces
+checkpoint/telemetry discipline, and escalates overclaim or instrument-risk
+signals. Another tenant might define an operations director or compliance
+reviewer with the same mandate mechanics but different policy.
 
-The operating philosophy is:
+The operating philosophy is generic:
 
 ```text
 operator <-> agent discovers a useful move
 -> artifacts record it
--> Research Director replays/ranks it
--> ZTARE or an engineer mechanizes the stable subroutine
+-> a role office replays/ranks it
+-> a tenant adapter or engineer mechanizes the stable subroutine
 ```
 
 Exploration may be manual. Durable learning should not remain manual.
@@ -189,16 +221,16 @@ Exploration may be manual. Durable learning should not remain manual.
 ## CLI
 
 ```
-ztare role list                     # list all roles
-ztare role inspect <role_id>        # show role + mandate + recent sessions
-ztare role delegate <role> <task>   # create a session, attach work
-ztare session list <role_id>        # list this role's sessions
+cognitive-firm role list                     # list all roles
+cognitive-firm role inspect <role_id>        # show role + mandate + recent sessions
+cognitive-firm role delegate <role> <task>   # create a session, attach work
+cognitive-firm session list <role_id>        # list this role's sessions
 ```
 
 ## Docker / daemon boot path
 
-For a fuller productized walkthrough, including task templates and
-preference-based routing, see `docs/guides/org_runtime_quickstart.md`.
+For the public setup path, see `docs/first-30-minutes.md` and
+`docs/adopting-cognitive-firm.md`.
 
 Before a daemon acts, the boot contract is:
 
@@ -214,19 +246,17 @@ also tells the spawned runtime to read them. This matters in Docker because
 not every agent host auto-discovers `AGENTS.md` the way Codex/Claude do in an
 interactive repo session.
 
-Dry-run the Research Director against the current preferences:
+Dry-run a role against the current preferences:
 
 ```bash
-python scripts/org_role_preflight.py --role research_director
-python scripts/agent_daemon.py --role research_director --tick-once --dry-run
-docker compose --profile daemons run --rm research-director-daemon python scripts/org_role_preflight.py --role research_director
-docker compose --profile daemons run --rm research-director-daemon python scripts/agent_daemon.py --role research_director --tick-once --dry-run
+python scripts/org_role_preflight.py --role <role_id>
+python scripts/agent_daemon.py --role <role_id> --tick-once --dry-run
 ```
 
 Run it continuously:
 
 ```bash
-docker compose --profile daemons up research-director-daemon
+docker compose --profile daemons up <role-service>
 ```
 
 The Docker service is only a process wrapper. It does not grant authority. The
@@ -238,20 +268,37 @@ agent CLI already authenticated.
 Runtime identity is configurable. Example:
 
 ```bash
-ZTARE_MEMBER_ID=codex ZTARE_AGENT_CLI=codex ZTARE_AGENT_ADAPTER=codex_exec docker compose --profile daemons up research-director-daemon
+COGNITIVE_FIRM_MEMBER_ID=codex COGNITIVE_FIRM_AGENT_CLI=codex COGNITIVE_FIRM_AGENT_ADAPTER=codex_exec docker compose --profile daemons up <role-service>
 ```
 
-`ZTARE_MEMBER_ID` is the member/runtime written to sessions. `ZTARE_AGENT_CLI`
-is the executable the daemon uses for task execution. `ZTARE_AGENT_ADAPTER`
-selects the noninteractive runtime adapter. Supported adapters today are
-`claude_print` and `codex_exec`; `auto` infers from the executable name.
+Runtime adapter configuration names identify the member/runtime written to
+sessions, executable used for task execution, and noninteractive runtime
+adapter. Supported adapters today are `claude_print` and `codex_exec`; `auto`
+infers from the executable name.
 
-## Paper 4 connection
+## Companion Paper Connection
 
-This folder is the practical instantiation of the AI-native M-form
-architecture proposed in paper 4 (§ Persistence Asymmetry and Role-Substrate
-Decoupling). Key paper claims grounded here:
-1. Roles are persistent contracts; substrates are interchangeable bodies
+This folder is the practical instantiation of the companion paper's role-office
+architecture. Key paper claims grounded here:
+1. Roles are persistent contracts; runtimes are interchangeable bodies
 2. Workers are ephemeral; managers are backed by persistent or session
-   substrates — the ROLE is always persistent
+   runtimes -- the role is always persistent
 3. Organizational leverage concentrates in role definition, not worker selection
+
+<!-- AUTO-INDEX:START (managed by scripts/gen_folder_index.py — edit prose OUTSIDE this block) -->
+
+## Index
+
+**Sub-folders**
+
+- [`mandates/`](mandates/) — 2 file(s)
+- [`patterns/`](patterns/) — 3 file(s)
+- [`preferences/`](preferences/) — 0 file(s)
+- [`roles/`](roles/) — 6 file(s)
+
+**Documents**
+
+- [bootstrap_manifest.yaml](bootstrap_manifest.yaml)
+
+<sub>4 sub-folder(s), 1 document(s). Auto-generated; re-run `gen_folder_index.py` after adding files.</sub>
+<!-- AUTO-INDEX:END -->

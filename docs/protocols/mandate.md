@@ -1,6 +1,6 @@
 # Mandate Protocol
 
-**Status:** production-stable since 2026-04. The kernel verifies the mandate hash each tick.
+**Status:** implemented. The kernel verifies the mandate hash each tick.
 **Modules:** role yaml in `org/roles/<role_id>.yaml`; prose mandate in `org/mandates/<role_id>_mandate.md`.
 
 The mandate is the **typed authority contract** that defines what a role may do autonomously vs. what requires escalation to the principal. It is the structural primitive that prevents agent-CLI subprocesses from re-negotiating their own scope at runtime.
@@ -15,7 +15,7 @@ Schema-governed fields the kernel parses programmatically:
 
 ```yaml
 schema_version: 1
-role_id: research_director
+role_id: reviewer
 role_class: director
 description: >
   One-paragraph summary the principal can read at-a-glance.
@@ -97,7 +97,7 @@ The mandate defines four authority levels for any candidate action:
 | **Autonomous** | Role may dispatch without principal review | `authorized_paths` matches + `budget_caps` passes |
 | **Gated** | Principal must APPROVE before dispatch | Path or budget exceeds autonomous threshold |
 | **Out-of-scope** | Cannot be dispatched at all | `forbidden_paths` matches OR mandate-hash drift |
-| **Principal-extension** | Principal explicitly extends authority for one task | Per GP-229 — see `docs/concepts/principal_extension.md` |
+| **Principal-extension** | Principal explicitly extends authority for one task | Tenant policy defines the signed extension record |
 
 The kernel's `task_authorization.authorize_dispatch()` is the deterministic gate that maps every candidate to one of these four levels. The function is pure (no LLM, no network); its output is reproducible from the role config + candidate args.
 
@@ -137,5 +137,5 @@ This is the same separation that makes legal contracts effective: the boilerplat
 | Property-based invariants test suite | shipped | shipped |
 | Mandate version control via git | shipped | shipped |
 | Mandate signing (cryptographic, beyond git commit signing) | not needed | **queued** Phase 3 if needed |
-| Multi-principal mandate (joint signing) | not needed | **queued** if multi-principal mode lands |
-| EU AI Act deploy-gate | shipped (`src/cognitive_firm/orchestration/eu_ai_act_deploy_gate.py`) | shipped — load-bearing for T2 |
+| Joint mandate signing | not needed | **queued** if several principals must approve one mandate |
+| EU AI Act deploy-gate | shipped (`src/cognitive_firm/orchestration/eu_ai_act_deploy_gate.py`; `docs/protocols/eu-ai-act-deploy-gate.md`) | shipped for explicit T2 mapping checks |

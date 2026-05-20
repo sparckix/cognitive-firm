@@ -1,5 +1,5 @@
 ---
-id: PATTERN-019
+id: PATTERN-023
 name: anti_rename_charter_gate
 version: 1
 status: active
@@ -21,8 +21,8 @@ preconditions:
   - target_admissibility_class_named: present
 chain_position: pre_charter  # gate runs BEFORE any Lean port or full charter
 related_patterns:
-  - PATTERN-002 (darwin_idea_killer — chained AFTER if Step 4 ambiguous)
-  - PATTERN-014 (cold_shot_dispatch — used for Step 4 pre-flight if internal Claude isn't sufficient)
+  - PATTERN-002 (darwin_idea_killer, chained AFTER if Step 4 ambiguous)
+  - PATTERN-014 (cold_shot_dispatch, used for Step 4 pre-flight if internal Claude isn't sufficient)
 references:
   - C-2026-05-09-98 (μ[u] / Duchon-Robert RENAME)
   - C-2026-05-09-103 (defect-calc / CKN-Lin RENAME)
@@ -31,7 +31,7 @@ references:
   - PL-106 Q3-binary literature-check protocol
 ---
 
-# PATTERN-019 — anti-RENAME charter gate
+# PATTERN-023, anti-RENAME charter gate
 
 ## Problem (empirically motivated 2026-05-09)
 
@@ -51,7 +51,7 @@ existing-2026 literature:
 mm_01 ACR detector (PL-105, PRE-WARRANT) predicted RENAME would be
 the dominant failure mode at the closure-attempt stage. **Empirical
 3-of-3 in one window confirms the prediction at the charter-time
-stage specifically** — not as a whole-apparatus indictment, but as a
+stage specifically**, not as a whole-apparatus indictment, but as a
 specific failure mode the apparatus systematically lands on.
 
 This pattern mechanizes the gate that catches RENAMEs at charter time,
@@ -59,18 +59,18 @@ BEFORE any Lean port or 5-file shipment.
 
 ## Pattern (5 steps, MECHANICAL)
 
-### Step 1 — Minimal-form statement
+### Step 1, Minimal-form statement
 State the candidate closure theorem as: "for class X, conclusion Y
 follows from mechanism Z." STRIP elite nouns (no VBNS-PT / Liouvillian-Σ
 / OCCT-style branding). The minimal form must fit in 2-3 sentences and
 be parseable by someone who has not seen the apparatus's vocabulary.
 
-### Step 2 — mm_01 ACR Q1-Q5 self-check
-Per `src/ztare/research_director/universal_research_ops.py::META_META_VOCABULARY[mm_01]`,
+### Step 2, mm_01 ACR Q1-Q5 self-check
+Per the tenant research-operations vocabulary,
 answer in writing:
 
   - **Q1** What admissibility-criterion is being rebased? (objects,
-    proofs, solutions, states — which boundary moves?)
+    proofs, solutions, states, which boundary moves?)
   - **Q2** Is this rebasing already executed in the literature?
     (Cite ≥3 candidate prior executions; if ZERO candidates, the
     apparatus has likely overlooked something.)
@@ -84,7 +84,7 @@ answer in writing:
     contain "we generalize / extend / adapt / port" → RENAME-drift
     suspected? Or "the joint admissibility class IS new" → mm_01-aligned?
 
-### Step 3 — Q3-binary literature-collision check
+### Step 3, Q3-binary literature-collision check
 Per the `mm_01_self_check` discipline first applied at
 `projects/ns_defect_calculus_pivot/DRAFT_charter.md` Q1-Q5: state the
 binary
@@ -95,20 +95,20 @@ binary
   mathematics?"*
 
 Answer requires identifying tools A, B by NAME with arXiv anchors
-(PATTERN-014). If the answer is "reduces to standard tools" — STOP,
+(PATTERN-014). If the answer is "reduces to standard tools", STOP,
 the closure is a RENAME of those tools. If the answer is "requires
-specific non-standard ingredient X" — proceed to Step 4.
+specific non-standard ingredient X", proceed to Step 4.
 
-### Step 4 — Pre-flight cold-shot (CHEAP)
+### Step 4, Pre-flight cold-shot (CHEAP)
 BEFORE any Lean port or charter ratification:
   - Internal-Claude lit-grep agent (free): "is theorem T already
     known? cite ≥3 candidate adjacent results."
   - OR cheap external cold-shot ($0.20-0.40 cap): "is theorem T
     (a) RENAME of theorem U, (b) genuinely novel, (c) false, (d)
-    open?" — same prompt template as Q3-binary above.
+    open?", same prompt template as Q3-binary above.
   - Time-box: ≤30 min wall clock total.
 
-### Step 5 — Charter prose RENAME-drift detector
+### Step 5, Charter prose RENAME-drift detector
 After charter draft is written but BEFORE ratification:
   - Read every paragraph; if contains drift indicator
     ("we generalize / extend / adapt / strengthen") → REWRITE
@@ -146,7 +146,7 @@ catches_referenced: [C-id, ...]
 - Step 3 forces literature collision check at the proof-mechanism
   level; standard-tools-only verdict = abort.
 - Step 4 pre-flight is the CHEAP version of what got us C-98 / C-103 /
-  C-104 — done at charter time, not after weeks of work.
+  C-104, done at charter time, not after weeks of work.
 - Step 5 closes the loop on charter prose drift.
 
 ## When to deploy
@@ -158,7 +158,7 @@ catches_referenced: [C-id, ...]
 ## When NOT to deploy
 
 - Pure infrastructure work (mollifier API, type classes, weak-limit
-  lemmas) — these don't claim novel closure
+  lemmas), these don't claim novel closure
 - Routine sorry-closure on existing typed scaffolds
 - Mining / analytics pipelines
 

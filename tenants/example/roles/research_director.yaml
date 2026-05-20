@@ -1,0 +1,16 @@
+role_id: research_director
+title: Research Director
+mandate_path: tenants/example/mandates/research_director_mandate.md
+authorized_paths:
+  - tenants/example/projects/
+  - tenants/example/mandates/
+  - tenants/example/preferences/
+forbidden_paths:
+  - .env
+  - secrets/
+budget_caps:
+  single_action_usd: 5.0
+  session_usd: 25.0
+  daily_usd: 50.0
+escalates_to: principal
+authorized_mcp_capabilities: []

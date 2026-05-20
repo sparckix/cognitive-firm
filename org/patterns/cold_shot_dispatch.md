@@ -5,17 +5,9 @@ version: 1
 status: active
 discovered: 2026-05-09
 discovered_reason: |
-  Pre-existed as kernel primitive at `src/ztare/fit/cold_llm_erdos_seed.py`
-  and as project-side scripts (`projects/gp154_d_int_measurement/scripts/
-  cold_shot_gpt55_od7.py`, `projects/ns_proofsearch_resupply_pincer/
-  workspace/cold_shot_policy.json`, etc.) since approximately 2026-05-02.
-  Operator catch (2026-05-09 evening): "This is the 'cold shot' pattern we
-  coded / erdos in ZTARE itself almost like a week ago for fuck's sake.
-  And I also told you to extract such kind of primitives. Guess you were
-  not exhaustive enough, even after creating a GRAPH of the patterns
-  supposedly." Pattern-extraction failure: minted org/patterns/INDEX.md
-  catalog without exhaustive ingestion of existing ZTARE kernel primitives.
-  Catch C-2026-05-09-60.
+  Extracted from tenant practice: difficult questions sometimes need a
+  one-shot, cross-family review that starts from a clean prompt rather than
+  another continuation of the same working context.
 triggers:
   lexical: [
     "treat as the book", "Erdős-style", "Erdős style", "alien-math",
@@ -24,7 +16,7 @@ triggers:
   ]
   structural:
     - load_bearing_eigenquestion_with_anchored_failure_modes
-    - same_family_LLM_dispatches_have_converged_on_a_dead_route
+    - same_family_agent_dispatches_have_converged_on_a_dead_route
     - need_to_break_anchoring_on_canonical_literature
     - cross_vocabulary_audit_flagged_anchoring_risk
   problem_classes:
@@ -37,30 +29,25 @@ spawn:
   variants:
     - mode: kernel_library
       description: |
-        Existing ZTARE kernel primitive. Used during ZTARE iter loop
-        pre_iter_1 advisory phase. Multi-family cold-shot family policy
-        (de_anchor_seed / structural_seed / physics_lagrangian_seed /
-        qualitative_evidence_seed) selected per substrate class.
-      module: src.ztare.fit.cold_llm_erdos_seed
+        Existing tenant primitive. Used during an iterative research loop
+        pre-run advisory phase. Multi-family cold-shot policy is selected per
+        substrate class by the tenant overlay.
+      module: tenant_overlay.cold_shot_adapter
       project_examples:
-        - projects/gp154_d_int_measurement/scripts/cold_shot_gpt55_od7.py
-        - projects/gp154_d_int_measurement/scripts/cold_shot_gemini_pro_od7_v2.py
-        - projects/ns_proofsearch_resupply_pincer/workspace/cold_shot_policy.json
-        - projects/gp210_consciousness_theory/workspace/cold_shot_policy.json
-        - projects/ns_spike_lifecycle_discriminator/workspace/cold_shot_policy.json
+        - tenants/<name>/projects/*/workspace/cold_shot_policy.json
     - mode: rd_direct_external_prover
       description: |
-        Research-Director-direct cross-family LLM cold-shot via OpenAI/
-        Anthropic/Google API. Used when (a) no ZTARE iter loop is active
+        Research-Director-direct cross-family LLM cold-shot via external
+        model providers. Used when (a) no iterative research loop is active
         on the substrate, or (b) the load-bearing question is at the
         meta-architecture layer (e.g. "is this Lean encoding faithful?").
-        Operator-authorized 2026-05-09 with $10 hard cap.
+        Cost caps and provider policy are deployment choices.
       tools: [bash]
       scripts:
-        - scripts/dispatch_external_prover.py  # this dispatcher
+        - tenant_overlay/scripts/<cold-shot-dispatcher>.py
       kill_criteria:
-        - cumulative_session_spend_USD: 10.0
-        - per_dispatch_cap_USD: 5.0
+        - provider_cost_cap_exceeded
+        - prompt_missing_failure_modes
 output_schema: cold_shot_response_v1
 fallback: PATTERN-011  # if cold-shot reveals the question needs N parallel attacks, escalate to swarm
 preconditions:
@@ -69,7 +56,7 @@ preconditions:
 chain_position: pre_iter | post_demolition  # before main iter, OR after a route is demolished and we need a fresh attempt
 related_patterns:
   - id: PATTERN-005
-    relation: child  # falsifiable_asymmetry — cold-shot prompts demand a falsifiable verdict
+    relation: child  # falsifiable_asymmetry, cold-shot prompts demand a falsifiable verdict
   - id: PATTERN-009
     relation: sibling  # both are cross-validation; PATTERN-009 is CAS, PATTERN-014 is LLM
   - id: PATTERN-011
@@ -77,21 +64,20 @@ related_patterns:
   - id: PATTERN-015
     relation: required  # cold-shot is only as good as its eigenquestion phrasing
 references:
-  - existing kernel: src/ztare/fit/cold_llm_erdos_seed.py
-  - existing scripts: projects/gp154_d_int_measurement/scripts/cold_shot_gpt55_od7.py
-  - cold-shot policy schema: projects/*/workspace/cold_shot_policy.json
-  - ANTI-PATTERN-006 (cross_agent_monoculture) — cold-shot is the cross-family answer
+  - existing tenant primitive: tenant_overlay.cold_shot_adapter
+  - cold-shot policy schema: tenants/<name>/projects/*/workspace/cold_shot_policy.json
+  - ANTI-PATTERN-006 (cross_agent_monoculture), cold-shot is the cross-family answer
 ---
 
-# PATTERN-014 — Cold-Shot Dispatch
+# PATTERN-014, Cold-Shot Dispatch
 
 ## What this pattern is
 
 A **single-dispatch, cross-family, no-prior-context, de-anchored, alien-
-math-discipline** prompt to an LLM (today: GPT-5.5 / Gemini-Pro), used
+math-discipline** prompt to an LLM, used
 to attack a load-bearing eigenquestion when same-family agents have
 converged on a dead route or the question lives at the meta-architecture
-layer that internal Claude swarms can't reach without bias.
+layer that same-family agent swarms cannot reach without bias.
 
 Distinct from:
 * **PATTERN-009 (independent_cas_verification)**: SymPy/numpy CAS check,
@@ -107,7 +93,7 @@ Every cold-shot prompt MUST contain (verbatim or close paraphrase):
 
 1. **No prior context**: "You are receiving this with no prior
    conversation context."
-2. **The book framing**: "Treat the data as a problem from 'the book' —
+2. **The book framing**: "Treat the data as a problem from 'the book',
    attack it on its merits, not on the canonical framings the
    literature has already tried."
 3. **Explicit de-anchoring**: "Do not anchor on [LIST: papers/ techniques
@@ -116,7 +102,7 @@ Every cold-shot prompt MUST contain (verbatim or close paraphrase):
    the problem, drop it."
 5. **Alien-math tradition swap**: "Alien-math discipline: assume you are
    a mathematician from a different tradition than [the tradition that
-   produced the failing route] — what would such a tradition reach for
+   produced the failing route], what would such a tradition reach for
    first?"
 
 Plus the standard problem-statement structure:
@@ -125,24 +111,24 @@ Plus the standard problem-statement structure:
   that ruled out earlier routes).
 * WHAT'S BEEN TRIED AND REFUTED (named with arXiv ids + verdicts).
 * FALSIFIABLE OUTPUT FORMAT (per PATTERN-005): demand a verdict line
-  ending in "[yes / no / partially / unknown — one-sentence rationale]".
+  ending in "[yes / no / partially / unknown, one-sentence rationale]".
 
 Without these bullets, the dispatch is a generic LLM call and reverts
 to single-family bias.
 
 ## When to deploy
 
-* **Pre-iter advisory** (kernel mode): before launching a ZTARE iter on
+* **Pre-run advisory** (kernel mode): before launching an iterative run on
   a new substrate, fire the cold-shot family policy to seed the iter
   with diverse non-self-derived starting points.
-* **Post-demolition** (RD-direct mode): after an internal Claude swarm
+* **Post-demolition** (RD-direct mode): after a same-family agent swarm
   has converged on a route that an external cross-vocabulary audit or
   external prover demolished, re-attack with cold-shot from a different
   tradition. Tonight's two operator-relayed GPT-5.5 dispatches (Q1 on
   BKGSW+NC, Q2 on Lerner-port faithfulness) are canonical examples.
 * **Load-bearing meta-architecture question**: when the question is
   about how the apparatus is itself thinking ("is this Lean encoding
-  faithful to the published theorem"), internal-Claude has bias.
+  faithful to the published theorem"), same-family agents have bias.
   Cold-shot is the cross-family answer.
 
 ## When NOT to deploy
@@ -152,17 +138,15 @@ to single-family bias.
   is already in the middle of). PATTERN-001 (friction_debate) or
   PATTERN-011 (swarm_dispatch) is cheaper and adequate.
 * When the eigenquestion has not yet been validated under PATTERN-015
-  (eigenquestion_phrasing_discipline) — a poorly-phrased cold-shot
+  (eigenquestion_phrasing_discipline), a poorly-phrased cold-shot
   wastes paid cross-family capacity.
 
 ## Cost discipline
 
-* `scripts/dispatch_external_prover.py` enforces a hard $10 session cap
-  (operator-authorized 2026-05-09).
+* A tenant dispatcher can enforce a session cap.
 * Per-dispatch cap default $5; override via `--max-cost-usd`.
-* Every dispatch logs a row to `analytics/external_prover_ledger.jsonl`
-  AND a row to `analytics/pattern_deployment_ledger.jsonl` tagged
-  PATTERN-014.
+* Every dispatch should log a row to an external-prover ledger and a
+  pattern-deployment ledger tagged PATTERN-014.
 
 ## Falsifiable-asymmetry test (per PATTERN-005)
 
@@ -171,10 +155,10 @@ in the campaign window whose verdict (a) contradicted a same-family
 verdict the RD had previously relied on, or (b) named a structural
 defect the RD missed. Tonight's C-58 + C-59 are two such instances
 (operator-relayed cold-shots). The pattern is **falsified** if cold-
-shots only ever confirm existing internal verdicts — that would mean
+shots only ever confirm existing internal verdicts, that would mean
 the cross-family-lift hypothesis is empirically wrong.
 
-## Theory-building vs falsification mode (added 2026-05-09 ~19:30 UTC)
+## Theory-building vs falsification mode (added 2026-05-09 ~19:30 UTC; sharpened by Codex swarm 2026-05-09)
 
 Empirical finding: the apparatus has been deploying cold-shots in
 ~80% FALSIFICATION mode ("is X faithful?", "is Y over-strengthened?",
@@ -199,18 +183,48 @@ Cold-shots have TWO orthogonal modes:
 * **THEORY-BUILDING mode**: dispatch asks GPT-5 to PRODUCE a
   construction, candidate definition, missing abstraction, or new
   lemma. Output is mathematical content, not a verdict. Pattern:
-  Gowers methodology — give the model a relatively-new framework
+  Gowers methodology, give the model a relatively-new framework
   and ask DIRECTLY for the proof/construction. Examples tonight:
   PL-094 NS-arc projection (produced 6-week pivot plan), PL-099
   μ[u] candidate construction (in flight as of writing).
 
-The 1880s benchmark framing is a THEORY-BUILDING tool, not a
+The 1880s/2080s benchmark framing is a THEORY-BUILDING tool, not a
 falsification one. Riemann pre-Selberg had rich pattern recognition;
 the BENCHMARK (Selberg trace formula 90 years later) tells us the
 missing piece was a STRUCTURAL OBJECT linking zeta to spectral
 theory. Projecting forward: the NS Clay missing piece is candidate
 defect-calculus per C-93. Cold-shot should ASK FOR THE CONSTRUCTION,
 not audit whether existing approaches are faithful.
+
+### Submode: retrospective_failure_benchmark
+
+This is the reusable form of the operator's "1880s / what will look
+obvious in 50-100 years?" instruction. It remains inside PATTERN-014
+rather than receiving a new pattern id as of 2026-05-09, because the
+catalog already covers it as a theory-building cold-shot submode and
+the independent catalog explorer recommended extension over minting.
+
+Required output shape:
+
+1. Name the historical failure class (e.g. wrong carrier, wrong
+   topology, missing invariant, missing compactness principle).
+2. Map it to a present artifact: file, theorem, prediction row, catch,
+   or cold-shot packet.
+3. Produce or repair the theorem/construction first.
+4. Only then fill verification forks, three-leg checks, or retrospective
+   verdicts.
+5. State the exact next artifact to change.
+
+Anti-capture rule: if the prompt's first requested deliverable is only
+an audit/fork/verdict, rewrite before dispatch. PL-111 was superseded
+for this reason; PL-112 was proof-attempt-first and produced the L3A
+concentration-carrier repair.
+
+Gowers protocol connection: the 2026-05-08 Gowers report is relevant
+not because it is an authority, but because its workflow asks for
+construction/proof writeup first, then human checking and preferably
+formalization. Use forks and checks as guardrails around proof work,
+not substitutes for proof work.
 
 Mix going forward: roughly 50% falsification + 50% theory-building.
 Theory-building for genuinely Clay-relevant constructions (where
@@ -235,13 +249,13 @@ right default for Tier-1 cold-shot dispatches. Specifically for:
 * Quick pivot-residual scoping where speed matters more than depth.
 
 The cost differential (medium vs high) is typically $0.20-0.50 per
-dispatch — small relative to the strategic value of high-quality
+dispatch, small relative to the strategic value of high-quality
 Tier-1 verdicts. Default to high for genuinely Tier-1 work; only
 drop to medium for tactical verification.
 
-The dispatcher script `scripts/dispatch_external_prover.py` already
-defaults to `high` in its argparse; explicit `--reasoning-effort
-medium` overrides should be reserved for tactical-only dispatches.
+A tenant dispatcher should default to `high` effort for Tier-1 work;
+explicit lower-effort overrides should be reserved for tactical-only
+dispatches.
 
 ## Citation-verification rule (added 2026-05-09 per catch C-70)
 
@@ -263,18 +277,16 @@ Calibration: GPT-5 cold-shot arXiv-ID hallucination prior is empirically
 > paper.
 
 **Mandatory post-dispatch step**: PATTERN-009 (independent_cas_verification,
-internal-Claude-with-WebFetch variant) is REQUIRED on any cold-shot output
+same-family-with-web-retrieval variant) is REQUIRED on any cold-shot output
 containing arXiv IDs BEFORE the IDs propagate to any downstream artifact
 (catch ledger, paper draft, X post, journey doc, task description).
 
-**Failure-mode note**: the conceptual content of cold-shot output is
-typically reliable (the 5 of 5 cold-shots tonight all returned mathematically
-sound conceptual analysis). The hallucination surface is the **identifier
-layer** — author names roughly right, theorem statements roughly right, but
-arXiv IDs / journal volumes / page numbers fabricated. The verification
-protocol bridges this gap.
+**Failure-mode note**: cold-shot output can be useful while still being
+unreliable at the identifier layer: author names, theorem labels, arXiv IDs,
+journal volumes, and page numbers may be fabricated or stale. The verification
+protocol exists to keep that error from propagating.
 
-## Cold-shot-before-encoding rule (added 2026-05-09 per catch C-61)
+## Cold-shot-before-encoding rule
 
 When an external prover (cold-shot or operator-relay) proposes a
 **next-campaign target** (a new theorem statement, a new analytic
@@ -282,27 +294,16 @@ framework, a new replacement route after a previous demolition), the
 target MUST itself be cold-shot tested via PATTERN-014 BEFORE any
 internal Lean encoding consumes agent-hours.
 
-**Canonical evidence**: catch C-2026-05-09-61. The same GPT-5.5
-framework that derived the height-filtered Leray-skew commutator
-framework as the next-campaign target (after demolishing the additive-
-combinatorics route) demolished its own proposal 4 hours later via
-GPT-5 cold-shot (height-scale collapse for Liouville ω). The internal
-Lean encoding `ns_trackb_W6_NEW_3_LeraySkewCommutator.lean` (~250 LoC,
-~12 wall-clock minutes of agent time) was shipped IN BETWEEN, and is
-now retroactively tagged with the demolition.
-
-**Mitigation**: every next-campaign-target proposition gets a $0.30-
-$0.60 cold-shot test before it gets a Lean file. Costs $0.50, saves
-$5-10 of agent-time + the catch-ledger churn of having to demolish
-in-flight encoding.
+**Mitigation**: every next-campaign-target proposition gets an inexpensive
+de-anchored review before implementation starts. This is a routing check, not
+a proof of correctness.
 
 ## Anti-laundering catches
 
 * **ANTI-PATTERN-006 (cross_agent_monoculture)**: cold-shot's whole
   point is to defeat single-family laundering. If the "cold-shot"
-  is actually an internal Claude agent dispatched without the 5-bullet
+  is actually a same-family agent dispatched without the 5-bullet
   discipline, the pattern is misapplied.
-* **Catch C-60 (this pattern's minting catch)**: when the pattern was
-  initially missing, the existing kernel `cold_llm_erdos_seed.py`
-  primitive was rediscovered ad-hoc as "PATTERN-009 deployment." The
-  fix is this pattern doc + the explicit kernel cross-references above.
+* **Pattern laundering**: do not relabel a normal same-context review as a
+  cold-shot. The value comes from context separation and explicit failure
+  modes.

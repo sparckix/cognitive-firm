@@ -1,0 +1,10 @@
+principal_id: example_principal
+notification_channel: null
+default_escalation: principal
+review_cadence: daily
+budget_policy:
+  daily_usd: 50.0
+  require_approval_above_usd: 10.0
+surface_policy:
+  orbit_mode: projection_only
+  allow_direct_config_writes: false

@@ -1,6 +1,6 @@
 # A2A — Agent-to-Agent Protocol
 
-**Status:** best-in-class for single-principal governance kernels at T1; remote-adapter + saga-compensation gaps remain for T2 publishability.
+**Status:** shipped for single-principal governance kernels at T1; remote-adapter work remains queued for T2 deployments.
 **Module:** `cognitive_firm.orchestration.agent_channels` + `cognitive_firm.orchestration.artifact_dependencies` + `cognitive_firm.orchestration.a2a_projection`
 **Tests:** 38 across `tests/test_obligation_lifecycle.py` (18) + `tests/test_artifact_dependencies.py` (14) + downstream MCP integration.
 
@@ -94,6 +94,28 @@ Every state change appends a `agent.obligation.<state>` row to `transitions.json
 
 Without obligation lifecycle, "B is blocked waiting on A" is only inferable from open messages. With it, the manager-role daemon and Orbit can render the structural view directly via `list_blocked_obligations()`.
 
+### Bridge to human work sessions
+
+Some obligations cannot be fulfilled by an agent alone because they require
+human access, taste, judgment, relationship work, or non-digitized external
+action. In those cases the A2A obligation remains the role-to-role work
+contract, and H2A records the human side as a human work session with
+`obligation_id=<message_id>`.
+
+When the receiving role asks the human for that work, use the A2H helper
+`create_agent_requested_human_work_session(...)`. This records the bounded
+deliverable and keeps `agent_followup_required=true`, so the role cannot treat
+the human's contribution as equivalent to obligation fulfillment until it is
+integrated.
+
+This keeps the boundary clean:
+
+- A2A does not pretend the human interaction is just another agent message.
+- H2A does not grant execution authority; it records bounded human work,
+  receipts, and whether agent follow-up is required.
+- The closing role can query human work sessions by obligation id before
+  moving the obligation to `fulfilled`.
+
 ### Why this matters at T2
 
 Saga compensation (Phase C, see below) cannot be implemented without obligation state distinct from envelope state. You cannot compensate what you cannot lifecycle.
@@ -107,19 +129,23 @@ Saga compensation (Phase C, see below) cannot be implemented without obligation 
 3. From `manager` to anyone (coordination channel).
 4. Receiver appears in sender's `delegates_to` or `escalates_to` (and vice versa).
 
-Anything else raises `ChannelPolicyError`. The policy is intentionally simple — this is local channel hygiene, not enterprise RBAC. The control-plane policy compiler (Phase 4 in seam GP-167) will replace this when adopters need it.
+Anything else raises `ChannelPolicyError`. The policy is intentionally simple:
+local channel hygiene, not enterprise RBAC. A control-plane policy compiler can
+replace it when adopters need richer authorization.
 
 ## Dependency primitive (Phase B): content-addressed artifact promises
 
 Module: `cognitive_firm.orchestration.artifact_dependencies`.
 
-The structurally hardest A2A question is "task B depends on task A's output." cognitive-firm's answer reuses the GP-231 outbox substrate (`transitions.jsonl`) and shipped these primitives:
+The structurally hardest A2A question is "task B depends on task A's output."
+cognitive-firm's answer reuses the local outbox/event adapter
+(`transitions.jsonl`) and ships these primitives:
 
 ### Producer side
 
 ```python
 promise_artifact(
-    role_id="research_director",
+    role_id="reviewer",
     task_id="task_validate_X",
     artifact_key="validator.results.X",
     predicate="schema_version >= 2 AND score >= 0.7",
@@ -130,10 +156,10 @@ promise_artifact(
 # … work happens …
 
 fulfill_artifact(
-    role_id="research_director",
+    role_id="reviewer",
     task_id="task_validate_X",
     artifact_key="validator.results.X",
-    artifact_path="ztare_workspace/validator/X.json",
+    artifact_path="tenant_workspace/validator/X.json",
     sha256="9af3...",
     predicate="schema_version >= 2 AND score >= 0.7",
     predicate_eval={"schema_version_ge_2": True, "score_ge_0_7": True},
@@ -180,7 +206,9 @@ Public API:
 
 `a2a_projection.AgentCard` projects a role's authorized public surface for compatibility with Google A2A and IBM ACP discovery formats. Cards are **discovery-only, NOT authority** — the authority layer remains role yaml + mandate file. This is the structural difference from Google A2A, which conflates routing with execution authority.
 
-`build_all_agent_cards()` writes one card per role under `ztare_workspace/a2a/agent_cards/`. External A2A/ACP adapters can import these cards without granting any execution authority.
+`build_all_agent_cards()` writes one card per role under the configured tenant
+workspace's `a2a/agent_cards/` path. External A2A/ACP adapters can import
+these cards without granting any execution authority.
 
 ## Threat-model coverage
 
@@ -195,7 +223,7 @@ Public API:
 | Saga compensation (Phase C) | shipped (overkill for T1 but exercised) | shipped — load-bearing |
 | Remote A2A/ACP adapter | not needed | **queued** — interop |
 | Idempotent at-least-once delivery | not needed (single-machine) | **queued** |
-| Conformance test suite | not needed (internal use) | **queued** for publishability |
+| Conformance test suite | local tests shipped | **queued** for remote-adapter interoperability |
 
 ## Distance to publishable reference implementation
 

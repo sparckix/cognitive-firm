@@ -1,0 +1,91 @@
+# docs
+
+Start with:
+
+- [cognitive-firm protocols](PROTOCOLS.md)
+- [First 30 Minutes](first-30-minutes.md)
+- [Abstraction Map](abstraction-map.md)
+- [Resource And Event Catalog](resource-event-catalog.md)
+- [Blueprints](blueprints/README.md)
+- [Kernel Invariants](kernel-invariants.md)
+- [Recursive Organization](recursive-organization.md)
+- [Roadmap](ROADMAP.md)
+- [Field Validation Pilot](field-validation-pilot.md)
+- [Field Pilot Selector](field-pilot-selector.md)
+- [Field Pilot Starter Pack](templates/field-pilot/README.md)
+- [Reader Checklist](reader-checklist.md)
+- [Adopting cognitive-firm](adopting-cognitive-firm.md)
+- [Human-Agent Work](human-agent-work.md)
+- [Accountability Speed Envelope](accountability-speed-envelope.md)
+- [Agent prompts](agent-prompts.md)
+- [Organizational Learning Loop](organizational_learning_loop.md)
+- [App Integration](protocols/app-integration.md)
+- [Adapter Conformance](protocols/adapter-conformance.md)
+- [Inbound Events](protocols/inbound-events.md)
+- [A2H — Agent-to-Human Work Coordination](protocols/a2h.md)
+- [Actor Identity](protocols/actor-identity.md)
+- [Actor Membership](protocols/actor-membership.md)
+- [Identity Provider Adapters](protocols/identity-providers.md)
+- [Identity Provisioning](protocols/identity-provisioning.md)
+- [Tenant Isolation](protocols/tenant-isolation.md)
+- [Leases](protocols/leases.md)
+- [Accountability Summary](protocols/accountability.md)
+- [Governance Change Proposals](protocols/governance-changes.md)
+- [Learning Transition Compiler](protocols/learning-transition-compiler.md)
+- [Intelligence Sources](protocols/intelligence-sources.md)
+- [Approved Learning Events](protocols/learning-events.md)
+- [EU AI Act Deploy Gate](protocols/eu-ai-act-deploy-gate.md)
+- [Kernel Service](protocols/kernel-service.md)
+- [Kernel Event Envelope](protocols/kernel-events.md)
+- [Resource Envelope](protocols/resource-envelope.md)
+- [Policy Decisions](protocols/policy-decisions.md)
+- [OpenTelemetry Export](protocols/otel-export.md)
+- [Migration Records](protocols/migrations.md)
+- [State Surface Inventory](protocols/state-surface-inventory.md)
+- [T1 / T2 Upgrade Matrix](t1_t2_upgrade_matrix.md)
+- [Theory Map](theory.md)
+- [End-to-End Governance Walkthrough](examples/end-to-end-governance-walkthrough.md)
+- [Source Coverage Walkthrough](examples/source-coverage-walkthrough.md)
+- [Action Intelligence Source-Health Example](examples/action-intelligence-source-health.md)
+- [Accountability Speed Envelope Examples](examples/accountability-speed-envelope-examples.md)
+- [Field Validation Pilot Example](examples/field-validation-pilot-example.md)
+- [Learning Event Replay Example](examples/learning-event-replay.md)
+- [LangGraph Runtime Adapter Example](examples/langgraph-runtime-adapter.md)
+- [App-Service Integration Example](examples/app-service-integration-example.md)
+- [Learning Loop Demo](examples/learning-loop-demo.md)
+- [A2H Workflow Demo](examples/a2h-workflow-demo.md)
+
+<!-- AUTO-INDEX:START (managed by scripts/gen_folder_index.py — edit prose OUTSIDE this block) -->
+
+## Index
+
+**Sub-folders**
+
+- [`blueprints/`](blueprints/) - 2 file(s)
+- [`examples/`](examples/) - 10 file(s)
+- [`protocols/`](protocols/) - 38 file(s)
+- [`templates/`](templates/) - 1 file(s)
+
+**Documents**
+
+- [PROTOCOLS.md](PROTOCOLS.md)
+- [ROADMAP.md](ROADMAP.md)
+- [abstraction-map.md](abstraction-map.md)
+- [accountability-speed-envelope.md](accountability-speed-envelope.md)
+- [adopting-cognitive-firm.md](adopting-cognitive-firm.md)
+- [agent-prompts.md](agent-prompts.md)
+- [field-pilot-selector.md](field-pilot-selector.md)
+- [field-validation-pilot.md](field-validation-pilot.md)
+- [first-30-minutes.md](first-30-minutes.md)
+- [human-agent-work.md](human-agent-work.md)
+- [kernel-invariants.md](kernel-invariants.md)
+- [organizational_learning_loop.md](organizational_learning_loop.md)
+- [reader-checklist.md](reader-checklist.md)
+- [recursive-organization.md](recursive-organization.md)
+- [resource-event-catalog.md](resource-event-catalog.md)
+- [reverse_transfer_to_human_org_design.md](reverse_transfer_to_human_org_design.md)
+- [t1_t2_upgrade_matrix.md](t1_t2_upgrade_matrix.md)
+- [theory.md](theory.md)
+
+<sub>4 sub-folder(s), 18 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
+

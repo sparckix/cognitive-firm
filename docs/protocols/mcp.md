@@ -2,14 +2,17 @@
 
 **Status:** Phase 1 (outbox-relay) + Phase 1.5 (transport + Linear binding) + Phase 2 (capability tokens) shipped. Phase 3 (supply-chain pinning) + Phase 4 (IdP federation) deferred until concrete adopter demand.
 **Module:** `cognitive_firm.role_extensions.mcp_bridge`
-**Tests:** 27 across `tests/test_mcp_outbox_relay.py` (6) + `tests/test_mcp_linear_server.py` (6) + `tests/test_mcp_capabilities.py` (15).
+**Tests:** 30 across `tests/test_mcp_outbox_relay.py` (6) + `tests/test_mcp_linear_server.py` (7) + `tests/test_mcp_capabilities.py` (15) + `tests/test_mcp_transport.py` (2).
 **Design provenance:** the architecture below was selected by a three-panel adversarial review (enterprise-security architect + distributed-systems skeptic + M-Form invariant auditor) before any code was written.
 
 MCP defines how role offices reach external enterprise systems (Linear, Salesforce, ERPs, ticketing, comms) without filesystem-as-truth contortions. The kernel governs **action**, not state — the world's state stays where the world keeps it.
 
 ## Core architectural decision
 
-Per the GP-231 panel verdict (2026-05-07): **the kernel writes once to the transition log; everything else is derived from it.** This is the transactional outbox pattern. cognitive-firm's `transitions.jsonl` was already an append-only ordered durable log; the panel concluded "that IS an outbox." Adding MCP dispatch on top required only an outbox relay, not a new substrate.
+The kernel writes MCP requests once to the transition log; follow-up state is
+derived from that log. This is the transactional outbox pattern. Locally,
+`transitions.jsonl` is the ordered outbox; an MCP relay reads pending rows,
+dispatches allowed calls, and appends a deterministic result row.
 
 ## Schema: the three event types
 
@@ -23,11 +26,11 @@ The kernel writes this BEFORE attempting the call. Crash between write and dispa
 {
   "event": "mcp_call_requested",
   "ts": "2026-05-07T...",
-  "actor": "research_director",
-  "role_id": "research_director",
+  "actor": "reviewer",
+  "role_id": "reviewer",
   "surface": "mcp_bridge",
   "subject": "linear_seam_lookup",
-  "causality_id": "obj_GP-240",
+  "causality_id": "obj_customer_import",
   "payload": {
     "server_name": "linear",
     "tool_name": "list_issues",
@@ -45,7 +48,7 @@ The kernel writes this BEFORE attempting the call. Crash between write and dispa
   "event": "mcp_call_dispatched",
   "ts": "...",
   "actor": "outbox_relay",
-  "role_id": "research_director",
+  "role_id": "reviewer",
   "surface": "mcp_bridge",
   "subject": "requested:<event_id>",
   "causality_id": "<event_id of the request>",
@@ -130,10 +133,13 @@ Unregistered server/tool pairs are REJECTED with a clear reason. The relay never
 
 ## Transport layer
 
-`transport.py` provides `call_mcp_tool(server, tool, request, idempotency_key, timeout)` over either:
+`transport.py` provides `call_mcp_tool(server, tool, request, idempotency_key, timeout)` over:
 
 - **stdio** — for MCP servers that ship as local executables. The transport spawns the executable as a subprocess, writes the JSON-RPC payload to stdin, reads the response from stdout.
-- **HTTP** — for MCP servers behind HTTPS endpoints (Linear's reference server, etc.). The transport uses `urllib.request` over POST with `Authorization: Bearer ${ENV_VAR}` if the server's `ServerSpec` has `auth_env_var` set.
+- **Streamable HTTP** — for hosted MCP servers. The transport initializes a
+  session, sends MCP protocol/version headers, then issues `tools/call`.
+- **legacy HTTP JSON-RPC** — for older servers that still expose a simple POST
+  endpoint.
 
 Auth tokens live in environment variables, never in `org/`. A mandate edit revoking a capability halts dispatch immediately; a token rotation requires a daemon restart.
 
@@ -146,14 +152,18 @@ Phase 1.5 ships one server binding as a worked example:
 ```python
 LINEAR_SPEC = ServerSpec(
     name="linear",
-    transport="http",
-    url="https://mcp.linear.app/rpc",
+    transport="streamable_http",
+    url="https://mcp.linear.app/mcp",
     auth_env_var="LINEAR_API_KEY",
     timeout_seconds_default=30.0,
 )
 ```
 
 Three projections registered: `list_issues`, `get_issue`, `list_projects`. Write tools (create / update / transition) deferred to Phase 2 because they require capability tokens that the principal has explicitly approved per role.
+
+The Linear projection accepts both direct JSON-RPC result payloads and the
+current Streamable HTTP shape where tool output is returned as JSON text inside
+`result.content[]`.
 
 ### To enable Linear in production
 
@@ -172,17 +182,27 @@ Three projections registered: `list_issues`, `get_issue`, `list_projects`. Write
    ```
 4. Roles can now emit `mcp_call_requested` rows with `server_name: "linear"`.
 
+Optional live smoke:
+
+```bash
+LINEAR_API_KEY=... python scripts/mcp_linear_live_smoke.py --tool list_projects
+```
+
+The live smoke is intentionally outside `make smoke-public` because it requires
+network access and a tenant-owned credential. It should return
+`"transition_class": "mcp_call_dispatched"`.
+
 ## Threat-model coverage
 
 | Primitive | T1 (single-principal) | T2 (regulated enterprise) |
 |-----------|----------------------|---------------------------|
-| Outbox-relay (Phase 1) | shipped | shipped |
-| JSON-RPC transport stdio + HTTP (Phase 1.5) | shipped | shipped |
-| Deterministic projection registry | shipped | shipped |
-| Local de-dup cache | shipped | shipped |
-| Linear server binding (read-only) | shipped | shipped (read-only is safe at T2) |
-| Capability tokens (Phase 2) | shipped | shipped |
-| Task-scoped capability lifetime | shipped | shipped |
+| Outbox-relay (Phase 1) | shipped | T2-relevant relay checks shipped |
+| JSON-RPC transport stdio + HTTP (Phase 1.5) | shipped | T2-relevant transport checks shipped |
+| Deterministic projection registry | shipped | T2-relevant projection checks shipped |
+| Local de-dup cache | shipped | T2-relevant local idempotency checks shipped |
+| Linear server binding (read-only) | shipped | projection fixture shipped; deployment auth remains tenant-owned |
+| Capability tokens (Phase 2) | shipped | T2-relevant capability checks shipped |
+| Task-scoped capability lifetime | shipped | T2-relevant lifetime checks shipped |
 | Server image-digest pinning (Phase 3) | not needed | **queued** — supply-chain |
 | Signed tool-manifest hash (Phase 3) | not needed | **queued** |
 | Revocation feed for compromised servers (Phase 3) | not needed | **queued** |
@@ -192,7 +212,9 @@ Three projections registered: `list_issues`, `get_issue`, `list_projects`. Write
 
 ## Phase 3 + Phase 4 — what they would add
 
-**Phase 3 — supply chain.** When a third-party MCP server ships a malicious or buggy update, what prevents the next call from executing it? Per the enterprise-architect panel (GP-231), the answer requires:
+**Phase 3 — supply chain.** When a third-party MCP server ships a malicious or
+buggy update, what prevents the next call from executing it? The proposed
+answer requires:
 
 - **Image digest pin** at the Config layer (not server name; immutable image hash).
 - **Signed tool-manifest hash** (the principal-signed contract for what tools the server is approved to expose).

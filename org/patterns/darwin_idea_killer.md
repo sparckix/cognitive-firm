@@ -5,8 +5,8 @@ version: 1
 status: active
 discovered: 2026-05-08
 triggers:
-  lexical: [audit, kill, refute, falsify, obstruction]
-  structural: [theorem_proposed, claim_made, prior_pattern_output_present]
+  lexical: [audit, kill, refute, falsify, obstruction, excited, "this might be it", strong_signal, breakthrough, promising, finally, close_to_gate]
+  structural: [theorem_proposed, claim_made, prior_pattern_output_present, strong_f_row_pending, first_positive_after_stall, agent_or_operator_moderately_excited]
   problem_classes: [hard_mathematical_residual, apparatus_self_audit]
 spawn:
   mode: single_audit
@@ -25,7 +25,7 @@ related_patterns:
   - PATTERN-003 (reducer — sometimes chained after)
 references:
   - https://arxiv.org/html/2604.00478 (Silicon Mirror — anti-sycophancy 2026)
-  - existing src/ztare/orchestrator/post_run_meta_audit.py — apparatus-side analog
+  - existing tenant post-run meta-audit — apparatus-side analog
 ---
 
 # Pattern 2 — DARWIN-IDEA-KILLER
@@ -79,9 +79,28 @@ Mungerian-fallback-smuggling, Bohr-Wiener-sparsity-fails.
 - After a candidate construction is proposed
 - Before a Lean file is added to the umbrella build
 - Before a result is recorded in F-row
+- When a result creates moderate excitement or a tempting promotion
+  narrative. This is a hard trigger: dispatch a ruthless independent
+  kill-agent before writing the strong F-row or raising GNN/training odds.
 
 ALWAYS chain DARWIN after Pattern 1 or any claim-producing primitive.
 The chain Pattern-1 → DARWIN is the canonical recursive-friction loop.
+
+### Excitement-triggered gate
+
+If the Director wants to say "this may be the bridge", "this materially
+changes odds", "strongest result so far", "GNN maybe now", "publishable",
+or any similar promotion phrase, run DARWIN first. The expected output is
+not a generic review; it must attack:
+
+1. leakage from target-conditioned sampling,
+2. overlap between baseline and claimed improvement set,
+3. tautological metric movement,
+4. stronger deterministic feature absorption,
+5. statistical small-N fragility,
+6. whether the F-row wording should be downgraded.
+
+Record the survived claim only after the kill report lands.
 
 ## Anti-pattern
 
@@ -110,7 +129,7 @@ VERDICT: theorem stays conditional, residual is structural-not-laundered.
 
 ## Cross-references
 
-- `src/ztare/orchestrator/post_run_meta_audit.py` — apparatus-side analog
+- tenant post-run meta-audit — apparatus-side analog
   (cross-family LLM diagnostic). Extend, don't duplicate.
 - `mitigations_11_12_13_2026_05_08.md` — Reducer (P13) is a specialized
   DARWIN variant for 2150-vocab projections.

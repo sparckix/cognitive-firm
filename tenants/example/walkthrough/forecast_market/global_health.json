@@ -1,0 +1,33 @@
+{
+  "contract_count": 1,
+  "decision_use": {
+    "rows": 1
+  },
+  "contracts": [
+    {
+      "contract_id": "demo_forecast_001",
+      "lifecycle_state": "aggregate_ready",
+      "next_action": "request_human_work",
+      "contract": {
+        "contract_id": "demo_forecast_001",
+        "layer": "micro",
+        "question": "Will this demo claim be source-ready without restricted-source review?",
+        "task_type": "source_readiness",
+        "success_threshold": "primary source attached before downstream synthesis",
+        "horizon": "one work session"
+      },
+      "forecast_count": 2,
+      "aggregate": {
+        "p_success": 0.35,
+        "allocation_recommendation": {
+          "action": "request_human_work",
+          "reason": "The likely bottleneck is access to a restricted source, not more autonomous synthesis.",
+          "voi_proxy": 0.72,
+          "p_success": 0.35,
+          "expected_value": 0.4,
+          "forecast_spread": 0.18
+        }
+      }
+    }
+  ]
+}

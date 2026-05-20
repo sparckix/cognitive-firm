@@ -1,0 +1,25 @@
+{
+  "records": [
+    {
+      "action_id": "demo_action_001",
+      "action_ref": "tenants/example/walkthrough/README.md#flow",
+      "actor": "role.manager",
+      "actor_role": "manager",
+      "action_kind": "routing",
+      "decision_stage": "pre_work",
+      "objective_metric": "source_readiness",
+      "baseline_action": "continue autonomous synthesis",
+      "counterfactual_action": "request human source check",
+      "expected_effect": "reduce unsupported-claim risk",
+      "observed_outcome": "human work requested before synthesis",
+      "status": "planned",
+      "optimization_scope": "local",
+      "forecast_contract_id": "demo_forecast_001",
+      "requires_human_review": true,
+      "negative_externality_tags": [
+        "principal_time"
+      ],
+      "notes": "The review burden is explicit so the tenant can decide whether the action class is worth reusing."
+    }
+  ]
+}

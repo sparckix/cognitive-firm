@@ -1,15 +1,22 @@
-# `tenants/` — multi-tenant overlay slot
+# `tenants/` - tenant overlay slot
 
-This directory is a **slot**, not a package. The cognitive-firm kernel ships empty here on purpose: real tenant content (mandate text, principal preferences, role definitions, preference values) is private and lives in a sibling repo per tenant. This README documents the overlay pattern so a fork can host its own tenant cleanly.
+This directory is a **slot**, not a package. The public kernel includes a
+minimal `tenants/example/` overlay so adopters can see the shape. Real tenant
+content (mandate text, principal preferences, role definitions, project files,
+private evidence, and business-system bindings) should live in a sibling
+private repo per tenant. This README documents the overlay pattern so a fork
+can host its own tenant cleanly.
 
-## Why the kernel ships this empty
+## Why the kernel ships only an example
 
 cognitive-firm separates **mechanism** (in `src/`, `org/templates/`, `schemas/`) from **policy** (per-tenant mandates, preferences, role bindings). The kernel only ships mechanism. Policy is loaded at runtime from an overlay so:
 
-- Two organizations can run the same kernel without contaminating each other's instantiation.
+- Two organizations can use the same kernel without contaminating each other's
+  instantiation.
 - The kernel repo can stay public while tenant content stays private.
-- A fresh `git clone` of the kernel runs in **kernel-only mode** (templates only, no live policy) — this is the published-protocol-ready surface.
-- When new tenants are added, the public kernel sees zero diff.
+- A fresh `git clone` can run in **kernel-only mode** or inspect
+  `tenants/example/` without live private policy.
+- Real tenants can be added without changing public kernel history.
 
 ## The overlay pattern, concretely
 
@@ -132,7 +139,10 @@ The kernel returns to kernel-only mode; templates remain, live policy is gone.
 
 ## Multiple tenants on one kernel
 
-A single cognitive-firm checkout can host **one active tenant at a time** because the symlink slots are fixed paths. To switch tenants, run teardown then run the next tenant's setup. For multiple concurrent tenants, run multiple kernel checkouts (one per tenant), each pointed at its own tenant repo.
+A single cognitive-firm checkout should host **one active tenant at a time** in
+T1 because the symlink slots are fixed paths. To switch tenants, run teardown
+then run the next tenant's setup. For multiple concurrent tenants, run multiple
+kernel checkouts (one per tenant), each pointed at its own tenant repo.
 
 For shared-volume / Postgres-backed tenant isolation (the T2 reactivation path), see the threat-model table in `docs/PROTOCOLS.md`.
 
@@ -143,13 +153,15 @@ For shared-volume / Postgres-backed tenant isolation (the T2 reactivation path),
 | Role schema (`schemas/role.v1.schema.json`) | Tenant-specific role definitions (e.g. `research_director.yaml`) |
 | Mandate templates (`org/mandates/templates/`) | Real mandate text with research-program / IP context |
 | Preference templates (`org/preferences/templates/`) | Principal taste, budget priorities, model preferences |
-| Generic roles (`org/roles/{manager,engineer,reviewer,principal}.yaml`) | Tenant workers (e.g. ZTARE's `debate_runner`, NS-track-specific roles) |
+| Generic roles (`org/roles/{manager,engineer,reviewer,principal}.yaml`) | Tenant workers, project-specific reviewers, and domain-specific role offices |
 | Bootstrap manifest (`org/bootstrap_manifest.yaml`) | Tenant-specific conditional reads cited from manifest |
 | Pattern + anti-pattern catalogs (`org/patterns/`, `org/anti-patterns/`) | Tenant project IDs, in-flight strategy, sealed pre-registrations |
 | Signal kinds (`org/signals/SIGNAL_KINDS.md`) | Damage-signal rationale tied to specific tenant incidents |
 
 Rule of thumb: if removing the file would break the kernel's ability to boot in kernel-only mode, it stays in the kernel; if removing it just removes a tenant's instantiation, it goes to the overlay.
 
-## Reference implementation
+## Example implementation
 
-The companion repo `ztare-research-co` is the working example. The figs_activist_loop / ZTARE project hosts the cognitive-firm kernel with the `ztare` tenant overlaid, and the structure described here is exactly what that repo implements.
+Use `tenants/example/` as the public, generic overlay example. Private
+organizations may keep richer overlays in sibling repos and symlink them into
+the public kernel checkout.
