@@ -62,3 +62,33 @@ def test_attention_route_routes_a2h_work_to_the_member_human(tmp_path):
         "GET", "/kernel/attention/bob", config=config
     )
     assert other.payload["signals"] == []
+
+
+def test_surface_policy_blocks_a_projection_only_surface(tmp_path):
+    config = KernelServiceConfig(
+        human_work_log=tmp_path / "hw.jsonl",
+        surface_write_modes={"orbit": "projection_only"},
+    )
+    resp = dispatch_kernel_request(
+        "POST",
+        "/kernel/human-work",
+        body={"actor_context": {"surface": "orbit"}},
+        config=config,
+    )
+    assert resp.status == 409
+
+
+def test_surface_policy_allows_an_unrestricted_surface(tmp_path):
+    config = KernelServiceConfig(
+        human_work_log=tmp_path / "hw.jsonl",
+        surface_write_modes={"orbit": "projection_only"},
+    )
+    # 'cli' is not projection-only; the guard lets it through (the request may
+    # still fail downstream for an unrelated reason, but not with a 409).
+    resp = dispatch_kernel_request(
+        "POST",
+        "/kernel/human-work",
+        body={"actor_context": {"surface": "cli"}},
+        config=config,
+    )
+    assert resp.status != 409

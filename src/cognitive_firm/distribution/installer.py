@@ -19,11 +19,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+import yaml
+
 import cognitive_firm
 from cognitive_firm.distribution import gitops
 from cognitive_firm.distribution.boot import boot_check
 from cognitive_firm.distribution.manifest import (
     FILES_DIRNAME,
+    PATCH_TARGET_SUFFIXES,
     PackageManifest,
     check_kernel_compat,
 )
@@ -157,6 +160,63 @@ def plan_install(
     return plan
 
 
+def _component_files(
+    manifest: PackageManifest, package_root: Path, target_root: Path
+) -> Iterator[tuple[Path, str, bool, str]]:
+    """Yield (source_file, dest_relative, conflict, op) for every file to
+    install — the op-aware plan the installer applies (O3-P2)."""
+    files_root = Path(package_root) / FILES_DIRNAME
+    target_root = Path(target_root)
+    for component in manifest.components:
+        src = files_root / component.source
+        if not src.exists():
+            if component.optional:
+                continue
+            raise FileNotFoundError(
+                f"component source missing: {component.source}"
+            )
+        for src_file, dest_rel in _iter_files(src, component.dest):
+            conflict = (target_root / dest_rel).exists()
+            yield src_file, dest_rel, conflict, component.op
+
+
+def _merge_patch(target: Any, patch: Any) -> Any:
+    """Apply an RFC 7386 JSON Merge Patch to a document. A `null` value in the
+    patch deletes the key; a non-object patch replaces the target outright."""
+    if not isinstance(patch, dict):
+        return patch
+    base = dict(target) if isinstance(target, dict) else {}
+    for key, value in patch.items():
+        if value is None:
+            base.pop(key, None)
+        else:
+            base[key] = _merge_patch(base.get(key), value)
+    return base
+
+
+def _load_structured(path: Path) -> Any:
+    text = Path(path).read_text()
+    if Path(path).suffix == ".json":
+        return json.loads(text)
+    return yaml.safe_load(text)
+
+
+def _apply_merge_patch(patch_file: Path, target_file: Path) -> None:
+    """Merge the patch document at ``patch_file`` into ``target_file`` in place,
+    preserving the target's JSON/YAML encoding."""
+    if target_file.suffix not in PATCH_TARGET_SUFFIXES:
+        raise InstallError(
+            f"a patch component may only target JSON/YAML: {target_file.name}"
+        )
+    merged = _merge_patch(
+        _load_structured(target_file), _load_structured(patch_file)
+    )
+    if target_file.suffix == ".json":
+        target_file.write_text(json.dumps(merged, indent=2) + "\n")
+    else:
+        target_file.write_text(yaml.safe_dump(merged, sort_keys=False))
+
+
 def _ensure_gitignore(target_root: Path) -> None:
     """Ensure the install-receipt directory is never committed into the org."""
     gitignore = target_root / ".gitignore"
@@ -230,17 +290,27 @@ def install(
         gitops.init_repo(target_root)
     pre_install_ref = gitops.current_ref(target_root)
 
-    plan = plan_install(manifest, package_root, target_root)
     installed: list[InstalledFile] = []
     skipped: list[str] = []
     created: list[str] = []
     try:
-        for src_file, dest_rel, conflict in plan:
-            if conflict and not force:
+        for src_file, dest_rel, conflict, op in _component_files(
+            manifest, package_root, target_root
+        ):
+            dest_path = target_root / dest_rel
+            if op == "patch":
+                if not conflict:
+                    raise InstallError(
+                        f"patch component targets a missing file: {dest_rel}"
+                    )
+                _apply_merge_patch(src_file, dest_path)
+                installed.append(InstalledFile(dest_rel, "patched"))
+                continue
+            if op == "add" and conflict and not force:
                 skipped.append(dest_rel)
                 installed.append(InstalledFile(dest_rel, "skipped"))
                 continue
-            dest_path = target_root / dest_rel
+            # op == "add" (no conflict, or forced) or op == "replace"
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(src_file, dest_path)
             action = "overwritten" if conflict else "created"

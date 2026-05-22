@@ -24,6 +24,19 @@ SCHEMA_VERSION = 1
 PACKAGE_KINDS = ("distro", "overlay")
 FILES_DIRNAME = "files"
 
+# Overlay-composition intent for a component (O3-P2):
+#   add     - install a new file; a pre-existing dest is a conflict (default,
+#             the historical behavior).
+#   replace - own the file outright; a pre-existing dest is expected and
+#             overwritten.
+#   patch   - the component source is an RFC 7386 JSON Merge Patch applied to
+#             an existing JSON/YAML target file.
+COMPONENT_OPS = ("add", "replace", "patch")
+
+# File extensions a `patch` component may target — Merge Patch needs a
+# structured (object/map) document to merge into.
+PATCH_TARGET_SUFFIXES = (".json", ".yaml", ".yml")
+
 
 class ManifestError(ValueError):
     """Raised when a package manifest cannot be loaded or is malformed."""
@@ -52,11 +65,15 @@ class KernelCompat:
 
 @dataclass(frozen=True)
 class Component:
-    """One installable unit: a directory or file under the package's files/."""
+    """One installable unit: a directory or file under the package's files/.
+
+    ``op`` is the overlay-composition intent — see ``COMPONENT_OPS``.
+    """
 
     source: str  # package-relative path under files/
     dest: str  # target-relative install path
     optional: bool = False
+    op: str = "add"
 
     @classmethod
     def from_raw(cls, raw: dict[str, Any]) -> "Component":
@@ -67,6 +84,7 @@ class Component:
             source=source,
             dest=str(raw.get("dest", source)).strip(),
             optional=bool(raw.get("optional", False)),
+            op=(str(raw.get("op", "add")).strip() or "add"),
         )
 
 
@@ -127,6 +145,10 @@ def validate_manifest(
     files_root = Path(package_root) / FILES_DIRNAME
     seen_dests: set[str] = set()
     for component in manifest.components:
+        if component.op not in COMPONENT_OPS:
+            issues.append(
+                f"component op '{component.op}' not in {COMPONENT_OPS}"
+            )
         if _escapes(component.source):
             issues.append(
                 f"component source escapes package: {component.source}"

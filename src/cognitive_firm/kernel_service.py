@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -149,6 +149,10 @@ class KernelServiceConfig:
     identity_admin_roles: tuple[str, ...] = ("role.identity_admin", "role.owner", "role.principal")
     identity_provider: IdentityProviderAdapter | None = None
     mutation_backend: TransactionalMutationBackend | None = None
+    # Per-surface write policy (L3 / O-Q4). Maps an ActorContext.surface tag to
+    # "projection_only" or "read_write". A surface absent here may write —
+    # the kernel denies only what a deployment explicitly restricts.
+    surface_write_modes: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -240,6 +244,18 @@ def dispatch_kernel_request(
     try:
         subject = _authenticate(headers or {}, config=config)
         actor = _actor_context(body, config=config, subject=subject)
+        if method == "POST":
+            from cognitive_firm.userland.surface_policy import (
+                surface_write_allowed,
+            )
+
+            _surface_decision = surface_write_allowed(
+                surface=actor.surface,
+                is_mutation=True,
+                modes=config.surface_write_modes,
+            )
+            if not _surface_decision.allowed:
+                return _error(409, _surface_decision.reason)
         if method == "GET" and route == "/health":
             return _ok({"ok": True, "service": "cognitive-firm-kernel"})
 
