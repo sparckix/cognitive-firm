@@ -157,6 +157,70 @@ class KernelServiceResponse:
     payload: dict[str, Any]
 
 
+def _vocabulary_payload() -> dict[str, Any]:
+    """The L4 userland vocabulary, served so every surface speaks one dialect."""
+    from cognitive_firm.userland import vocabulary
+
+    return {
+        "schema_version": vocabulary.schema_version(),
+        "terms": [term.as_dict() for term in vocabulary.all_terms()],
+    }
+
+
+def _attention_feed(config: KernelServiceConfig) -> list[dict[str, Any]]:
+    """Gather the firm's pending signals and route them to participants (L1).
+
+    Pending gates plus A2H work requests are normalized, then the userland
+    attention router classifies each and resolves its target participant.
+    """
+    from cognitive_firm.orchestration.actor_membership import (
+        list_actor_memberships,
+    )
+    from cognitive_firm.orchestration.human_work import (
+        list_a2h_waiting_on_human_sessions,
+    )
+    from cognitive_firm.userland.attention_router import (
+        AttentionSignal,
+        pending_gate_signals,
+        resolve_authority_role,
+        route_signals,
+    )
+
+    signals = list(pending_gate_signals(config.gates_dir))
+    for session in list_a2h_waiting_on_human_sessions(
+        log_path=config.human_work_log
+    ):
+        signals.append(
+            AttentionSignal(
+                signal_id=session.session_id,
+                kind="a2h_waiting",
+                headline=f"Work request: {session.objective}",
+                source_ref=session.session_id,
+                created_at_utc=session.created_at_utc,
+                target_role_id=session.agent_counterparty_role,
+                target_actor_id=session.human_actor,
+            )
+        )
+
+    authority_role = resolve_authority_role(config.org_dir)
+    authority_actor: str | None = None
+    if authority_role:
+        memberships = list_actor_memberships(
+            role_id=authority_role,
+            status="active",
+            log_path=config.actor_membership_log,
+        )
+        if memberships:
+            authority_actor = memberships[0].actor_id
+
+    routed = route_signals(
+        signals,
+        authority_actor_id=authority_actor,
+        authority_role_id=authority_role,
+    )
+    return [signal.as_dict() for signal in routed]
+
+
 def dispatch_kernel_request(
     method: str,
     path: str,
@@ -193,6 +257,19 @@ def dispatch_kernel_request(
             )
             summary = build_accountability_summary(surface)
             return _ok({"summary": summary.as_dict()})
+
+        if method == "GET" and route == "/kernel/vocabulary":
+            return _ok(_vocabulary_payload())
+
+        if (
+            method == "GET"
+            and len(parts) == 3
+            and parts[:2] == ["kernel", "attention"]
+        ):
+            actor_id = parts[2]
+            routed = _attention_feed(config)
+            mine = [s for s in routed if s.get("target_actor_id") == actor_id]
+            return _ok({"actor_id": actor_id, "signals": mine})
 
         if method == "POST" and route == "/kernel/human-work":
             _verify_mutation_lease("human_work:create", body, actor=actor, config=config)
