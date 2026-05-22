@@ -27,7 +27,9 @@ Keep a feature in the kernel when it is a reusable organizational mechanism:
 
 Examples: actor identity, actor membership, leases, H2A/A2H/A2A, MCP
 capabilities, inbound-event quarantine, run checkpoints, action attestations,
-accountability cases, learning events, state-surface inventory.
+accountability cases, learning events, state-surface inventory, operating-unit
+contracts and the durable work-item queue, outcome links, routine reviews,
+governed resource allocation, and residual decision rights.
 
 ## What Belongs Outside The Kernel
 

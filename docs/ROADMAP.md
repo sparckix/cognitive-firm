@@ -13,6 +13,13 @@ tenant-specific research policy, scoring systems, and optimizer rules.
   cases.
 - Local kernel service boundary with first-party actor identity, actor
   membership, identity provider adapter shape, and optional resource leases.
+- Production layer: typed operating-unit contracts and a durable work-item
+  queue with lease-fenced claims, retries, dead letters, bounded exits, and an
+  operating-unit health dashboard.
+- Durable-learning layer: outcome links (did an approved change improve a
+  measured outcome?), routine reviews (scheduled review and accountable
+  retirement of stale routines), governed resource allocation across operating
+  units, and residual decision-rights records for incomplete-mandate situations.
 - Public verification commands: `make smoke-public`, `make smoke-docker`, and
   the Python test suite.
 - Backup/restore smoke for a minimal T1 organization snapshot and restored

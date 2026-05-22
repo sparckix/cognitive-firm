@@ -19,6 +19,13 @@ The implementation source is `src/cognitive_firm/orchestration/state_surface_inv
 | `governance_changes` | canonical state | JSONL | `propose_governance_change` | review queues, org surface | `docs/protocols/governance-changes.md` |
 | `learning_events` | canonical state | JSONL | `create_learning_event`, candidate promotion | review queues, org surface | `docs/protocols/learning-events.md` |
 | `learning_event_encounters` | telemetry | JSONL | `record_learning_event_encounter` | work discovery, learning replay audits | `docs/protocols/learning-events.md` |
+| `operating_units` | canonical state | JSONL | `define_operating_unit`, `set_operating_unit_status` | work items, operating-unit dashboard | `docs/protocols/work-items.md` |
+| `work_items` | canonical state | JSONL | `enqueue_work_item`, `claim_work_item`, `complete_work_item`, `fail_work_item` | operating-unit dashboard, kernel event stream | `docs/protocols/work-items.md` |
+| `outcome_links` | canonical state | JSONL | `create_outcome_link`, `record_metric_snapshot`, `record_verdict` | outcome-link summary, routine reviews, org surface | `docs/protocols/outcome-links.md` |
+| `routine_reviews` | canonical state | JSONL | `schedule_routine_review`, `record_review_outcome`, `retire_routine` | due-review surface, review queues, org surface | `docs/protocols/routine-reviews.md` |
+| `resource_allocation` | canonical state | JSONL | `record_allocation_decision`, `apply_allocation_decision`, `revert_allocation_decision` | allocation ledger, operating-unit dashboard, audit review | `docs/protocols/resource-allocation.md` |
+| `residual_right_assignments` | canonical state | JSONL | `assign_residual_right` | residual-rights holder lookup, decision-rights summary | `docs/protocols/decision-rights.md` |
+| `residual_decisions` | canonical state | JSONL | `record_residual_decision`, `review_residual_decision` | decision-rights summary, governance review | `docs/protocols/decision-rights.md` |
 
 ## Event And Projection Surfaces
 
@@ -34,6 +41,7 @@ The implementation source is `src/cognitive_firm/orchestration/state_surface_inv
 | `strategy_office` | read model | projection | observer-only findings from org-surface state | `docs/protocols/strategy-office.md` |
 | `learning_transition_compiler` | read model | projection | proposed learning candidates | `docs/protocols/learning-transition-compiler.md` |
 | `accountability` | read model | projection | joined accountability summary | `docs/protocols/accountability.md` |
+| `operating_unit_surface` | read model | projection | production health per operating unit: backlog, claimed, p95, throughput, blockers | `docs/protocols/work-items.md` |
 | `intelligence_sources` | read model | projection | source coverage and repair candidates | `docs/protocols/intelligence-sources.md` |
 
 ## Tenant-Owned Read Models

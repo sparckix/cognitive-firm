@@ -300,6 +300,13 @@ make smoke-docker
 | Learning transition compiler | `src/cognitive_firm/orchestration/learning_transition_compiler.py` | `tests/test_learning_transition_compiler.py` |
 | Approved learning events | `src/cognitive_firm/orchestration/learning_events.py` | `tests/test_learning_events.py` |
 | Learning-carrier work discovery | `src/cognitive_firm/orchestration/work_discovery.py` | `tests/test_work_discovery_learning_carriers.py` |
+| Operating-unit contracts | `src/cognitive_firm/orchestration/operating_units.py` | `tests/test_operating_units.py` |
+| Durable work-item queue | `src/cognitive_firm/orchestration/work_items.py` | `tests/test_work_items.py`, `tests/test_kernel_service.py` |
+| Operating-unit dashboard | `src/cognitive_firm/orchestration/operating_unit_surface.py` | `tests/test_operating_unit_surface.py` |
+| Outcome links (learning → measured outcome) | `src/cognitive_firm/orchestration/outcome_links.py` | `tests/test_outcome_links.py` |
+| Routine reviews (forgetting lifecycle) | `src/cognitive_firm/orchestration/routine_reviews.py` | `tests/test_routine_reviews.py` |
+| Governed resource allocation | `src/cognitive_firm/orchestration/resource_allocation.py` | `tests/test_resource_allocation.py` |
+| Residual decision rights | `src/cognitive_firm/orchestration/decision_rights.py` | `tests/test_decision_rights.py` |
 | EU AI Act deploy gate | `src/cognitive_firm/orchestration/eu_ai_act_deploy_gate.py` | `tests/test_eu_ai_act_deploy_gate.py`; `docs/protocols/eu-ai-act-deploy-gate.md` |
 | Property-based invariants (Hypothesis) | `tests/test_invariants_property_based.py` | 8/8 |
 | Cross-primitive integration tests | `tests/test_cross_primitive_integration.py` | 3/3 |

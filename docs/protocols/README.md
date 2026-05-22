@@ -53,6 +53,15 @@ the connector-inventory surface. [Action Attestation](action-attestation.md)
 records compact machine-side provenance for actions, tool calls, runtime events,
 and artifacts. [EU AI Act Deploy Gate](eu-ai-act-deploy-gate.md) defines the
 optional T2 mapping check for roles that opt into it.
+[Work Items And Operating Units](work-items.md) defines the production layer:
+typed operating-unit contracts and a durable, lease-fenced work queue with
+retries, dead letters, and bounded exits.
+[Outcome Links](outcome-links.md) record whether an approved change improved a
+measured outcome. [Routine Reviews](routine-reviews.md) schedule review and
+accountable retirement of stale routines. [Resource Allocation](resource-allocation.md)
+makes cross-operating-unit budget/capacity movement a governed decision.
+[Decision Rights](decision-rights.md) record residual control rights for
+situations an incomplete mandate does not cover.
 Re-run the folder index generator when refreshing the managed index below.
 
 <!-- AUTO-INDEX:START (managed by scripts/gen_folder_index.py — edit prose OUTSIDE this block) -->
@@ -76,6 +85,7 @@ Re-run the folder index generator when refreshing the managed index below.
 - [adapter-conformance.md](adapter-conformance.md)
 - [app-integration.md](app-integration.md)
 - [audit-integrity.md](audit-integrity.md)
+- [decision-rights.md](decision-rights.md)
 - [eu-ai-act-deploy-gate.md](eu-ai-act-deploy-gate.md)
 - [forecast-market.md](forecast-market.md)
 - [governance-changes.md](governance-changes.md)
@@ -93,15 +103,19 @@ Re-run the folder index generator when refreshing the managed index below.
 - [mcp.md](mcp.md)
 - [migrations.md](migrations.md)
 - [otel-export.md](otel-export.md)
+- [outcome-links.md](outcome-links.md)
 - [policy-decisions.md](policy-decisions.md)
 - [project-charter.md](project-charter.md)
+- [resource-allocation.md](resource-allocation.md)
 - [resource-envelope.md](resource-envelope.md)
+- [routine-reviews.md](routine-reviews.md)
 - [run-checkpoints.md](run-checkpoints.md)
 - [runtime-adapters.md](runtime-adapters.md)
 - [state-backends.md](state-backends.md)
 - [state-surface-inventory.md](state-surface-inventory.md)
 - [strategy-office.md](strategy-office.md)
 - [tenant-isolation.md](tenant-isolation.md)
+- [work-items.md](work-items.md)
 
-<sub>0 sub-folder(s), 37 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
+<sub>0 sub-folder(s), 42 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
 

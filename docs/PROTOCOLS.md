@@ -301,6 +301,62 @@ primitive semantics.
 
 Status: first-party interface and tests shipped.
 
+### [Work Items And Operating Units](protocols/work-items.md)
+
+How the kernel runs recurring production work under the governance layer. An
+operating unit is the typed contract for one production lane (a station, desk,
+or department); a work item is one durable, claimable unit of work that flows
+through it. Claims are lease-fenced with monotonic tokens, failures retry and
+then dead-letter, and completion must land on a bounded exit the unit declared
+in advance. Every transition emits a kernel event. The operating-unit dashboard
+projects backlog, claimed, p95, throughput, and blockers per unit.
+
+Status: first-party interfaces, kernel-service routes, CLIs, and tests shipped.
+
+### [Outcome Links](protocols/outcome-links.md)
+
+How the kernel records whether an approved change actually improved a measured
+outcome. An outcome link ties a change (a learning event, governance change, or
+accountability case) to a baseline metric snapshot, post-change snapshots, and
+a tenant verdict. The kernel owns the typed record and lifecycle; the tenant
+owns the metric and the verdict. This makes the kernel's central claim —
+durable learning produces measurable improvement — testable from kernel
+records rather than asserted.
+
+Status: first-party interface, kernel-service routes, CLI, and tests shipped.
+
+### [Routine Reviews](protocols/routine-reviews.md)
+
+How the kernel sunsets stale routines. Approved learning events otherwise only
+accumulate; routine reviews schedule a review of a routine by a due date,
+surface overdue reviews as forgetting pressure, and record an accountable
+retirement transition. The kernel owns the schedule and the transition; the
+tenant owns the review cadence and the judgment.
+
+Status: first-party interface, kernel-service routes, CLI, and tests shipped.
+
+### [Resource Allocation](protocols/resource-allocation.md)
+
+How the kernel makes cross-operating-unit resource movement a governed
+decision. The kernel ships divisions (operating units) and a dashboard; this
+adds the general-office function: a typed allocation decision moves budget or
+capacity between units with a deciding role, authority basis, and rationale,
+and projects an allocation ledger. The kernel records decisions; the tenant
+owns the optimizer that proposes the numbers.
+
+Status: first-party interface, kernel-service routes, CLI, and tests shipped.
+
+### [Decision Rights](protocols/decision-rights.md)
+
+How the kernel records residual control rights for incomplete mandates. A
+mandate is an incomplete contract; when it is silent, the residual-rights
+holder decides. Residual-right assignments name the default decider per scope;
+residual decisions record what was decided where no clause applied, flag an
+unauthorized decider rather than rejecting the record, and can be promoted to a
+new mandate clause. This keeps mandate-gap decisions reviewable.
+
+Status: first-party interfaces, kernel-service routes, CLI, and tests shipped.
+
 ### [Accountability Summary](protocols/accountability.md)
 
 How the kernel joins owners, projects, review status, due dates, source
