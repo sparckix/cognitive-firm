@@ -161,3 +161,23 @@ These are now part of the public adoption path:
 - `docs/accountability-speed-envelope.md`;
 - `docs/examples/learning-event-replay.md`;
 - `docs/examples/action-intelligence-source-health.md`.
+
+## Adoption And Distribution Direction
+
+The kernel is sound; the current frontier is making it adoptable without an
+adopter having to assemble it from a protocol catalog. Planned, in sequence:
+
+- A userland: an operator-facing surface that hides the kernel, so a
+  non-technical operator can run a governed organization without reading the
+  protocol specs.
+- A starter distribution + installer: a day-one runnable example organization
+  brought up in a single action, not assembled from the catalog.
+- A package / overlay ecosystem: tenant overlays as installable, shareable
+  packages with a clear third-party authoring path.
+- Open-core distribution: the kernel stays open and self-hostable so the
+  filesystem + git inspect/fork/replay invariant holds; a managed hosted
+  option serves adopters who will not run infrastructure.
+
+These are gated on a first validating field pilot: the kernel's
+measurable-improvement claim should be demonstrated with one real adopter
+before adoption is scaled.
