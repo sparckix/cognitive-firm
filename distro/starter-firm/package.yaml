@@ -1,0 +1,41 @@
+# starter-firm distro - schema_version 1
+#
+# A curated, day-one-runnable governed organization. Install it into an empty
+# directory to get a firm you can inspect, fork, and replay from the first
+# commit. See docs/protocols/distribution.md.
+
+schema_version: 1
+name: starter-firm
+version: 0.1.0
+kind: distro
+description: >
+  A day-one runnable governed organization: a principal, an operating lead,
+  an analyst, and a closure reviewer, with mandates and principal
+  preferences. Install it into an empty directory to get a governed firm you
+  can inspect, fork, and replay from the first commit.
+
+kernel:
+  min_version: "0.1.0"
+  max_version: null
+
+components:
+  - source: roles
+    dest: roles
+  - source: mandates
+    dest: mandates
+  - source: preferences
+    dest: preferences
+
+requires: []
+provides:
+  - governed-organization
+  - accountable-closure
+
+post_install_message: |
+  Installed the starter-firm distro.
+  Next:
+    1. Review roles/ and edit authority boundaries to match your firm.
+    2. Replace preferences/principal.yaml with your escalation and budget
+       policy.
+    3. git init && git add -A && git commit -m "starter-firm: initial org"
+       - the filesystem + git is now your system of record.

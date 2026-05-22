@@ -42,6 +42,9 @@ tenant-specific research policy, scoring systems, and optimizer rules.
 - Field-pilot starter pack with scope, baseline, metrics, and learning-event
   summary templates.
 - Obsidian-compatible docs and a minimal example-tenant overlay.
+- Distribution layer: versioned distro/overlay packages, a package registry,
+  and a one-action installer with boot-proxy verification, plus a
+  `starter-firm` distro and the `cognitive-firm-distro` CLI.
 
 ## Lean T2 Seams
 
@@ -165,19 +168,27 @@ These are now part of the public adoption path:
 ## Adoption And Distribution Direction
 
 The kernel is sound; the current frontier is making it adoptable without an
-adopter having to assemble it from a protocol catalog. Planned, in sequence:
+adopter having to assemble it from a protocol catalog.
+
+Shipped:
+
+- Distribution layer: versioned `distro`/`overlay` packages, a package
+  registry, and a one-action installer with a structural boot-proxy verify.
+  The `starter-firm` distro brings up a governed organization (principal,
+  lead, analyst, reviewer) in a single command. See
+  [`protocols/distribution.md`](protocols/distribution.md).
+
+Planned, in sequence:
 
 - A userland: an operator-facing surface that hides the kernel, so a
   non-technical operator can run a governed organization without reading the
   protocol specs.
-- A starter distribution + installer: a day-one runnable example organization
-  brought up in a single action, not assembled from the catalog.
-- A package / overlay ecosystem: tenant overlays as installable, shareable
-  packages with a clear third-party authoring path.
+- A shared package registry beyond local discovery: overlay packages as
+  installable, shareable artifacts with a clear third-party authoring path.
 - Open-core distribution: the kernel stays open and self-hostable so the
   filesystem + git inspect/fork/replay invariant holds; a managed hosted
   option serves adopters who will not run infrastructure.
 
-These are gated on a first validating field pilot: the kernel's
+The remaining items are gated on a first validating field pilot: the kernel's
 measurable-improvement claim should be demonstrated with one real adopter
 before adoption is scaled.

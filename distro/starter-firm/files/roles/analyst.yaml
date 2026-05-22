@@ -1,0 +1,29 @@
+schema_version: 1
+role_id: analyst
+role_class: specialist
+description: >
+  Production specialist. Performs the organization's analysis and work-product
+  tasks, records findings as durable state, and hands completed work to the
+  reviewer for accountable closure.
+
+authorized_paths:
+  - "projects/"
+forbidden_paths:
+  - "roles/"
+  - "mandates/"
+  - ".env"
+  - "secrets/"
+
+delegates_to: []
+
+escalates_to:
+  - role.lead
+
+budget:
+  daily_cap_usd: 25.00
+  session_cap_usd: 15.00
+  single_action_cap_usd: 5.00
+  warn_threshold_frac: 0.80
+  absolute_ceiling_usd: 25.00
+
+mandate_path: mandates/analyst_mandate.md

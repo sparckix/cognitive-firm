@@ -1,0 +1,29 @@
+schema_version: 1
+role_id: reviewer
+role_class: reviewer
+description: >
+  Closure reviewer. Independently checks completed work against its mandate and
+  evidence before it is accepted, and records review verdicts so the
+  organization keeps an accountable-closure trail.
+
+authorized_paths:
+  - "projects/"
+forbidden_paths:
+  - "roles/"
+  - "mandates/"
+  - ".env"
+  - "secrets/"
+
+delegates_to: []
+
+escalates_to:
+  - role.lead
+
+budget:
+  daily_cap_usd: 20.00
+  session_cap_usd: 12.00
+  single_action_cap_usd: 4.00
+  warn_threshold_frac: 0.80
+  absolute_ceiling_usd: 20.00
+
+mandate_path: mandates/reviewer_mandate.md

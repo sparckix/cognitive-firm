@@ -86,6 +86,7 @@ Re-run the folder index generator when refreshing the managed index below.
 - [app-integration.md](app-integration.md)
 - [audit-integrity.md](audit-integrity.md)
 - [decision-rights.md](decision-rights.md)
+- [distribution.md](distribution.md)
 - [eu-ai-act-deploy-gate.md](eu-ai-act-deploy-gate.md)
 - [forecast-market.md](forecast-market.md)
 - [governance-changes.md](governance-changes.md)
@@ -117,5 +118,5 @@ Re-run the folder index generator when refreshing the managed index below.
 - [tenant-isolation.md](tenant-isolation.md)
 - [work-items.md](work-items.md)
 
-<sub>0 sub-folder(s), 42 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
+<sub>0 sub-folder(s), 43 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
 

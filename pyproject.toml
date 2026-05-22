@@ -62,6 +62,7 @@ Source = "https://github.com/sparckix/cognitive-firm"
 cognitive-firm-kernel-service = "cognitive_firm.kernel_service:main"
 cognitive-firm-actor-membership = "cognitive_firm.orchestration.actor_membership:main"
 cognitive-firm-identity-provisioning = "cognitive_firm.identity_provisioning:main"
+cognitive-firm-distro = "cognitive_firm.distribution.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
