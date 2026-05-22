@@ -63,6 +63,7 @@ cognitive-firm-kernel-service = "cognitive_firm.kernel_service:main"
 cognitive-firm-actor-membership = "cognitive_firm.orchestration.actor_membership:main"
 cognitive-firm-identity-provisioning = "cognitive_firm.identity_provisioning:main"
 cognitive-firm-distro = "cognitive_firm.distribution.cli:main"
+cognitive-firm-userland = "cognitive_firm.userland.cli:main"
 
 # The kernel package lives under src/; the distro/ tree lives at the repo
 # root. Both ship in the wheel: the kernel as importable code, distro/ as a
