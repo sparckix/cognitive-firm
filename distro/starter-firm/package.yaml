@@ -10,9 +10,10 @@ version: 0.1.0
 kind: distro
 description: >
   A day-one runnable governed organization: a principal, an operating lead,
-  an analyst, and a closure reviewer, with mandates and principal
-  preferences. Install it into an empty directory to get a governed firm you
-  can inspect, fork, and replay from the first commit.
+  an analyst, and a closure reviewer, with mandates, principal preferences,
+  one operating unit, and one project charter — a real governance loop you
+  can run on the first commit. Install it into an empty directory to get a
+  governed firm you can inspect, fork, and replay.
 
 kernel:
   min_version: "0.1.0"
@@ -25,17 +26,28 @@ components:
     dest: mandates
   - source: preferences
     dest: preferences
+  - source: operating_units
+    dest: operating_units
+  - source: projects
+    dest: projects
 
-requires: []
 provides:
   - governed-organization
   - accountable-closure
+  - runnable-governance-loop
 
 post_install_message: |
   Installed the starter-firm distro.
+  It ships a runnable governance loop: the Review Desk operating unit and a
+  generic first-project charter. The loop is real; the first DOMAIN project
+  is your own first action.
   Next:
     1. Review roles/ and edit authority boundaries to match your firm.
     2. Replace preferences/principal.yaml with your escalation and budget
        policy.
-    3. git init && git add -A && git commit -m "starter-firm: initial org"
-       - the filesystem + git is now your system of record.
+    3. Edit projects/first-project/project_charter.md - replace its Core
+       Question with your firm's actual first unit of work.
+    4. The install is already your first git commit - the filesystem + git
+       is now your system of record. Commit your edits from steps 1-3 when
+       you are ready, and `cognitive-firm-distro rollback` undoes the install.
+  See DEPLOY.md for the single-host deployment path.

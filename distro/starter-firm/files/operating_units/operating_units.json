@@ -1,0 +1,15 @@
+[
+  {
+    "unit_id": "review_desk",
+    "unit_kind": "governance_gate",
+    "display_name": "Review Desk",
+    "owner_role": "role.lead",
+    "input_kinds": ["produced_artifact"],
+    "allowed_work_kinds": ["review_artifact", "return_for_rework"],
+    "allowed_exits": ["accepted", "returned_for_rework"],
+    "worker_roles": ["role.reviewer"],
+    "sla": {"p95_seconds": 120},
+    "operator_required_when": ["ambiguous_value", "policy_change"],
+    "governance_required_for": ["accepted"]
+  }
+]

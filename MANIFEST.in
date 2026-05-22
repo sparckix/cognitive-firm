@@ -1,0 +1,5 @@
+# Source-distribution manifest. The distro/ tree is shipped as package data so
+# bundled distros are available from a `pip install`, not only a git checkout.
+recursive-include distro *.yaml *.yml *.md *.json *.txt
+include distro/__init__.py
+recursive-include distro/starter-firm/files *

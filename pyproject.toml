@@ -64,12 +64,17 @@ cognitive-firm-actor-membership = "cognitive_firm.orchestration.actor_membership
 cognitive-firm-identity-provisioning = "cognitive_firm.identity_provisioning:main"
 cognitive-firm-distro = "cognitive_firm.distribution.cli:main"
 
+# The kernel package lives under src/; the distro/ tree lives at the repo
+# root. Both ship in the wheel: the kernel as importable code, distro/ as a
+# data tree so `cognitive-firm-distro list` finds the bundled distros from a
+# `pip install` (not just a checkout).
 [tool.setuptools.packages.find]
-where = ["src"]
-include = ["cognitive_firm*"]
+where = ["src", "."]
+include = ["cognitive_firm*", "distro*"]
 
 [tool.setuptools.package-data]
 cognitive_firm = ["py.typed"]
+distro = ["**/*.yaml", "**/*.yml", "**/*.md", "**/*.json", "**/*.txt"]
 
 [tool.ruff]
 line-length = 110
