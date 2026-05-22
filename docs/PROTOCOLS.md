@@ -104,6 +104,13 @@ Local review artifacts (orthogonal): tenant-owned records for interdisciplinary
 or synthetic reviews of significant primitive, mandate, charter, strategy, or
 tenant-policy changes. Keep artifacts under the gitignored `reviews/`
 workspace by default, and promote only durable conclusions into docs or policy.
+
+Distribution (orthogonal): versioned `distro`/`overlay` packages, a package
+registry, and a transactional git-backed installer compose a runnable governed
+organization an operator installs in one action. The installer is the userland
+of the OS analogy; it never writes the kernel, only overlay files the adopter
+owns. Extension schemas (orthogonal) let a package register a per-`kind` JSON
+Schema to validate custom primitive payloads without a kernel change.
 ```
 
 ## The core protocols
@@ -497,6 +504,38 @@ state, approval references, and future application cues without applying the
 referenced mutation themselves.
 
 Status: filesystem adapter and tests shipped.
+
+### [Distribution](protocols/distribution.md)
+
+How a runnable governed organization is packaged, installed, verified, and
+rolled back. A `distro` is a curated day-one-runnable starter organization; an
+`overlay` is an add-on installed on an existing organization. Install is
+transactional and git-backed: the installer ensures the target is its own git
+repo, applies the package, enforces a kernel-version gate, runs a
+governance-graph `boot_check`, and only then commits and tags the result
+`install/<package>/<version>`. A failed or unbootable install leaves the
+target untouched. `rollback` undoes a bad install — a clean `git reset` when
+nothing has run since the install boundary, or a compensating `git revert`
+forward commit when the org has run. The bundled `starter-firm` distro and the
+`cognitive-firm-distro` CLI (`list / show / install / verify / upgrade /
+rollback / uninstall`) ship in the wheel.
+
+Status: package registry, transactional installer, `boot_check` verifier,
+rollback, `starter-firm` distro, CLI, and tests shipped.
+
+### [Extension Schemas](protocols/extension-schemas.md)
+
+How a package or org validates a custom primitive type without a kernel
+change. A package ships JSON Schema files under
+`extension_schemas/<primitive>/<type_key>.schema.json`; the generic
+`validate_payload` hook checks a payload against any registered schema. Open by
+default — a `kind` with no registered schema is enqueued unconstrained, so the
+kernel's open-typed baseline is preserved. The hook is wired into
+`enqueue_work_item` today; the same one-line idiom is how future primitives opt
+in.
+
+Status: first-party interface (O3-P6), `WorkItem` enqueue call site, and tests
+shipped.
 
 ## Organizational Learning
 

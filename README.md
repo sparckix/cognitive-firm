@@ -168,9 +168,10 @@ Read in this order if you are new:
 
 | Directory | Role |
 |---|---|
-| `src/cognitive_firm/` | Kernel: orchestration daemon, signals, notifications, role extensions, common runtime helpers |
+| `src/cognitive_firm/` | Kernel: orchestration daemon, signals, notifications, role extensions, the distribution layer, the userland, common runtime helpers |
 | `org/` | System-of-record skeleton: roles, mandates, sessions, signals, channels, transitions. Treat as a template. |
 | `tenants/` | Multi-tenant overlay slot. Reserved for `<tenant_id>/` subdirectories with overlay scripts; real tenants live in private repos. |
+| `distro/` | Installable distribution packages. The `starter-firm` distro brings up a runnable governed organization in one action with `cognitive-firm-distro install`. |
 | `schemas/` | Typed contracts for mandates, roles, gate payloads, transitions |
 | `scripts/` | `agent_daemon.py` (entrypoint), `org_role_preflight.py` (preflight), `setup_vps.sh`, `telegram_setup.py`, `operator_console.sh` |
 | `deploy/` | systemd units (`agent-daemon.service`, `orbit-sync.service`) for VPS deployment |
@@ -226,6 +227,24 @@ The dry-run tick discovers candidate work, prints what it would dispatch, and ex
 `.env.example` documents every environment variable the kernel and Orbit
 dashboard read. Most variables are optional. At least one LLM API key is needed
 for model calls made by the kernel itself.
+
+### Install a runnable organization
+
+The quickstart above is the developer path. To stand up a *governed
+organization* in one action — rather than assembling one from the protocol
+catalog — use the distribution layer:
+
+```bash
+cognitive-firm-distro list
+cognitive-firm-distro install starter-firm --into ./my-firm
+```
+
+`install` is transactional and git-backed: the target becomes its own git
+repository, the install lands as a commit tagged
+`install/starter-firm/<version>`, and the installer verifies the new
+organization's governance graph before committing it. A bad install is
+reversible — `cognitive-firm-distro rollback starter-firm --into ./my-firm`.
+See [`docs/protocols/distribution.md`](docs/protocols/distribution.md).
 
 ---
 
@@ -307,6 +326,9 @@ make smoke-docker
 | Routine reviews (forgetting lifecycle) | `src/cognitive_firm/orchestration/routine_reviews.py` | `tests/test_routine_reviews.py` |
 | Governed resource allocation | `src/cognitive_firm/orchestration/resource_allocation.py` | `tests/test_resource_allocation.py` |
 | Residual decision rights | `src/cognitive_firm/orchestration/decision_rights.py` | `tests/test_decision_rights.py` |
+| Distribution layer (install / verify / rollback / upgrade) | `src/cognitive_firm/distribution/` | `tests/test_distribution.py`, `tests/test_rollback.py`, `tests/test_distro_content.py` |
+| Userland — attention router, needs-me, work inbox, vocabulary, enrollment | `src/cognitive_firm/userland/` | `tests/test_attention_router.py`, `tests/test_needs_me.py`, `tests/test_work_inbox.py`, `tests/test_vocabulary.py`, `tests/test_enrollment.py` |
+| Primitive extension schemas | `src/cognitive_firm/orchestration/extension_schemas.py` | `tests/test_extension_schemas.py` |
 | EU AI Act deploy gate | `src/cognitive_firm/orchestration/eu_ai_act_deploy_gate.py` | `tests/test_eu_ai_act_deploy_gate.py`; `docs/protocols/eu-ai-act-deploy-gate.md` |
 | Property-based invariants (Hypothesis) | `tests/test_invariants_property_based.py` | 8/8 |
 | Cross-primitive integration tests | `tests/test_cross_primitive_integration.py` | 3/3 |

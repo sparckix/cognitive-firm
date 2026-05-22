@@ -55,6 +55,25 @@ If you only want the kernel read model:
 python -m cognitive_firm.orchestration.org_surface
 ```
 
+## The Fast Path: Install a Runnable Organization
+
+The smoke above verifies the kernel. To see a *running governed organization*
+without assembling one by hand, use the distribution layer:
+
+```bash
+cognitive-firm-distro list
+cognitive-firm-distro install starter-firm --into ./my-firm
+```
+
+This brings up a governed organization — a principal, an operating lead, an
+analyst, and a closure reviewer, with mandates and a day-one governance loop —
+as its own git repository. The install is transactional: the installer verifies
+the organization's governance graph and only then commits it, tagged
+`install/starter-firm/<version>`. `cognitive-firm-distro rollback` undoes it.
+
+See [`docs/protocols/distribution.md`](docs/protocols/distribution.md). The
+rest of this path inspects the kernel that distro is built on.
+
 ## 15-25: Inspect the Kernel Surface
 
 Read:

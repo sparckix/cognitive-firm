@@ -43,8 +43,23 @@ tenant-specific research policy, scoring systems, and optimizer rules.
   summary templates.
 - Obsidian-compatible docs and a minimal example-tenant overlay.
 - Distribution layer: versioned distro/overlay packages, a package registry,
-  and a one-action installer with boot-proxy verification, plus a
-  `starter-firm` distro and the `cognitive-firm-distro` CLI.
+  and a transactional git-backed installer with kernel-version gating and
+  governance-graph `boot_check` verification. Installs commit and tag the
+  target (`install/<pkg>/<version>`); `rollback` undoes a bad install (clean
+  git reset, or a compensating git revert if the org has run). The
+  `cognitive-firm-distro` CLI ships `list / show / install / verify / upgrade
+  / rollback / uninstall`, and the bundled `starter-firm` distro ships a
+  day-one governance loop in the wheel.
+- Userland layer (`src/cognitive_firm/userland/`): the operator- and
+  member-human-facing layer over the kernel, with five layers — L0 enrollment,
+  L1 attention router, L2 action (operator `needs-me` queue, member-human work
+  inbox), L3 inspection/surface-policy, L4 vocabulary spine. Exposed by two
+  kernel-service routes: `GET /kernel/attention/{actor_id}` and
+  `GET /kernel/vocabulary`. The userland logic is built and tested; a dedicated
+  userland CLI surface and Orbit panes are not yet built.
+- Extension schemas (O3-P6): packages register JSON Schemas to validate custom
+  primitive payload types, wired into `enqueue_work_item`. Open by default — a
+  `kind` with no registered schema is unconstrained.
 
 ## Lean T2 Seams
 
@@ -173,16 +188,29 @@ adopter having to assemble it from a protocol catalog.
 Shipped:
 
 - Distribution layer: versioned `distro`/`overlay` packages, a package
-  registry, and a one-action installer with a structural boot-proxy verify.
-  The `starter-firm` distro brings up a governed organization (principal,
-  lead, analyst, reviewer) in a single command. See
+  registry, and a transactional git-backed installer. Install enforces a
+  kernel-version gate, runs a governance-graph `boot_check`, and only then
+  commits and tags the target (`install/<pkg>/<version>`); a failed or
+  unbootable install leaves the target untouched. `rollback` undoes a bad
+  install — a clean `git reset` when nothing has run since, or a compensating
+  `git revert` forward commit when the org has run. The
+  `cognitive-firm-distro` CLI ships `list / show / install / verify / upgrade
+  / rollback / uninstall`. The `starter-firm` distro brings up a governed
+  organization (principal, lead, analyst, reviewer) with a day-one governance
+  loop in a single command, and is bundled in the wheel. See
   [`protocols/distribution.md`](protocols/distribution.md).
+- Userland layer logic: an operator- and member-human-facing layer over the
+  kernel — L0 enrollment, L1 attention router, L2 action (operator `needs-me`
+  queue, member-human work inbox), L3 inspection/surface-policy, L4 vocabulary
+  spine — exposed by the `GET /kernel/attention/{actor_id}` and
+  `GET /kernel/vocabulary` kernel-service routes. The userland logic is built
+  and tested.
 
 Planned, in sequence:
 
-- A userland: an operator-facing surface that hides the kernel, so a
-  non-technical operator can run a governed organization without reading the
-  protocol specs.
+- A userland operator surface: a dedicated userland CLI and Orbit panes over
+  the built userland logic, so a non-technical operator can run a governed
+  organization without reading the protocol specs.
 - A shared package registry beyond local discovery: overlay packages as
   installable, shareable artifacts with a clear third-party authoring path.
 - Open-core distribution: the kernel stays open and self-hostable so the

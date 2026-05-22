@@ -8,9 +8,11 @@ mechanisms, not tenant strategy, app workflow, or model execution.
 | Layer | Owns | Does not own |
 |---|---|---|
 | Kernel primitives | authority, state transitions, obligations, evidence, human work, attestations, accountability, learning records | domain policy, scoring, UI workflow |
-| Protocols | H2A, A2H, A2A, MCP, runtime adapters, inbound events, app integration, state backends | provider-specific product behavior |
-| Service boundary | local HTTP/API surface over kernel primitives, actor context, leases, policy checks | enterprise IAM administration or graph-runtime scheduling |
+| Protocols | H2A, A2H, A2A, MCP, runtime adapters, inbound events, app integration, state backends, distribution, extension schemas | provider-specific product behavior |
+| Service boundary | local HTTP/API surface over kernel primitives, actor context, leases, policy checks, attention/vocabulary routes | enterprise IAM administration or graph-runtime scheduling |
 | Runtime adapters | projection of external runtime lifecycle into kernel state | execution graph semantics, model inference, retry policy inside the runtime |
+| Distribution layer | versioned distro/overlay packages, package registry, transactional git-backed installer, verifier, rollback | the kernel itself; the installer only writes adopter-owned overlay files |
+| Userland | operator/member-human-facing layer over the kernel: enrollment, attention router, action queues, inspection, vocabulary spine — pure functions over kernel logs and the kernel service | durable state; it is an assembly layer, never a kernel primitive |
 | App surfaces | Orbit, Telegram, CLI, plus tenant-built Slack/Teams/Linear/GitHub adapters | durable source of truth |
 | Tenant overlay | role mandates, project charters, local metrics, private connectors, workflow-specific policy | reusable kernel mechanism |
 
@@ -30,6 +32,12 @@ capabilities, inbound-event quarantine, run checkpoints, action attestations,
 accountability cases, learning events, state-surface inventory, operating-unit
 contracts and the durable work-item queue, outcome links, routine reviews,
 governed resource allocation, and residual decision rights.
+
+The extension-schema mechanism (`validate_payload`) is a kernel module written
+once, but the schemas it enforces are config a package ships — adding a
+validated custom type never requires a kernel change. A distro or overlay is
+also config: roles, mandates, preferences, operating units, and charters an
+adopter edits to match their firm.
 
 ## What Belongs Outside The Kernel
 

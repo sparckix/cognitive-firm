@@ -90,6 +90,13 @@ cognitive-firm-kernel-service --host 127.0.0.1 --port 8765
 For the smallest overlay shape, inspect `tenants/example/`. It is intentionally
 generic and should be copied into a private tenant repo before real use.
 
+For steps 5-6 you can also install the bundled `starter-firm` distro instead of
+copying templates by hand. `cognitive-firm-distro install starter-firm --into
+./my-firm` lays down a day-one governance loop (principal, lead, analyst,
+reviewer) as a transactional git-backed install, verified by `boot_check` and
+revertable with `cognitive-firm-distro rollback`. See
+[`protocols/distribution.md`](protocols/distribution.md).
+
 ## Project Setup
 
 For each project, create a project charter with the required sections:

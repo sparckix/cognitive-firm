@@ -62,6 +62,11 @@ accountable retirement of stale routines. [Resource Allocation](resource-allocat
 makes cross-operating-unit budget/capacity movement a governed decision.
 [Decision Rights](decision-rights.md) record residual control rights for
 situations an incomplete mandate does not cover.
+[Distribution](distribution.md) defines versioned distro/overlay packages and
+the transactional git-backed installer, verifier, and rollback that compose a
+runnable governed organization. [Extension Schemas](extension-schemas.md)
+define how a package validates a custom primitive payload type via a registered
+JSON Schema without a kernel change.
 Re-run the folder index generator when refreshing the managed index below.
 
 <!-- AUTO-INDEX:START (managed by scripts/gen_folder_index.py — edit prose OUTSIDE this block) -->
@@ -88,6 +93,7 @@ Re-run the folder index generator when refreshing the managed index below.
 - [decision-rights.md](decision-rights.md)
 - [distribution.md](distribution.md)
 - [eu-ai-act-deploy-gate.md](eu-ai-act-deploy-gate.md)
+- [extension-schemas.md](extension-schemas.md)
 - [forecast-market.md](forecast-market.md)
 - [governance-changes.md](governance-changes.md)
 - [h2a.md](h2a.md)
@@ -118,5 +124,5 @@ Re-run the folder index generator when refreshing the managed index below.
 - [tenant-isolation.md](tenant-isolation.md)
 - [work-items.md](work-items.md)
 
-<sub>0 sub-folder(s), 43 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
+<sub>0 sub-folder(s), 44 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
 
