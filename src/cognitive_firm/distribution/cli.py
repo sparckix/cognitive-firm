@@ -15,10 +15,20 @@ from pathlib import Path
 from cognitive_firm.distribution.installer import (
     install,
     load_receipt,
+    plan_install,
     upgrade,
     verify_install,
 )
-from cognitive_firm.distribution.registry import PackageIndex, discover_packages
+from cognitive_firm.distribution.manifest import (
+    ManifestError,
+    PackageManifest,
+    validate_manifest,
+)
+from cognitive_firm.distribution.registry import (
+    MANIFEST_FILENAME,
+    PackageIndex,
+    discover_packages,
+)
 from cognitive_firm.distribution.rollback import RollbackError, rollback
 
 
@@ -93,6 +103,137 @@ def _cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_manifest_unchecked(
+    manifest_path: Path,
+) -> tuple[PackageManifest | None, str | None]:
+    """Parse a ``package.yaml`` into a manifest WITHOUT raising on validation
+    problems — so ``lint`` can report every problem instead of the first one.
+
+    Returns ``(manifest, None)`` on a parseable file, or ``(None, error)`` if
+    the file is missing or not even structurally loadable as YAML/a mapping.
+    """
+    import yaml
+
+    if not manifest_path.is_file():
+        return None, f"manifest not found: {manifest_path}"
+    try:
+        raw = yaml.safe_load(manifest_path.read_text())
+    except yaml.YAMLError as exc:
+        return None, f"YAML parse error: {exc}"
+    try:
+        return PackageManifest.from_raw(raw or {}), None
+    except ManifestError as exc:
+        return None, str(exc)
+
+
+def _resolve_lint_package(
+    args: argparse.Namespace,
+) -> tuple[Path, str | None]:
+    """Resolve the ``lint`` argument to a package directory.
+
+    The argument may be a filesystem path to a package directory (or its
+    ``package.yaml``), or the name of a package in the registry.
+    """
+    raw = Path(args.package)
+    if raw.is_file() and raw.name == MANIFEST_FILENAME:
+        return raw.parent, None
+    if (raw / MANIFEST_FILENAME).is_file():
+        return raw, None
+    # Fall back to a registry lookup by name.
+    entry = _index(args).get(args.package)
+    if entry is not None:
+        return entry.root, None
+    return raw, (
+        f"no package found at path or in registry: {args.package}"
+    )
+
+
+def _cmd_lint(args: argparse.Namespace) -> int:
+    """Lint a package: parse its manifest and report authoring problems.
+
+    Exit 0 means the package is clean; non-zero means problems were found.
+    This is the O3-P4 third-party authoring inner loop — an author runs it on
+    their package directory before publishing, with no install and no org.
+    """
+    package_root, resolve_err = _resolve_lint_package(args)
+    if resolve_err is not None:
+        print(f"ERROR: {resolve_err}", file=sys.stderr)
+        return 2
+
+    manifest_path = package_root / MANIFEST_FILENAME
+    manifest, parse_err = _load_manifest_unchecked(manifest_path)
+    if manifest is None:
+        print(f"LINT FAILED: {package_root}", file=sys.stderr)
+        print(f"  - {parse_err}", file=sys.stderr)
+        return 1
+
+    issues = list(validate_manifest(manifest, package_root))
+
+    # Surface authoring mistakes validate_manifest does not cover.
+    files_root = package_root / "files"
+    if not files_root.is_dir():
+        issues.append("no files/ directory — a package ships its overlay there")
+    for component in manifest.components:
+        src = files_root / component.source
+        if component.op == "patch" and component.optional and not src.exists():
+            issues.append(
+                f"optional patch component has no source: {component.source}"
+            )
+
+    if issues:
+        print(f"LINT FAILED: {manifest.name or package_root} "
+              f"({len(issues)} problem(s))", file=sys.stderr)
+        for issue in issues:
+            print(f"  - {issue}", file=sys.stderr)
+        return 1
+
+    print(
+        f"lint ok: {manifest.name} {manifest.version} ({manifest.kind}) — "
+        f"{len(manifest.components)} component(s), no problems found"
+    )
+    return 0
+
+
+def _print_install_plan(
+    manifest: PackageManifest, package_root: Path, target: Path
+) -> int:
+    """Resolve and print the install plan WITHOUT applying it (``--dry-run``).
+
+    No git repo is created and no files are written — this is a preview an
+    author or operator uses to see exactly what an install would do.
+    """
+    try:
+        plan = plan_install(manifest, package_root, target)
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    print(
+        f"dry-run: would install {manifest.name} {manifest.version} "
+        f"({manifest.kind}) -> {target}"
+    )
+    if not plan:
+        print("  (no files to install)")
+        return 0
+    conflicts = 0
+    by_op = {c.dest: c.op for c in manifest.components}
+    for src_file, dest_rel, conflict in plan:
+        # Map the file back to its component to surface the composition op.
+        op = next(
+            (o for d, o in by_op.items() if dest_rel == d
+             or dest_rel.startswith(d + "/")),
+            "add",
+        )
+        marker = "CONFLICT" if conflict else "new"
+        if conflict:
+            conflicts += 1
+        print(f"  [{op:<7}] {dest_rel}  ({marker})")
+    print(
+        f"  total: {len(plan)} file(s), {conflicts} conflict(s) — "
+        "nothing was written"
+    )
+    return 0
+
+
 def _cmd_install(args: argparse.Namespace) -> int:
     index = _index(args)
     entry = index.get(args.package)
@@ -103,6 +244,10 @@ def _cmd_install(args: argparse.Namespace) -> int:
         return 2
 
     target = Path(args.into)
+
+    if args.dry_run:
+        return _print_install_plan(entry.manifest, entry.root, target)
+
     receipt = install(entry.manifest, entry.root, target, force=args.force)
     created = sum(1 for f in receipt.files if f.action == "created")
     overwritten = sum(1 for f in receipt.files if f.action == "overwritten")
@@ -230,7 +375,22 @@ def main(argv: list[str] | None = None) -> int:
     p_install.add_argument(
         "--force", action="store_true", help="Overwrite existing files."
     )
+    p_install.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Resolve and print the install plan without applying anything.",
+    )
     p_install.set_defaults(func=_cmd_install)
+
+    p_lint = sub.add_parser(
+        "lint",
+        help="Check a package manifest for authoring problems.",
+    )
+    p_lint.add_argument(
+        "package",
+        help="Package directory, package.yaml path, or registry package name.",
+    )
+    p_lint.set_defaults(func=_cmd_lint)
 
     p_upgrade = sub.add_parser(
         "upgrade", help="Install a newer package version over an org."

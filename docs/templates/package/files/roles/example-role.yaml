@@ -1,0 +1,32 @@
+schema_version: 1
+role_id: example-role
+role_class: specialist
+description: >
+  Example role shipped by the package template. Replace this file (or add
+  more role files) with the roles your package actually installs. A role.v1
+  file must carry every key below — `cognitive-firm-distro lint` and the
+  installer's boot_check both enforce that.
+
+authorized_paths:
+  - "projects/"
+forbidden_paths:
+  - "roles/"
+  - "mandates/"
+  - ".env"
+  - "secrets/"
+
+delegates_to: []
+
+# escalates_to must reach an `authority` role in the org this package installs
+# into — overlays rely on the target org already having one.
+escalates_to:
+  - role.lead
+
+budget:
+  daily_cap_usd: 25.00
+  session_cap_usd: 15.00
+  single_action_cap_usd: 5.00
+  warn_threshold_frac: 0.80
+  absolute_ceiling_usd: 25.00
+
+mandate_path: mandates/example-role_mandate.md
