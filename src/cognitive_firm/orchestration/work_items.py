@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
+from cognitive_firm.orchestration.extension_schemas import validate_payload
 from cognitive_firm.orchestration.kernel_events import record_kernel_event
 from cognitive_firm.orchestration.operating_units import OperatingUnit, get_operating_unit
 
@@ -308,12 +309,19 @@ def enqueue_work_item(
     log_path: Path | None = None,
     operating_units_log: Path | None = None,
     kernel_events_log: Path | None = None,
+    extension_schemas_root: Path | None = None,
 ) -> WorkItem:
     """Enqueue a new work item against an operating unit.
 
     Enqueue is idempotent on ``idempotency_key``: a second enqueue with a key
     that already exists returns the existing item instead of creating a
     duplicate. The work ``kind`` must be one the unit accepts.
+
+    If — and only if — an extension schema is registered for this ``kind``
+    (under ``<extension_schemas_root>/extension_schemas/work_item/<kind>.schema.json``),
+    the ``payload`` is validated against it (O3-P6). A ``kind`` with **no**
+    registered schema stays open and unvalidated, exactly as before: a custom
+    work type never needs a schema, but may ship one.
     """
     if not kind.strip():
         raise ValueError("kind is required")
@@ -326,6 +334,17 @@ def enqueue_work_item(
         raise ValueError(
             f"work kind {kind!r} is not in {unit_id}.allowed_work_kinds "
             f"{unit.allowed_work_kinds}"
+        )
+    # O3-P6: validate the payload against a registered per-kind extension
+    # schema, if one exists. No schema registered == no constraint (open by
+    # default) — this never breaks an existing unvalidated custom kind.
+    schema_errors = validate_payload(
+        "work_item", kind.strip(), payload or {}, schemas_root=extension_schemas_root
+    )
+    if schema_errors:
+        raise ValueError(
+            f"work item payload fails the extension schema registered for "
+            f"kind {kind.strip()!r}: {'; '.join(schema_errors)}"
         )
     path = log_path or DEFAULT_WORK_ITEMS_LOG
     with _work_items_lock(path):
