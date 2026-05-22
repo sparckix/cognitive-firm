@@ -257,15 +257,29 @@ def fetch_package(
 
 
 def _cache_entry_is_valid(repo_dir: Path, sha: str) -> bool:
-    """True iff ``repo_dir`` is a usable git repo checked out at ``sha``.
+    """True iff ``repo_dir`` is a usable git repo *clean* at ``sha``.
 
-    The content-addressed cache is keyed by SHA, so a *complete* cache entry
-    must be a git repo whose ``HEAD`` is exactly that SHA. A partially-written
-    entry (process killed mid-clone) is non-empty but is not a usable repo, or
-    its ``HEAD`` does not match — either way this returns ``False`` and the
-    caller re-clones. Any git failure is treated as an invalid cache entry
-    rather than propagated, since a bad cache entry is always recoverable by
-    re-cloning.
+    The content-addressed cache is keyed by SHA, so a *trustworthy* cache entry
+    must be a git repo whose ``HEAD`` is exactly that SHA AND whose tracked
+    working tree exactly matches that commit. Two failure modes both return
+    ``False`` so the caller re-clones:
+
+    - **Partial entry** (process killed mid-clone): non-empty but not a usable
+      repo, or ``HEAD`` does not match the SHA.
+    - **Poisoned entry** (remote-cache poisoning): a tracked file under the
+      cache dir was modified after the clone without committing. ``HEAD`` still
+      reads as the expected SHA, but the package *content* no longer matches
+      that commit. A HEAD-only check would wrongly trust — and install — the
+      tampered content. ``git diff --quiet HEAD`` exits non-zero whenever a
+      tracked file is modified, staged, or deleted relative to ``HEAD``, which
+      reliably catches a modified tracked file. Untracked files are ignored on
+      purpose: only files that diverge from the committed SHA invalidate the
+      entry, and the package payload is wholly tracked content.
+
+    Any git failure is treated as an invalid cache entry rather than
+    propagated, since a bad cache entry is always recoverable by re-cloning.
+    The essential property: a cache entry whose tracked files do not match its
+    committed SHA is never trusted.
     """
     if not (repo_dir / ".git").exists():
         return False
@@ -273,7 +287,17 @@ def _cache_entry_is_valid(repo_dir: Path, sha: str) -> bool:
         head = _git(["rev-parse", "HEAD"], cwd=repo_dir)
     except RemoteFetchError:
         return False
-    return head.lower() == sha.lower()
+    if head.lower() != sha.lower():
+        return False
+    # The working tree must be clean at this SHA: a non-zero exit from
+    # `git diff --quiet HEAD` means a tracked file diverged from the commit.
+    result = subprocess.run(
+        ["git", "diff", "--quiet", "HEAD"],
+        cwd=str(repo_dir),
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
 
 
 def _clone_at_sha(url: str, sha: str, dest: Path) -> None:

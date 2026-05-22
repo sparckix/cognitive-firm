@@ -432,6 +432,58 @@ def test_fetch_package_rejects_a_partial_cache_entry(tmp_path):
     assert not (poisoned / "partial-junk").exists()
 
 
+def test_fetch_package_discards_a_poisoned_cache_entry(tmp_path):
+    """A cache entry whose working tree was modified after clone (a tracked
+    file changed, no commit) does NOT match its committed SHA. The validator
+    must reject it so fetch_package re-clones — the poisoned content must
+    never be reused/returned. On a first fetch_and_lock there is no prior
+    lock to catch this, so the cache validator is the only line of defence.
+    """
+    repo = tmp_path / "repo"
+    refs = _make_package_repo(repo)
+    cache = tmp_path / "cache"
+    sha = refs["v1"]
+    # First fetch populates the SHA-keyed cache from a clean clone.
+    first = fetch_package(RemotePackageSource(url=str(repo), ref="v1"), cache)
+    assert first.resolved_sha == sha
+    payload = first.package_root / "package.yaml"
+    clean_text = payload.read_text()
+
+    # Poison a *tracked* file inside the cache dir WITHOUT committing — the
+    # commit SHA at HEAD is unchanged, so a HEAD-only validator would pass.
+    payload.write_text(clean_text + "\n# injected supply-chain payload\n")
+    assert payload.read_text() != clean_text
+
+    # A re-fetch must detect the dirty working tree, discard the cache entry,
+    # re-clone fresh, and return the real (committed) content.
+    again = fetch_package(RemotePackageSource(url=str(repo), ref="v1"), cache)
+    assert again.resolved_sha == sha
+    assert (again.package_root / "package.yaml").read_text() == clean_text
+
+
+def test_fetch_package_reuses_a_clean_cache_entry(tmp_path):
+    """Regression: a clean cache entry at the right SHA is still reused — the
+    poisoning fix must not force a needless re-clone of an untouched cache."""
+    repo = tmp_path / "repo"
+    refs = _make_package_repo(repo)
+    cache = tmp_path / "cache"
+    sha = refs["v1"]
+    first = fetch_package(RemotePackageSource(url=str(repo), ref="v1"), cache)
+    cache_dir = cache_dir_for(cache, sha)
+    # An identity marker that survives reuse but not an rmtree+reclone. It
+    # lives under .git so it does not perturb the package content hash.
+    marker = cache_dir / ".git" / ".reuse-probe"
+    marker.write_text("probe")
+    before_inode = cache_dir.stat().st_ino
+
+    again = fetch_package(RemotePackageSource(url=str(repo), ref="v1"), cache)
+    assert again.resolved_sha == sha
+    assert again.content_hash == first.content_hash
+    # The cache dir was not torn down: same inode and the probe still there.
+    assert cache_dir.stat().st_ino == before_inode
+    assert marker.exists()
+
+
 def test_refetch_with_changed_remote_content_raises_lockmismatch(tmp_path):
     """F-17: re-fetching a package that already has a lock entry, where the
     remote content at the SAME SHA changed underneath, must raise

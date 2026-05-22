@@ -32,6 +32,7 @@ from cognitive_firm.distribution.manifest import (
 )
 from cognitive_firm.distribution.signing import (
     SigningError,
+    trust_store_is_populated,
     verify_against_trust_store,
 )
 from cognitive_firm.orchestration.kernel_events import (
@@ -284,14 +285,31 @@ def _undo_failed_install(
 
 
 def _verify_signature(
-    manifest: PackageManifest, package_root: Path, target_root: Path
+    manifest: PackageManifest,
+    package_root: Path,
+    target_root: Path,
+    *,
+    require_signed: bool = False,
 ) -> bool:
     """Verify a package's provenance before install (O3-P1 constraint 4).
 
-    If the manifest declares no ``signing`` block the package is *unsigned*:
-    returns ``False`` (recorded as ``signature_verified: false``) — unsigned
-    packages still install, so existing distros like ``starter-firm`` are never
-    broken.
+    If the manifest declares no ``signing`` block the package is *unsigned*.
+    Whether an unsigned package is accepted is a **downgrade-resistant trust
+    policy** — because an attacker can strip a ``signing:`` block from a signed
+    package, treating "no signing block" as automatically safe would defeat
+    signing entirely:
+
+    - If the target org's trust store holds at least one trusted publisher, the
+      org has opted into signing. An unsigned package is refused with
+      ``InstallError`` *before any file is written* — accepting it would let a
+      signature-stripped package sail through as merely "unsigned".
+    - If ``require_signed`` is set, an unsigned package is refused even when the
+      trust store is empty — an explicit opt-in for orgs that want signing
+      enforced from the very first install.
+    - Otherwise (empty/absent trust store, no ``require_signed``) the org has
+      not opted into signing — this is the documented bootstrap case (a brand
+      new org adopting ``starter-firm`` onto an empty directory). The unsigned
+      package still installs, recorded as ``signature_verified: false``.
 
     If the manifest declares ``signing``, the detached Ed25519 signature is
     verified against the publisher's key in the target org's local trust store
@@ -300,6 +318,20 @@ def _verify_signature(
     publisher — is refused with ``InstallError`` *before any file is written*.
     """
     if manifest.signing is None:
+        if trust_store_is_populated(target_root):
+            raise InstallError(
+                f"refusing to install unsigned package '{manifest.name}': the "
+                f"target org's trust store has trusted publishers, so it has "
+                f"opted into signing — an unsigned (or signature-stripped) "
+                f"package is refused. Sign the package with a trusted "
+                f"publisher's key, or clear the trust store to opt back out."
+            )
+        if require_signed:
+            raise InstallError(
+                f"refusing to install unsigned package '{manifest.name}': "
+                f"require_signed is set — only signed packages from a trusted "
+                f"publisher may be installed."
+            )
         return False
     try:
         verified = verify_against_trust_store(
@@ -328,6 +360,7 @@ def install(
     *,
     force: bool = False,
     kernel_version: str | None = None,
+    require_signed: bool = False,
 ) -> InstallReceipt:
     """Install a package into ``target_root``, transactionally and git-backed.
 
@@ -335,12 +368,18 @@ def install(
     package's declared range (G1), or if the resulting org does not boot (G5).
     If the manifest declares a ``signing`` block, the package's Ed25519
     signature is verified against the target's trust store before any mutation
-    and a bad signature is refused (O3-P1 constraint 4); an unsigned package
-    still installs, with ``signature_verified: false`` on the receipt and
-    event. On any failure the target is restored (G11). On success the install
-    is a git commit tagged ``install/<package>/<version>`` (R1). Existing files
-    are skipped unless ``force`` is set. ``kernel_version`` overrides the
-    running kernel version (for tests).
+    and a bad signature is refused (O3-P1 constraint 4).
+
+    Unsigned packages follow a downgrade-resistant trust policy (see
+    :func:`_verify_signature`): if the target's trust store holds any trusted
+    publisher, or ``require_signed`` is set, an unsigned (or signature-stripped)
+    package is refused with ``InstallError`` before any mutation. Only when the
+    trust store is empty and ``require_signed`` is false does an unsigned
+    package install with ``signature_verified: false`` — the documented
+    bootstrap path. On any failure the target is restored (G11). On success the
+    install is a git commit tagged ``install/<package>/<version>`` (R1).
+    Existing files are skipped unless ``force`` is set. ``kernel_version``
+    overrides the running kernel version (for tests).
     """
     version = kernel_version or cognitive_firm.__version__
     compat = check_kernel_compat(manifest.kernel, version)
@@ -350,7 +389,10 @@ def install(
         )
 
     signature_verified = _verify_signature(
-        manifest, Path(package_root), Path(target_root)
+        manifest,
+        Path(package_root),
+        Path(target_root),
+        require_signed=require_signed,
     )
 
     target_root = Path(target_root)

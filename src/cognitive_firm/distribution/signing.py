@@ -297,6 +297,19 @@ def list_trusted_publishers(root: Path) -> list[str]:
     )
 
 
+def trust_store_is_populated(root: Path) -> bool:
+    """True iff ``root``'s trust store holds at least one trusted publisher.
+
+    This is the downgrade-resistance signal: once an org has opted into signing
+    by trusting any publisher, an unsigned package must be refused — accepting
+    it silently would let an attacker strip a ``signing:`` block and defeat the
+    very protection the org opted into. An empty or absent trust store means the
+    org has not opted in (the bootstrap case), so an unsigned package may still
+    install.
+    """
+    return bool(list_trusted_publishers(root))
+
+
 def verify_against_trust_store(
     package_root: Path, publisher: str, signature: str, *, trust_root: Path
 ) -> bool:

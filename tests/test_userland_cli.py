@@ -263,6 +263,54 @@ def test_decline_records_an_attested_event(tmp_path, monkeypatch, capsys):
     assert declined[0].actor == "human_lead"
 
 
+def test_an_approved_proposal_stops_appearing_in_proposals(
+    tmp_path, monkeypatch, capsys
+):
+    config = _gov_config(tmp_path)
+    proposal = propose_governance_change(
+        change_kind="role_change",
+        title="Widen analyst write scope",
+        proposed_by="operator",
+        target_ref="roles/analyst.yaml",
+        rationale="overlay install",
+        invariant_checks=_passing_checks(),
+        log_path=_governance_log(config),
+    )
+    _bind(monkeypatch, config)
+
+    assert main(["proposals"]) == 0
+    assert "awaiting review:" in capsys.readouterr().out
+
+    assert main(["approve", proposal.proposal_id]) == 0
+    capsys.readouterr()
+
+    # The loop closes: a decided proposal no longer nags the operator.
+    assert main(["proposals"]) == 0
+    assert "No governance changes are awaiting review." in capsys.readouterr().out
+
+
+def test_a_proposal_cannot_be_decided_twice(tmp_path, monkeypatch, capsys):
+    config = _gov_config(tmp_path)
+    proposal = propose_governance_change(
+        change_kind="role_change",
+        title="Widen analyst write scope",
+        proposed_by="operator",
+        target_ref="roles/analyst.yaml",
+        rationale="overlay install",
+        invariant_checks=_passing_checks(),
+        log_path=_governance_log(config),
+    )
+    _bind(monkeypatch, config)
+
+    assert main(["approve", proposal.proposal_id]) == 0
+    capsys.readouterr()
+
+    rc = main(["decline", proposal.proposal_id])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "already been decided" in captured.err
+
+
 def test_approve_a_missing_proposal_errors(tmp_path, monkeypatch, capsys):
     config = _gov_config(tmp_path)
     _bind(monkeypatch, config)

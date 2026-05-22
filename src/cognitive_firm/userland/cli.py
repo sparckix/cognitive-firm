@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
 from cognitive_firm.kernel_service import dispatch_kernel_request
 from cognitive_firm.userland import work_inbox
@@ -183,7 +184,10 @@ def _cmd_proposals(_args: argparse.Namespace) -> int:
         error = response.payload.get("error", "unknown error")
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
-    proposals = response.payload.get("proposals", [])
+    proposals = [
+        p for p in response.payload.get("proposals", [])
+        if not p.get("decided")
+    ]
     if not proposals:
         print("No governance changes are awaiting review.")
         return 0
@@ -205,11 +209,15 @@ def _cmd_proposals(_args: argparse.Namespace) -> int:
 
 def _cmd_decide(args: argparse.Namespace, decision: str) -> int:
     """Record an attested approve/decline decision on a governance change."""
-    body: dict[str, str] = {"decision": decision}
+    body: dict[str, Any] = {"decision": decision}
     if args.reason:
         body["reason"] = args.reason
     if getattr(args, "actor", None):
-        body["decided_by"] = args.actor
+        # --actor sets the request's actor context, not a free-text decider:
+        # when the kernel runs with authentication, the authenticated subject
+        # overrides this, so attribution on a governance decision cannot be
+        # forged from the command line.
+        body["actor_context"] = {"actor_id": args.actor}
     try:
         response = dispatch_kernel_request(
             "POST",

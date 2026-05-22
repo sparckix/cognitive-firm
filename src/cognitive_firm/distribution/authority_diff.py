@@ -185,9 +185,10 @@ def _classify_budget(
 ) -> tuple[str, str]:
     """Classify a change to a role's spend ``budget``.
 
-    Raising any cap expands spend authority; lowering it narrows. A change that
-    raises some caps and lowers others is UNKNOWN (the gate treats it as
-    expanding — fail-closed).
+    Raising a cap — or *removing* one entirely — expands spend authority;
+    lowering a cap, or adding one where none existed, narrows it. A change
+    that both expands and narrows is UNKNOWN (the gate treats it as expanding
+    — fail-closed).
     """
     b = before if isinstance(before, dict) else {}
     a = after if isinstance(after, dict) else {}
@@ -195,12 +196,20 @@ def _classify_budget(
     lowered: list[str] = []
     for key in _BUDGET_CAP_KEYS:
         bv, av = b.get(key), a.get(key)
-        if not isinstance(bv, (int, float)) or not isinstance(av, (int, float)):
-            continue
-        if av > bv:
-            raised.append(f"{key} {bv} -> {av}")
-        elif av < bv:
-            lowered.append(f"{key} {bv} -> {av}")
+        b_num = isinstance(bv, (int, float))
+        a_num = isinstance(av, (int, float))
+        if b_num and a_num:
+            if av > bv:
+                raised.append(f"{key} {bv} -> {av}")
+            elif av < bv:
+                lowered.append(f"{key} {bv} -> {av}")
+        elif b_num and not a_num:
+            # The cap existed and is now gone — removing a spend ceiling is
+            # an expansion of authority just as surely as raising it.
+            raised.append(f"{key} {bv} -> (removed)")
+        elif a_num and not b_num:
+            # A cap is now imposed where none existed — a new constraint.
+            lowered.append(f"{key} (none) -> {av}")
     if not raised and not lowered:
         return NEUTRAL, ""
     if raised and not lowered:

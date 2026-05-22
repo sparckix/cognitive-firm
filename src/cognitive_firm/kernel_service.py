@@ -176,6 +176,26 @@ def _governance_changes_log(config: KernelServiceConfig) -> Path:
     return config.org_dir / "governance_changes" / "governance_changes.jsonl"
 
 
+def _decided_governance_ids(config: KernelServiceConfig) -> set[str]:
+    """Proposal ids that already carry an attested approve/decline event.
+
+    ``governance_changes`` has no status-transition function — a decided
+    proposal keeps ``status: review_ready`` in its log. The durable decision
+    is the kernel event; this reads those events so a decided proposal stops
+    nagging in the attention feed and cannot be decided twice.
+    """
+    from cognitive_firm.orchestration.kernel_events import list_kernel_events
+
+    decided: set[str] = set()
+    for verb in ("governance_change.approved", "governance_change.declined"):
+        for event in list_kernel_events(
+            verb=verb, log_path=config.transition_log
+        ):
+            if event.object_ref.startswith("governance_change:"):
+                decided.add(event.object_ref.split(":", 1)[1])
+    return decided
+
+
 def _attention_feed(config: KernelServiceConfig) -> list[dict[str, Any]]:
     """Gather the firm's pending signals and route them to participants (L1).
 
@@ -200,9 +220,12 @@ def _attention_feed(config: KernelServiceConfig) -> list[dict[str, Any]]:
     )
 
     signals = list(pending_gate_signals(config.gates_dir))
+    decided = _decided_governance_ids(config)
     for proposal in list_governance_changes(
         status="review_ready", log_path=_governance_changes_log(config)
     ):
+        if proposal.proposal_id in decided:
+            continue  # already approved/declined — stop nagging the operator
         # Governance signals leave the target empty — the router fills it with
         # the authority. This closes the governed-install human loop: an
         # overlay's authority-diff proposal surfaces in the operator's queue.
@@ -319,9 +342,13 @@ def dispatch_kernel_request(
                 status=status_filter,
                 log_path=_governance_changes_log(config),
             )
-            return _ok(
-                {"proposals": [p.as_dict() for p in proposals]}
-            )
+            decided = _decided_governance_ids(config)
+            payload = []
+            for proposal in proposals:
+                row = proposal.as_dict()
+                row["decided"] = proposal.proposal_id in decided
+                payload.append(row)
+            return _ok({"proposals": payload})
 
         if (
             method == "GET"
@@ -499,13 +526,23 @@ def dispatch_kernel_request(
                     f"governance change {proposal_id!r} is not awaiting "
                     f"review (status: {proposal.status})",
                 )
+            if proposal_id in _decided_governance_ids(config):
+                return _error(
+                    409,
+                    f"governance change {proposal_id!r} has already been "
+                    f"decided",
+                )
             verb = (
                 "governance_change.approved"
                 if decision == "approve"
                 else "governance_change.declined"
             )
+            # The recorded decider is the request's actor context — when auth
+            # is on, _actor_context has already pinned this to the
+            # authenticated subject. A body field cannot forge the attribution
+            # on a governance decision (the accountability record).
             event = record_kernel_event(
-                actor=str(body.get("decided_by") or actor.actor_id),
+                actor=actor.actor_id,
                 verb=verb,
                 object_ref=f"governance_change:{proposal_id}",
                 payload={

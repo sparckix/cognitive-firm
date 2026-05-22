@@ -343,6 +343,102 @@ def test_install_refuses_untrusted_publisher(tmp_path):
         install(manifest, pkg, target, kernel_version="0.1.0")
 
 
+# --------------------------------------------------------------------------
+# Downgrade-resistant trust policy
+# --------------------------------------------------------------------------
+
+
+def test_populated_trust_store_refuses_unsigned_package(tmp_path):
+    """Once an org trusts any publisher it has opted into signing — an unsigned
+    package must be refused, not silently accepted as ``signature_verified:
+    false``."""
+    pkg = _make_package(tmp_path / "src")
+    target = tmp_path / "org"
+    target.mkdir()
+    kp = generate_keypair()
+    add_trusted_publisher(target, "acme", kp.public_pem)
+
+    manifest = load_manifest(pkg / "package.yaml")  # starter-firm: unsigned
+    assert manifest.signing is None
+    with pytest.raises(InstallError, match="unsigned"):
+        install(manifest, pkg, target, kernel_version="0.1.0")
+    # Refusal happens before mutation — nothing landed.
+    assert not (target / "roles").exists()
+
+
+def test_populated_trust_store_refuses_signature_stripped_package(tmp_path):
+    """The downgrade attack: take a signed package, tamper a file, delete the
+    ``signing:`` block, install. With a populated trust store it is refused."""
+    pkg = _make_package(tmp_path / "src")
+    target = tmp_path / "org"
+    target.mkdir()
+    kp = generate_keypair()
+    add_trusted_publisher(target, "acme", kp.public_pem)
+    sig = sign_package(pkg, kp.private_pem)
+
+    raw = yaml.safe_load((pkg / "package.yaml").read_text())
+    raw["signing"] = {"publisher": "acme", "signature": sig}
+    (pkg / "package.yaml").write_text(yaml.safe_dump(raw, sort_keys=False))
+    # Attacker tampers a file then strips the signing block.
+    _signable_file(pkg).write_text(
+        _signable_file(pkg).read_text() + "\n# evil\n"
+    )
+    raw = yaml.safe_load((pkg / "package.yaml").read_text())
+    raw.pop("signing", None)
+    (pkg / "package.yaml").write_text(yaml.safe_dump(raw, sort_keys=False))
+
+    manifest = load_manifest(pkg / "package.yaml")
+    assert manifest.signing is None
+    with pytest.raises(InstallError, match="unsigned"):
+        install(manifest, pkg, target, kernel_version="0.1.0")
+    assert not (target / "roles").exists()
+
+
+def test_empty_trust_store_still_installs_unsigned_bootstrap(tmp_path):
+    """The bootstrap path: a brand-new org with no trust store installs an
+    unsigned package, recorded ``signature_verified: false`` — unchanged."""
+    pkg = _make_package(tmp_path / "src")
+    target = tmp_path / "org"
+    manifest = load_manifest(pkg / "package.yaml")
+    receipt = install(manifest, pkg, target, kernel_version="0.1.0")
+    assert receipt.signature_verified is False
+    assert (target / "roles").exists()
+
+
+def test_require_signed_refuses_unsigned_even_with_empty_trust_store(tmp_path):
+    """The explicit opt-in: require_signed refuses an unsigned package even
+    when the trust store is empty."""
+    pkg = _make_package(tmp_path / "src")
+    target = tmp_path / "org"
+    manifest = load_manifest(pkg / "package.yaml")
+    with pytest.raises(InstallError, match="require_signed"):
+        install(
+            manifest, pkg, target, kernel_version="0.1.0", require_signed=True
+        )
+    assert not (target / "roles").exists()
+
+
+def test_signed_package_from_trusted_publisher_still_installs(tmp_path):
+    """Regression: a properly signed package from a trusted publisher installs,
+    with the trust-store-non-empty rule active."""
+    pkg = _make_package(tmp_path / "src")
+    target = tmp_path / "org"
+    target.mkdir()
+    kp = generate_keypair()
+    add_trusted_publisher(target, "acme", kp.public_pem)
+    sig = sign_package(pkg, kp.private_pem)
+    raw = yaml.safe_load((pkg / "package.yaml").read_text())
+    raw["signing"] = {"publisher": "acme", "signature": sig}
+    (pkg / "package.yaml").write_text(yaml.safe_dump(raw, sort_keys=False))
+
+    manifest = load_manifest(pkg / "package.yaml")
+    receipt = install(
+        manifest, pkg, target, kernel_version="0.1.0", require_signed=True
+    )
+    assert receipt.signature_verified is True
+    assert (target / "roles").exists()
+
+
 def test_signed_install_event_records_signature_verified(tmp_path):
     pkg = _make_package(tmp_path / "src")
     target = tmp_path / "org"

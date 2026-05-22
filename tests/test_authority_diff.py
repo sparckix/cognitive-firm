@@ -162,6 +162,20 @@ def test_lowering_budget_cap_narrows(tmp_path):
     assert any(line.classification == NARROWS for line in diff.lines)
 
 
+def test_removing_a_budget_cap_expands(tmp_path):
+    # Deleting a spend ceiling lifts the constraint just as raising it would —
+    # an overlay that empties `budget` must not slip through as neutral.
+    before, after = tmp_path / "b", tmp_path / "a"
+    _role(before, "agent", paths=["x/"], budget={"daily_cap_usd": 10.0})
+    _role(after, "agent", paths=["x/"], budget={})
+    diff = compute_authority_diff(before, after)
+    assert diff.expands_authority
+    assert any(
+        line.classification == EXPANDS and "budget" in line.text.lower()
+        for line in diff.lines
+    )
+
+
 # --- F-6: delegates_to is authority-bearing ----------------------------------
 
 
