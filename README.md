@@ -196,7 +196,25 @@ relative links.
 
 ---
 
-## 5. Quickstart (local dev)
+## 5. Quickstart
+
+### Install
+
+The fast path — install the kernel and its three CLIs from PyPI, then stand up
+a governed organization in one command:
+
+```bash
+pip install cognitive-firm
+cognitive-firm-distro install starter-firm --into ./my-firm
+```
+
+`./my-firm` is now a governed firm — its own git repo, verified to boot.
+[`docs/getting-started.md`](docs/getting-started.md) is the full
+zero-to-running path.
+
+### Local development
+
+Working on the kernel itself? Clone and install it editable:
 
 ```bash
 git clone https://github.com/sparckix/cognitive-firm ~/cognitive-firm
@@ -240,11 +258,11 @@ The dry-run tick discovers candidate work, prints what it would dispatch, and ex
 dashboard read. Most variables are optional. At least one LLM API key is needed
 for model calls made by the kernel itself.
 
-### Install a runnable organization
+### Managing organizations and packages
 
-The quickstart above is the developer path. To stand up a *governed
-organization* in one action — rather than assembling one from the protocol
-catalog — use the distribution layer:
+`cognitive-firm-distro` is how you install and manage governed organizations
+and packages — a governed organization in one action, rather than assembled by
+hand from the protocol catalog:
 
 ```bash
 cognitive-firm-distro list

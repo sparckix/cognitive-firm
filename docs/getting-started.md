@@ -25,12 +25,9 @@ A firm is a directory. The tools act on a firm by being pointed at it.
 
 ```bash
 # 1. Get the kernel and the CLIs.
-git clone https://github.com/sparckix/cognitive-firm ~/cognitive-firm
-cd ~/cognitive-firm
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt && pip install -e .
-# (a published `pip install cognitive-firm` is the intended future path;
-#  the packaging is ready, the PyPI release is not yet cut.)
+pip install cognitive-firm
+# (to work on the kernel itself, clone the repo and `pip install -e .`
+#  instead — see the README's "Local development" section.)
 
 # 2. Install a governed organization into a directory of your choosing.
 cognitive-firm-distro install starter-firm --into ~/my-firm
