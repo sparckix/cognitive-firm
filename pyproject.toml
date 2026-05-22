@@ -73,7 +73,7 @@ where = ["src", "."]
 include = ["cognitive_firm*", "distro*"]
 
 [tool.setuptools.package-data]
-cognitive_firm = ["py.typed"]
+cognitive_firm = ["py.typed", "userland/*.json"]
 distro = ["**/*.yaml", "**/*.yml", "**/*.md", "**/*.json", "**/*.txt"]
 
 [tool.ruff]

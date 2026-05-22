@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "terms": {
+    "role": {
+      "label": "role",
+      "definition": "A standing job in the firm with a defined scope of authority, held by a human or an agent.",
+      "governance_note": "A role is the unit of authority. Who holds a role determines who may do what."
+    },
+    "mandate": {
+      "label": "mandate",
+      "definition": "The written scope of a role: what it may decide on its own and what it must escalate.",
+      "governance_note": "A mandate is the contract that bounds a role. Work outside the mandate must be escalated, not done."
+    },
+    "lease": {
+      "label": "lease",
+      "definition": "A time-bounded permission to change something, so two parties never edit it at once.",
+      "governance_note": "A lease makes a change attributable to one holder for a known window."
+    },
+    "gate": {
+      "label": "decision point",
+      "definition": "A point where work pauses until a human with authority approves or declines it.",
+      "governance_note": "A gate is where the firm stops and asks a person. An unanswered gate blocks the work behind it."
+    },
+    "escalation": {
+      "label": "escalation",
+      "definition": "Passing a decision up to a role with the authority to make it.",
+      "governance_note": "Escalation routes a decision to the role that is allowed to own it; every chain ends at the authority."
+    },
+    "a2h_session": {
+      "label": "work request",
+      "definition": "A bounded task an agent has handed to a human, with a named deliverable and a way to return a result.",
+      "governance_note": "A2H work is human work the firm depends on; it is tracked, not assumed done."
+    },
+    "accountability_case": {
+      "label": "accountability case",
+      "definition": "An open record of who was responsible for an outcome and what is owed to close it.",
+      "governance_note": "An accountability case keeps a consequential outcome from being quietly dropped."
+    },
+    "decision_right_basis": {
+      "label": "why this role may decide",
+      "definition": "The recorded reason a role is allowed to make a given class of decision.",
+      "governance_note": "Authority is never implicit; the basis says on what grounds a role decides."
+    },
+    "operating_unit": {
+      "label": "production lane",
+      "definition": "A typed contract for one kind of recurring work: who does it, and which finished states count.",
+      "governance_note": "An operating unit bounds a lane of work so its output is checkable, not open-ended."
+    },
+    "work_item": {
+      "label": "task",
+      "definition": "One durable, claimable unit of work that flows through a production lane.",
+      "governance_note": "A work item is claimed by one worker at a time and must end on a state the lane declared in advance."
+    },
+    "governance_change": {
+      "label": "governance change",
+      "definition": "A proposed change to the firm's roles, mandates, or authority structure, awaiting approval.",
+      "governance_note": "A governance change alters who-can-do-what; it is a governed decision, not an edit."
+    },
+    "actor": {
+      "label": "participant",
+      "definition": "An identified human, agent, or service that can act in the firm.",
+      "governance_note": "Every action is attributed to an actor; there are no anonymous changes."
+    },
+    "actor_kind": {
+      "label": "participant type",
+      "definition": "Whether a participant is a human, an agent, or a service.",
+      "governance_note": "The kind of participant changes what the firm may expect of it and how it is held accountable."
+    },
+    "authorized_paths": {
+      "label": "where this role may write",
+      "definition": "The parts of the firm a role is allowed to change.",
+      "governance_note": "This is the reach of a role's authority; '*' means unrestricted write access."
+    }
+  }
+}
