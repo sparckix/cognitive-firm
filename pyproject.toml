@@ -35,6 +35,7 @@ dependencies = [
     "click>=8.1",
     "rich>=13.7",
     "jsonschema>=4.21",
+    "cryptography>=42.0",
 ]
 
 [project.optional-dependencies]
@@ -62,13 +63,20 @@ Source = "https://github.com/sparckix/cognitive-firm"
 cognitive-firm-kernel-service = "cognitive_firm.kernel_service:main"
 cognitive-firm-actor-membership = "cognitive_firm.orchestration.actor_membership:main"
 cognitive-firm-identity-provisioning = "cognitive_firm.identity_provisioning:main"
+cognitive-firm-distro = "cognitive_firm.distribution.cli:main"
+cognitive-firm-userland = "cognitive_firm.userland.cli:main"
 
+# The kernel package lives under src/; the distro/ tree lives at the repo
+# root. Both ship in the wheel: the kernel as importable code, distro/ as a
+# data tree so `cognitive-firm-distro list` finds the bundled distros from a
+# `pip install` (not just a checkout).
 [tool.setuptools.packages.find]
-where = ["src"]
-include = ["cognitive_firm*"]
+where = ["src", "."]
+include = ["cognitive_firm*", "distro*"]
 
 [tool.setuptools.package-data]
-cognitive_firm = ["py.typed"]
+cognitive_firm = ["py.typed", "userland/*.json"]
+distro = ["**/*.yaml", "**/*.yml", "**/*.md", "**/*.json", "**/*.txt"]
 
 [tool.ruff]
 line-length = 110

@@ -35,6 +35,10 @@ from reimplementing primitive lifecycle rules.
 GET  /health
 GET  /kernel/org-surface
 GET  /kernel/accountability-summary
+GET  /kernel/attention/{actor_id}
+GET  /kernel/vocabulary
+GET  /kernel/governance-changes
+POST /kernel/governance-changes/{proposal_id}/decision
 POST /kernel/actors
 POST /kernel/memberships
 POST /kernel/memberships/{assignment_id}/revoke

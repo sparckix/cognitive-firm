@@ -1,0 +1,31 @@
+schema_version: 1
+role_id: lead
+role_class: manager
+description: >
+  Operating lead. Plans the work, routes tasks to specialists, tracks closure,
+  and escalates decisions that exceed delegated authority to the principal.
+  Owns the operating units of the starter organization.
+
+authorized_paths:
+  - "projects/"
+  - "mandates/"
+forbidden_paths:
+  - "roles/"
+  - ".env"
+  - "secrets/"
+
+delegates_to:
+  - role.analyst
+  - role.reviewer
+
+escalates_to:
+  - role.principal
+
+budget:
+  daily_cap_usd: 40.00
+  session_cap_usd: 20.00
+  single_action_cap_usd: 5.00
+  warn_threshold_frac: 0.80
+  absolute_ceiling_usd: 40.00
+
+mandate_path: mandates/lead_mandate.md

@@ -955,3 +955,229 @@ def test_kernel_service_primitive_routes_verify_sqlite_mutation_leases(tmp_path:
     )
     assert stale.status == 400
     assert "fencing token" in stale.payload["error"]
+
+
+def test_kernel_service_runs_a_work_item_through_an_operating_unit(tmp_path: Path):
+    config = KernelServiceConfig(
+        work_items_log=tmp_path / "work_items.jsonl",
+        operating_units_log=tmp_path / "operating_units.jsonl",
+        kernel_events_log=tmp_path / "kernel_events.jsonl",
+    )
+
+    defined = dispatch_kernel_request(
+        "POST",
+        "/kernel/operating-units",
+        {
+            "unit_id": "support_desk",
+            "unit_kind": "qualification_desk",
+            "display_name": "Support Desk",
+            "owner_role": "role.support_manager",
+            "allowed_work_kinds": ["triage_ticket"],
+            "allowed_exits": ["resolved", "escalated"],
+        },
+        config=config,
+    )
+    assert defined.status == 201
+
+    enqueued = dispatch_kernel_request(
+        "POST",
+        "/kernel/work-items",
+        {"unit_id": "support_desk", "kind": "triage_ticket", "payload": {"ticket": "T-1"}},
+        config=config,
+    )
+    assert enqueued.status == 201
+    work_id = enqueued.payload["work_item"]["work_id"]
+
+    claimed = dispatch_kernel_request(
+        "POST",
+        "/kernel/work-items/claim-next",
+        {"unit_id": "support_desk", "actor": "actor.agent_1"},
+        config=config,
+    )
+    assert claimed.status == 200
+    token = claimed.payload["work_item"]["claim_token"]
+
+    completed = dispatch_kernel_request(
+        "POST",
+        f"/kernel/work-items/{work_id}/complete",
+        {"actor": "actor.agent_1", "claim_token": token, "exit_kind": "resolved"},
+        config=config,
+    )
+    assert completed.status == 200
+    assert completed.payload["work_item"]["status"] == "done"
+
+    dashboard = dispatch_kernel_request(
+        "GET", "/kernel/operating-unit-dashboard", config=config
+    )
+    assert dashboard.status == 200
+    unit = dashboard.payload["dashboard"]["units"][0]
+    assert unit["unit_id"] == "support_desk"
+    assert unit["done"] == 1
+
+
+def test_kernel_service_rejects_unbounded_work_item_exit(tmp_path: Path):
+    config = KernelServiceConfig(
+        work_items_log=tmp_path / "work_items.jsonl",
+        operating_units_log=tmp_path / "operating_units.jsonl",
+        kernel_events_log=tmp_path / "kernel_events.jsonl",
+    )
+    dispatch_kernel_request(
+        "POST",
+        "/kernel/operating-units",
+        {
+            "unit_id": "support_desk",
+            "unit_kind": "qualification_desk",
+            "display_name": "Support Desk",
+            "owner_role": "role.support_manager",
+            "allowed_work_kinds": ["triage_ticket"],
+            "allowed_exits": ["resolved"],
+        },
+        config=config,
+    )
+    enqueued = dispatch_kernel_request(
+        "POST",
+        "/kernel/work-items",
+        {"unit_id": "support_desk", "kind": "triage_ticket"},
+        config=config,
+    )
+    work_id = enqueued.payload["work_item"]["work_id"]
+    claimed = dispatch_kernel_request(
+        "POST",
+        "/kernel/work-items/claim-next",
+        {"unit_id": "support_desk", "actor": "actor.agent_1"},
+        config=config,
+    )
+    token = claimed.payload["work_item"]["claim_token"]
+    rejected = dispatch_kernel_request(
+        "POST",
+        f"/kernel/work-items/{work_id}/complete",
+        {"actor": "actor.agent_1", "claim_token": token, "exit_kind": "not_an_exit"},
+        config=config,
+    )
+    assert rejected.status == 400
+    assert "allowed_exits" in rejected.payload["error"]
+
+
+def test_kernel_service_routes_the_durable_learning_layer(tmp_path: Path):
+    config = KernelServiceConfig(
+        outcome_links_log=tmp_path / "outcome_links.jsonl",
+        routine_reviews_log=tmp_path / "routine_reviews.jsonl",
+        resource_allocation_log=tmp_path / "resource_allocation.jsonl",
+        residual_rights_log=tmp_path / "residual_rights.jsonl",
+        residual_decisions_log=tmp_path / "residual_decisions.jsonl",
+        kernel_events_log=tmp_path / "kernel_events.jsonl",
+    )
+
+    # Outcome link: open, measure baseline + post, record a verdict.
+    link = dispatch_kernel_request(
+        "POST",
+        "/kernel/outcome-links",
+        {
+            "change_ref": "le_42",
+            "change_kind": "learning_event",
+            "metric_name": "ticket_cycle_time",
+            "metric_unit": "hours",
+            "created_by": "actor.analyst",
+        },
+        config=config,
+    )
+    assert link.status == 201
+    link_id = link.payload["outcome_link"]["outcome_link_id"]
+    for kind, value in (("baseline", 12.0), ("post", 8.0)):
+        snap = dispatch_kernel_request(
+            "POST",
+            f"/kernel/outcome-links/{link_id}/snapshots",
+            {"kind": kind, "value": value, "captured_by": "actor.analyst"},
+            config=config,
+        )
+        assert snap.status == 200
+    verdict = dispatch_kernel_request(
+        "POST",
+        f"/kernel/outcome-links/{link_id}/verdict",
+        {"verdict": "improved", "rationale": "cycle time fell after the change"},
+        config=config,
+    )
+    assert verdict.status == 200
+    summary = dispatch_kernel_request("GET", "/kernel/outcome-links/summary", config=config)
+    assert summary.status == 200
+
+    # Routine review: schedule one already overdue, confirm it surfaces as due.
+    scheduled = dispatch_kernel_request(
+        "POST",
+        "/kernel/routine-reviews",
+        {
+            "routine_ref": "le_42",
+            "routine_kind": "learning_event",
+            "learning_event_id": "le_42",
+            "review_due_utc": "2020-01-01T00:00:00+00:00",
+            "scheduled_by": "actor.manager",
+        },
+        config=config,
+    )
+    assert scheduled.status == 201
+    due = dispatch_kernel_request("GET", "/kernel/routine-reviews/due", config=config)
+    assert due.status == 200
+    assert len(due.payload["due_reviews"]) == 1
+
+    # Resource allocation: record a move, apply it, read the ledger.
+    decision = dispatch_kernel_request(
+        "POST",
+        "/kernel/allocation-decisions",
+        {
+            "resource_kind": "worker_capacity",
+            "from_unit": "__reserve__",
+            "to_unit": "triage_lane",
+            "amount": 5,
+            "deciding_role": "role.general_office",
+            "authority_basis": "quarterly allocation review",
+            "rationale": "triage backlog growth",
+        },
+        config=config,
+    )
+    assert decision.status == 201
+    decision_id = decision.payload["allocation_decision"]["decision_id"]
+    applied = dispatch_kernel_request(
+        "POST", f"/kernel/allocation-decisions/{decision_id}/apply", {}, config=config
+    )
+    assert applied.status == 200
+    ledger = dispatch_kernel_request(
+        "GET", "/kernel/allocation-ledger/worker_capacity", config=config
+    )
+    assert ledger.status == 200
+    assert ledger.payload["ledger"]["triage_lane"] == 5.0
+
+    # Decision rights: assign a residual right, record a decision under it.
+    assigned = dispatch_kernel_request(
+        "POST",
+        "/kernel/residual-rights",
+        {
+            "scope_kind": "project",
+            "scope_ref": "proj.atlas",
+            "holder_role": "role.project_lead",
+            "basis": "charter delegates unspecified calls to the lead",
+            "assigned_by": "actor.principal",
+        },
+        config=config,
+    )
+    assert assigned.status == 201
+    holder = dispatch_kernel_request(
+        "GET",
+        "/kernel/residual-rights/holder?scope_kind=project&scope_ref=proj.atlas",
+        config=config,
+    )
+    assert holder.status == 200
+    assert holder.payload["holder"]["holder_role"] == "role.project_lead"
+    residual = dispatch_kernel_request(
+        "POST",
+        "/kernel/residual-decisions",
+        {
+            "scope_kind": "project",
+            "scope_ref": "proj.atlas",
+            "deciding_role": "role.project_lead",
+            "decision_summary": "chose vendor A; mandate was silent",
+            "rationale": "time-critical and within project scope",
+        },
+        config=config,
+    )
+    assert residual.status == 201
+    assert residual.payload["residual_decision"]["unauthorized"] is False

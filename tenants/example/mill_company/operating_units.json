@@ -1,0 +1,67 @@
+[
+  {
+    "unit_id": "source_qualification",
+    "unit_kind": "qualification_desk",
+    "display_name": "Source Qualification",
+    "owner_role": "role.mill_manager",
+    "input_kinds": ["raw_candidate"],
+    "allowed_work_kinds": ["screen_candidate"],
+    "allowed_exits": ["qualified", "rejected"],
+    "worker_roles": ["role.deterministic_filter"],
+    "sla": {"p95_seconds": 10},
+    "operator_required_when": ["ambiguous_candidate"],
+    "governance_required_for": []
+  },
+  {
+    "unit_id": "proposal_desk",
+    "unit_kind": "proposal_lane",
+    "display_name": "Proposal Desk",
+    "owner_role": "role.mill_manager",
+    "input_kinds": ["qualified_input"],
+    "allowed_work_kinds": ["draft_proposal"],
+    "allowed_exits": ["proposal_ready", "no_viable_proposal"],
+    "worker_roles": ["role.llm_proposer"],
+    "sla": {"p95_seconds": 60},
+    "operator_required_when": ["policy_change"],
+    "governance_required_for": []
+  },
+  {
+    "unit_id": "execution_lane",
+    "unit_kind": "transformation_lane",
+    "display_name": "Execution Lane",
+    "owner_role": "role.mill_manager",
+    "input_kinds": ["proposal", "budget_grant"],
+    "allowed_work_kinds": ["execute_proposal", "repair"],
+    "allowed_exits": ["produced", "valid_falsifier", "tested_hold", "budget_exhausted"],
+    "worker_roles": ["role.agent_worker"],
+    "sla": {"p95_seconds": 300},
+    "operator_required_when": ["budget_escalation"],
+    "governance_required_for": []
+  },
+  {
+    "unit_id": "governance_gate",
+    "unit_kind": "governance_gate",
+    "display_name": "Governance Gate",
+    "owner_role": "role.governance_lead",
+    "input_kinds": ["produced_artifact"],
+    "allowed_work_kinds": ["ratify", "reject_for_rework"],
+    "allowed_exits": ["ratified", "returned_for_rework"],
+    "worker_roles": ["role.governance_worker"],
+    "sla": {"p95_seconds": 120},
+    "operator_required_when": ["ambiguous_value"],
+    "governance_required_for": ["ratified"]
+  },
+  {
+    "unit_id": "registry_desk",
+    "unit_kind": "registry_lane",
+    "display_name": "Registry Desk",
+    "owner_role": "role.mill_manager",
+    "input_kinds": ["ratified_artifact"],
+    "allowed_work_kinds": ["promote_to_registry"],
+    "allowed_exits": ["registered", "superseded"],
+    "worker_roles": ["role.deterministic_filter"],
+    "sla": {"p95_seconds": 30},
+    "operator_required_when": ["registry_conflict"],
+    "governance_required_for": []
+  }
+]

@@ -1,0 +1,27 @@
+schema_version: 1
+role_id: principal
+role_class: authority
+description: >
+  Root authority for the organization. Holds strategic decision rights,
+  resource allocation, and all irreversible commitments. Every other role's
+  escalation chain terminates here. Substrate-agnostic: filled by any human
+  with authority over the firm.
+
+authorized_paths:
+  - "*"
+forbidden_paths: []
+
+delegates_to:
+  - role.lead
+
+escalates_to: []
+
+budget:
+  daily_cap_usd: null
+  session_cap_usd: null
+  single_action_cap_usd: null
+  warn_threshold_frac: null
+  absolute_ceiling_usd: null
+
+# Authority roles operate by declaration, not mandate.
+mandate_path: null

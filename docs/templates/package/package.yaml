@@ -1,0 +1,74 @@
+# =============================================================================
+# package.yaml — a cognitive-firm distribution package (schema_version 1)
+#
+# Copy this directory as the starting point for a new distro or overlay, then
+# edit every field below. Validate your edits at any time with:
+#
+#     cognitive-firm-distro lint <this-directory>
+#
+# and preview an install without applying it with:
+#
+#     cognitive-firm-distro install <name> --into ./scratch-org --dry-run
+#
+# See docs/protocols/distribution.md for the full contract.
+# =============================================================================
+
+# Manifest schema version. Leave this at 1.
+schema_version: 1
+
+# Package identity. `name` must be unique within a registry; `version` is the
+# package's own version (a dotted string, e.g. 0.1.0).
+name: my-package
+version: 0.1.0
+
+# Package kind:
+#   distro  — a curated, day-one-runnable starter organization (installed into
+#             an empty directory).
+#   overlay — an add-on (extra roles, mandates, protocols) installed on top of
+#             an existing organization.
+kind: overlay
+
+# Human-readable summary. Minimum 10 characters — say what installing this
+# package gives the operator, in plain language.
+description: >
+  Describe what this package installs and why an operator would want it.
+
+# Supported kernel-version range, enforced at install time. Leave a bound as
+# null for "no bound". Set min_version to the oldest kernel you have tested.
+kernel:
+  min_version: "0.1.0"
+  max_version: null
+
+# Components — the install units. Each maps a path under files/ to a path in
+# the target organization. `source` and `dest` must both stay inside their
+# roots (a path that escapes is rejected by lint).
+#
+# `op` is the overlay-composition intent (default: add):
+#   add     — install a new file; a pre-existing destination is skipped as a
+#             conflict unless the operator passes --force.
+#   replace — own the file outright; a pre-existing destination is expected
+#             and overwritten.
+#   patch   — the source is an RFC 7386 JSON Merge Patch applied to an
+#             existing JSON/YAML file at `dest`.
+#
+# `optional: true` means a missing source is silently skipped instead of
+# failing the install.
+components:
+  - source: roles
+    dest: roles
+    op: add
+  - source: mandates
+    dest: mandates
+    op: add
+
+# Capability tags this package contributes. Free-form; used for discovery.
+provides:
+  - example-capability
+
+# Shown to the operator after a successful install — use it to explain the
+# next steps an adopter should take.
+post_install_message: |
+  Installed my-package.
+  Next:
+    1. Review the installed roles/ and edit authority boundaries.
+    2. Adjust the mandates to match your firm.

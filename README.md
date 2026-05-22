@@ -129,6 +129,11 @@ System of record: org/ (filesystem) + git history.
 
 ## 4. Repository map
 
+**New adopter? Start with [`docs/getting-started.md`](docs/getting-started.md)** —
+the shortest path from zero to a running governed firm (`pip install` →
+`cognitive-firm-distro install` → point the tools at it → run it). The table
+below is the full reading order.
+
 Read in this order if you are new:
 
 | # | Path | What you'll learn |
@@ -168,9 +173,10 @@ Read in this order if you are new:
 
 | Directory | Role |
 |---|---|
-| `src/cognitive_firm/` | Kernel: orchestration daemon, signals, notifications, role extensions, common runtime helpers |
+| `src/cognitive_firm/` | Kernel: orchestration daemon, signals, notifications, role extensions, the distribution layer, the userland, common runtime helpers |
 | `org/` | System-of-record skeleton: roles, mandates, sessions, signals, channels, transitions. Treat as a template. |
 | `tenants/` | Multi-tenant overlay slot. Reserved for `<tenant_id>/` subdirectories with overlay scripts; real tenants live in private repos. |
+| `distro/` | Installable distribution packages. The `starter-firm` distro brings up a runnable governed organization in one action with `cognitive-firm-distro install`. |
 | `schemas/` | Typed contracts for mandates, roles, gate payloads, transitions |
 | `scripts/` | `agent_daemon.py` (entrypoint), `org_role_preflight.py` (preflight), `setup_vps.sh`, `telegram_setup.py`, `operator_console.sh` |
 | `deploy/` | systemd units (`agent-daemon.service`, `orbit-sync.service`) for VPS deployment |
@@ -226,6 +232,50 @@ The dry-run tick discovers candidate work, prints what it would dispatch, and ex
 `.env.example` documents every environment variable the kernel and Orbit
 dashboard read. Most variables are optional. At least one LLM API key is needed
 for model calls made by the kernel itself.
+
+### Install a runnable organization
+
+The quickstart above is the developer path. To stand up a *governed
+organization* in one action — rather than assembling one from the protocol
+catalog — use the distribution layer:
+
+```bash
+cognitive-firm-distro list
+cognitive-firm-distro install starter-firm --into ./my-firm
+```
+
+`install` is transactional and git-backed: the target becomes its own git
+repository, the install lands as a commit tagged
+`install/starter-firm/<version>`, and the installer verifies the new
+organization's governance graph before committing it. A bad install is
+reversible — `cognitive-firm-distro rollback starter-firm --into ./my-firm`.
+The `cognitive-firm-distro` CLI also covers `show`, `verify`, `upgrade`,
+`uninstall`, and `lint`; a package can be installed from a git URL (SHA-pinned,
+recorded in a content-hashed `packages.lock`), and installing an overlay onto a
+*running* org files a governed authority-diff proposal — a package may not
+widen a role's authority. See
+[`docs/protocols/distribution.md`](docs/protocols/distribution.md).
+
+The userland sits above the kernel as the operator-facing layer. The
+`cognitive-firm-userland` CLI shows what needs a human and the shared
+vocabulary:
+
+```bash
+cognitive-firm-userland needs-me <actor_id>   # the operator's attention queue
+cognitive-firm-userland inbox <actor_id>      # a member-human's bounded work
+cognitive-firm-userland vocabulary            # the shared userland glossary
+cognitive-firm-userland status                # plain-language org health
+cognitive-firm-userland resolve <gate_id> --option <opt>   # resolve a pending gate
+cognitive-firm-userland proposals             # governance changes awaiting review
+cognitive-firm-userland approve <proposal_id> # approve a governance change
+cognitive-firm-userland decline <proposal_id> # decline a governance change
+```
+
+`proposals` / `approve` / `decline` are the governed-install human-review
+loop: a governance-change proposal awaits an operator decision, and
+`approve` / `decline` each record an attested kernel event.
+
+The same attention queue is also rendered by the Orbit `NeedsMePane`.
 
 ---
 
@@ -300,6 +350,19 @@ make smoke-docker
 | Learning transition compiler | `src/cognitive_firm/orchestration/learning_transition_compiler.py` | `tests/test_learning_transition_compiler.py` |
 | Approved learning events | `src/cognitive_firm/orchestration/learning_events.py` | `tests/test_learning_events.py` |
 | Learning-carrier work discovery | `src/cognitive_firm/orchestration/work_discovery.py` | `tests/test_work_discovery_learning_carriers.py` |
+| Operating-unit contracts | `src/cognitive_firm/orchestration/operating_units.py` | `tests/test_operating_units.py` |
+| Durable work-item queue | `src/cognitive_firm/orchestration/work_items.py` | `tests/test_work_items.py`, `tests/test_kernel_service.py` |
+| Operating-unit dashboard | `src/cognitive_firm/orchestration/operating_unit_surface.py` | `tests/test_operating_unit_surface.py` |
+| Outcome links (learning → measured outcome) | `src/cognitive_firm/orchestration/outcome_links.py` | `tests/test_outcome_links.py` |
+| Routine reviews (forgetting lifecycle) | `src/cognitive_firm/orchestration/routine_reviews.py` | `tests/test_routine_reviews.py` |
+| Governed resource allocation | `src/cognitive_firm/orchestration/resource_allocation.py` | `tests/test_resource_allocation.py` |
+| Residual decision rights | `src/cognitive_firm/orchestration/decision_rights.py` | `tests/test_decision_rights.py` |
+| Distribution layer (install / verify / rollback / upgrade / lint, `op` composition, `extends`) | `src/cognitive_firm/distribution/` | `tests/test_distribution.py`, `tests/test_rollback.py`, `tests/test_distro_content.py`, `tests/test_overlay_composition.py` |
+| Governed overlay install (authority-diff proposal, `package.install_approved`) | `src/cognitive_firm/distribution/governed_install.py` | `tests/test_governed_install.py` |
+| Remote packages (git-URL fetch, SHA pin, content-hashed lockfile) | `src/cognitive_firm/distribution/remote_registry.py`, `lockfile.py` | `tests/test_remote_registry.py` |
+| Userland — enrollment, attention router, needs-me, work inbox, vocabulary, surface policy | `src/cognitive_firm/userland/` | `tests/test_attention_router.py`, `tests/test_needs_me.py`, `tests/test_work_inbox.py`, `tests/test_vocabulary.py`, `tests/test_enrollment.py`, `tests/test_surface_policy.py` |
+| Userland CLI + kernel routes (`needs-me` / `inbox` / `vocabulary` / `status` / `resolve` / `proposals` / `approve` / `decline`; `GET /kernel/attention`, `GET /kernel/vocabulary`, `GET /kernel/governance-changes`, `POST /kernel/governance-changes/{id}/decision`) | `src/cognitive_firm/userland/cli.py`, `src/cognitive_firm/kernel_service.py` | `tests/test_userland_cli.py`, `tests/test_kernel_service_userland.py` |
+| Primitive extension schemas | `src/cognitive_firm/orchestration/extension_schemas.py` | `tests/test_extension_schemas.py` |
 | EU AI Act deploy gate | `src/cognitive_firm/orchestration/eu_ai_act_deploy_gate.py` | `tests/test_eu_ai_act_deploy_gate.py`; `docs/protocols/eu-ai-act-deploy-gate.md` |
 | Property-based invariants (Hypothesis) | `tests/test_invariants_property_based.py` | 8/8 |
 | Cross-primitive integration tests | `tests/test_cross_primitive_integration.py` | 3/3 |

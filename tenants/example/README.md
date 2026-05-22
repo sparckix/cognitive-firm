@@ -16,7 +16,12 @@ tenants/example/
   projects/demo/project_charter.md
   roles/research_director.yaml
   walkthrough/
+  mill_company/        # production-layer overlay: operating units + work items
 ```
+
+`mill_company/` is a second, focused example: it shows how a tenant
+instantiates the production layer (`docs/protocols/work-items.md`) as a
+company of typed operating units. See `mill_company/README.md`.
 
 ## Adoption Pattern
 

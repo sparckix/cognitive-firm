@@ -44,9 +44,9 @@ exogenous-pressure clock).
 
 Added optional `agent_utilization` block. Tracks Claude-Code / Codex /
 Gemini-CLI session-window usage as a **capacity dimension orthogonal to
-USD spend**. Consumed by `src/ztare/supervisor/agent_utilization_tracker.py`.
-Warn-threshold trip emits a Telegram push (GP-128b) AND a damage signal
-at `org/signals/damage/`.
+USD spend**. Consumed by `update_role_agent_utilization` in
+`src/cognitive_firm/orchestration/app_intents.py`. Warn-threshold trip
+emits a notification push AND a damage signal at `org/signals/damage/`.
 
 Fields (all optional; module defaults apply if block is absent):
 - `daily_cap_seconds` (number, default 10800 = 3h)

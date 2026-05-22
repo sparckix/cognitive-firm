@@ -20,6 +20,8 @@ import { SpendPane } from './components/SpendPane'
 import { BatchGateReview } from './components/BatchGateReview'
 import { ChatPane } from './components/ChatPane'
 import { HumanWorkPane } from './components/HumanWorkPane'
+import { NeedsMePane } from './components/NeedsMePane'
+import { WorkInboxPane } from './components/WorkInboxPane'
 
 const SpatialCanvas = lazy(() =>
   import('./components/SpatialCanvas').then(module => ({ default: module.SpatialCanvas }))
@@ -410,28 +412,23 @@ export function App() {
             })}
           </div>
 
-          {/* Review queue placeholder */}
+          {/* Operator needs-me queue — consolidated, urgency-ordered routed
+              attention feed (GP-230 O1). Replaces the gate-review placeholder. */}
           <div style={{ marginTop: 24 }}>
-            <h2 style={{
-              fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.5,
-              color: '#6b7394', marginBottom: 12,
-              display: 'flex', alignItems: 'center', gap: 8,
-            }}>
-              ⚖ Gate Review Queue
-              <span style={{
-                background: '#4f8ff7', color: '#fff', fontSize: 10,
-                padding: '1px 6px', borderRadius: 8,
-              }}>
-                {pendingGates.length}
-              </span>
-            </h2>
-            <div style={{ color: gateError ? '#ef4444' : '#4a5070', fontSize: 12, textAlign: 'center', padding: 20 }}>
-              {gateError || (
-                pendingGates.length === 0
-                  ? 'No pending gates. All agents operating within mandate.'
-                  : 'Resolve gates in the Executive Inbox pane.'
-              )}
-            </div>
+            {gateError && (
+              <div style={{ color: '#ef4444', fontSize: 12, marginBottom: 8 }}>
+                {gateError}
+              </div>
+            )}
+            <NeedsMePane />
+          </div>
+
+          {/* Member-human work inbox — bounded tasks assigned to this
+              human (GP-230 O1 L2). A parallel lane to NeedsMePane: the
+              operator's escalation pager above, the member-human's
+              work-to-do list here. */}
+          <div style={{ marginTop: 24 }}>
+            <WorkInboxPane />
           </div>
         </div>
 

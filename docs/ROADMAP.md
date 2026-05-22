@@ -13,6 +13,13 @@ tenant-specific research policy, scoring systems, and optimizer rules.
   cases.
 - Local kernel service boundary with first-party actor identity, actor
   membership, identity provider adapter shape, and optional resource leases.
+- Production layer: typed operating-unit contracts and a durable work-item
+  queue with lease-fenced claims, retries, dead letters, bounded exits, and an
+  operating-unit health dashboard.
+- Durable-learning layer: outcome links (did an approved change improve a
+  measured outcome?), routine reviews (scheduled review and accountable
+  retirement of stale routines), governed resource allocation across operating
+  units, and residual decision-rights records for incomplete-mandate situations.
 - Public verification commands: `make smoke-public`, `make smoke-docker`, and
   the Python test suite.
 - Backup/restore smoke for a minimal T1 organization snapshot and restored
@@ -35,6 +42,50 @@ tenant-specific research policy, scoring systems, and optimizer rules.
 - Field-pilot starter pack with scope, baseline, metrics, and learning-event
   summary templates.
 - Obsidian-compatible docs and a minimal example-tenant overlay.
+- Distribution layer: versioned distro/overlay packages, a package registry,
+  and a transactional git-backed installer with kernel-version gating and
+  governance-graph `boot_check` verification. Installs commit and tag the
+  target (`install/<pkg>/<version>`); `rollback` undoes a bad install (clean
+  git reset, or a compensating git revert if the org has run). The
+  `cognitive-firm-distro` CLI ships `list / show / install / install-overlay /
+  verify / upgrade / rollback / uninstall / lint`, and the bundled
+  `starter-firm` distro ships a
+  day-one governance loop in the wheel.
+  - Overlay composition: a component carries an `op` —
+    `add` / `replace` / `patch` (RFC 7386 JSON Merge Patch).
+  - Governed overlay install: installing an overlay onto a *running*
+    org files a governance-change proposal whose `expected_behavior_change` is
+    a rendered authority-diff; an overlay that expands a role's write scope (or
+    changes authority uninterpretably) fails a required invariant and is
+    blocked — a package may not widen authority. An approved install attests a
+    `package.install_approved` event.
+  - Remote packages: `install <git-url>` fetches a package SHA-pinned,
+    recording a content-hashed `.cognitive-firm/packages.lock` that catches a
+    moved tag or a force-push.
+  - Distro inheritance: a manifest may `extends` a base distro;
+    installing it installs the base first, then composes the extender (one
+    level).
+  - Authoring loop: `lint`, `install --dry-run`, and a package
+    template at `docs/templates/package/`.
+- Userland layer (`src/cognitive_firm/userland/`): the operator- and
+  member-human-facing layer over the kernel, with five layers — L0 enrollment,
+  L1 attention router, L2 action (operator `needs-me` queue, member-human work
+  inbox), L3 inspection/surface-policy, L4 vocabulary spine. Exposed by two
+  kernel-service routes: `GET /kernel/attention/{actor_id}` and
+  `GET /kernel/vocabulary`. The `cognitive-firm-userland` CLI ships `needs-me`,
+  `inbox`, `vocabulary`, `status`, `resolve`, and the governed-install
+  human-review verbs `proposals` / `approve` / `decline` (over the
+  `GET /kernel/governance-changes` and
+  `POST /kernel/governance-changes/{id}/decision` routes). An Orbit
+  `NeedsMePane` surfaces the operator's
+  attention queue. The userland logic is built and tested; the operator CLI and
+  the one `NeedsMePane` Orbit pane exist — not every Orbit pane over the
+  userland is built yet.
+- L3 surface-policy guard: the kernel service refuses a mutation from a
+  `projection_only` surface (`KernelServiceConfig.surface_write_modes`).
+- Extension schemas: packages register JSON Schemas to validate custom
+  primitive payload types, wired into `enqueue_work_item`. Open by default — a
+  `kind` with no registered schema is unconstrained.
 
 ## Lean T2 Seams
 
@@ -154,3 +205,56 @@ These are now part of the public adoption path:
 - `docs/accountability-speed-envelope.md`;
 - `docs/examples/learning-event-replay.md`;
 - `docs/examples/action-intelligence-source-health.md`.
+
+## Adoption And Distribution Direction
+
+The kernel is sound; the current frontier is making it adoptable without an
+adopter having to assemble it from a protocol catalog.
+
+Shipped:
+
+- Distribution layer: versioned `distro`/`overlay` packages, a package
+  registry, and a transactional git-backed installer. Install enforces a
+  kernel-version gate, runs a governance-graph `boot_check`, and only then
+  commits and tags the target (`install/<pkg>/<version>`); a failed or
+  unbootable install leaves the target untouched. A component carries a
+  composition `op` (`add` / `replace` / `patch`). `rollback` undoes a bad
+  install — a clean `git reset` when nothing has run since, or a compensating
+  `git revert` forward commit when the org has run. Installing an overlay onto
+  a *running* org is governed: it files an authority-diff proposal and is
+  blocked if it would widen a role's authority. A package can be installed
+  from a git URL (SHA-pinned, content-hashed lockfile), and a distro may
+  `extends` a base distro. The `cognitive-firm-distro` CLI ships `list / show /
+  install / verify / upgrade / rollback / uninstall / lint`, with
+  `install --dry-run` and a package template (`docs/templates/package/`) for
+  third-party authoring. The `starter-firm` distro brings up a governed
+  organization (principal, lead, analyst, reviewer) with a day-one governance
+  loop in a single command, and is bundled in the wheel. See
+  [`protocols/distribution.md`](protocols/distribution.md).
+- Userland layer: an operator- and member-human-facing layer over the
+  kernel — L0 enrollment, L1 attention router, L2 action (operator `needs-me`
+  queue, member-human work inbox), L3 inspection/surface-policy, L4 vocabulary
+  spine — exposed by the `GET /kernel/attention/{actor_id}` and
+  `GET /kernel/vocabulary` kernel-service routes. The `cognitive-firm-userland`
+  CLI (`needs-me` / `inbox` / `vocabulary` / `status` / `resolve` /
+  `proposals` / `approve` / `decline`) and an Orbit `NeedsMePane` are
+  shipped over the built-and-tested userland logic. Not every Orbit pane over
+  the userland is built yet.
+- Extension schemas and the shareable community-package roadmap
+  (`docs/community-packages.md`).
+
+Planned, in sequence:
+
+- More Orbit panes over the userland logic (inbox, vocabulary, enrollment), so
+  a non-technical operator runs a governed organization fully from the desktop
+  surface.
+- A shared, hosted package registry beyond local discovery and git-URL fetch,
+  with a published third-party authoring and review path
+  (`docs/community-packages.md`).
+- Open-core distribution: the kernel stays open and self-hostable so the
+  filesystem + git inspect/fork/replay invariant holds; a managed hosted
+  option serves adopters who will not run infrastructure.
+
+The remaining items are gated on a first validating field pilot: the kernel's
+measurable-improvement claim should be demonstrated with one real adopter
+before adoption is scaled.

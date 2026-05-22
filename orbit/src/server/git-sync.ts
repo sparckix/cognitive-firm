@@ -343,6 +343,20 @@ function parseRequestBody(req: any): Promise<any> {
   })
 }
 
+async function getKernelService(path: string): Promise<any> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (KERNEL_SERVICE_TOKEN) headers.Authorization = `Bearer ${KERNEL_SERVICE_TOKEN}`
+  const response = await fetch(`${KERNEL_SERVICE_URL}${path}`, {
+    method: 'GET',
+    headers,
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok || body.ok === false) {
+    throw new Error(String(body.error || `kernel service returned HTTP ${response.status}`))
+  }
+  return body
+}
+
 async function callKernelService(path: string, payload: Record<string, unknown>): Promise<any> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (KERNEL_SERVICE_TOKEN) headers.Authorization = `Bearer ${KERNEL_SERVICE_TOKEN}`
@@ -814,6 +828,68 @@ const server = createServer((req, res) => {
       res.writeHead(500, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: false, error: String(e) }))
     }
+    return
+  }
+
+  // ── Operator attention feed (O1 L1, GP-230) ──────────────────────
+  // GET /api/attention/<actor_id> → thin read proxy to the kernel's
+  // GET /kernel/attention/{actor_id} route. The routed-signal feed is a
+  // kernel-computed read (not a filesystem projection), so — consistent
+  // with the write path — it goes through the kernel service rather than
+  // being reconstructed in the daemon. Read-only; no surface-policy gate.
+  if (req.url?.startsWith('/api/attention/') && req.method === 'GET') {
+    const m = req.url.match(/^\/api\/attention\/([A-Za-z0-9_.:-]+)$/)
+    if (!m) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'invalid actor_id' }))
+      return
+    }
+    const actorId = m[1]
+    getKernelService(`/kernel/attention/${actorId}`)
+      .then(body => {
+        const result = body.result ?? body
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          actor_id: result.actor_id ?? actorId,
+          signals: result.signals ?? [],
+        }))
+      })
+      .catch(err => {
+        res.writeHead(502, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: String(err) }))
+      })
+    return
+  }
+
+  // ── Member-human work inbox (O1 L2, GP-230) ──────────────────────
+  // GET /api/work-inbox/<actor_id> → thin read proxy to the kernel's
+  // GET /kernel/work-inbox/{actor_id} route. The member-human's bounded
+  // task inbox is a kernel-computed read model over human_work.jsonl
+  // (not a filesystem projection rebuilt here), so — like /api/attention
+  // — it goes through the kernel service. Read-only; no surface-policy
+  // gate. Distinct from /api/attention: that is the operator's escalation
+  // feed, this is the member-human's work-to-do list.
+  if (req.url?.startsWith('/api/work-inbox/') && req.method === 'GET') {
+    const m = req.url.match(/^\/api\/work-inbox\/([A-Za-z0-9_.:-]+)$/)
+    if (!m) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'invalid actor_id' }))
+      return
+    }
+    const actorId = m[1]
+    getKernelService(`/kernel/work-inbox/${actorId}`)
+      .then(body => {
+        const result = body.result ?? body
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          actor_id: result.actor_id ?? actorId,
+          items: result.items ?? [],
+        }))
+      })
+      .catch(err => {
+        res.writeHead(502, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: String(err) }))
+      })
     return
   }
 
