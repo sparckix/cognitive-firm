@@ -1,11 +1,13 @@
 """Distribution-layer installer.
 
-Materializes a package (see ``manifest.py``) into a target organization
-directory, records an install receipt, and verifies the result boots.
+Materializes a package into a target organization directory, records an
+install receipt, and verifies the result boots.
 
-The installer never touches the kernel. It only writes overlay files the
-adopter owns, so the installed organization stays inspectable, forkable, and
-replayable.
+Each install is transactional and git-backed: the installer ensures the target
+is its own git repo, applies the package, verifies the org boots, then commits
+and tags the result (spec R1/G11). A failed install leaves the target as it
+was. The installer never touches the kernel — only overlay files the adopter
+owns, so the installed org stays inspectable, forkable, and replayable.
 """
 
 from __future__ import annotations
@@ -17,24 +19,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-import yaml
-
-from cognitive_firm.distribution.manifest import FILES_DIRNAME, PackageManifest
+import cognitive_firm
+from cognitive_firm.distribution import gitops
+from cognitive_firm.distribution.boot import boot_check
+from cognitive_firm.distribution.manifest import (
+    FILES_DIRNAME,
+    PackageManifest,
+    check_kernel_compat,
+)
+from cognitive_firm.orchestration.kernel_events import (
+    append_kernel_event,
+    create_kernel_event,
+)
 
 RECEIPT_DIRNAME = ".cognitive-firm"
+DISTRIBUTION_EVENTS_LOG = "distribution-events.jsonl"
 
-# Top-level keys every installed role.yaml must carry (role.v1 schema).
-_ROLE_REQUIRED_KEYS = (
-    "schema_version",
-    "role_id",
-    "role_class",
-    "description",
-    "authorized_paths",
-    "forbidden_paths",
-    "delegates_to",
-    "escalates_to",
-    "budget",
-)
+
+class InstallError(RuntimeError):
+    """Raised when an install cannot proceed or did not produce a bootable org."""
 
 
 @dataclass(frozen=True)
@@ -47,7 +50,11 @@ class InstalledFile:
 
 @dataclass(frozen=True)
 class InstallReceipt:
-    """The durable record of one install, written under the target."""
+    """The durable record of one install, written under the target.
+
+    ``pre_install_ref`` / ``commit_sha`` / ``git_tag`` are the install boundary
+    (spec R1): the git refs rollback uses to undo this install.
+    """
 
     package: str
     version: str
@@ -56,6 +63,9 @@ class InstallReceipt:
     target_root: str
     files: tuple[InstalledFile, ...]
     skipped_conflicts: tuple[str, ...] = ()
+    pre_install_ref: str | None = None
+    commit_sha: str = ""
+    git_tag: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -66,6 +76,9 @@ class InstallReceipt:
             "target_root": self.target_root,
             "files": [{"dest": f.dest, "action": f.action} for f in self.files],
             "skipped_conflicts": list(self.skipped_conflicts),
+            "pre_install_ref": self.pre_install_ref,
+            "commit_sha": self.commit_sha,
+            "git_tag": self.git_tag,
         }
 
     @classmethod
@@ -81,7 +94,35 @@ class InstallReceipt:
                 for f in raw.get("files", [])
             ),
             skipped_conflicts=tuple(raw.get("skipped_conflicts", [])),
+            pre_install_ref=raw.get("pre_install_ref"),
+            commit_sha=raw.get("commit_sha", ""),
+            git_tag=raw.get("git_tag", ""),
         )
+
+
+def record_distribution_event(
+    target_root: Path,
+    *,
+    actor: str,
+    verb: str,
+    package: str,
+    payload: dict[str, Any],
+) -> None:
+    """Append a typed kernel event for an install-layer action.
+
+    The event uses the canonical ``KernelEvent`` envelope and lands in the
+    org's distribution event log (``.cognitive-firm/distribution-events.jsonl``)
+    — the attested, append-only trail of installs, upgrades, and rollbacks.
+    """
+    event = create_kernel_event(
+        actor=actor,
+        verb=verb,
+        object_ref=f"package:{package}",
+        payload=payload,
+    )
+    log_path = Path(target_root) / RECEIPT_DIRNAME / DISTRIBUTION_EVENTS_LOG
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    append_kernel_event(event, log_path=log_path)
 
 
 def _iter_files(src: Path, dest_prefix: str) -> Iterator[tuple[Path, str]]:
@@ -116,34 +157,124 @@ def plan_install(
     return plan
 
 
+def _ensure_gitignore(target_root: Path) -> None:
+    """Ensure the install-receipt directory is never committed into the org."""
+    gitignore = target_root / ".gitignore"
+    line = f"{RECEIPT_DIRNAME}/"
+    existing = gitignore.read_text() if gitignore.is_file() else ""
+    if line in existing.splitlines():
+        return
+    with gitignore.open("a", encoding="utf-8") as handle:
+        if existing and not existing.endswith("\n"):
+            handle.write("\n")
+        handle.write(line + "\n")
+
+
+def _undo_failed_install(
+    target_root: Path,
+    *,
+    target_existed: bool,
+    pre_install_ref: str | None,
+    created: list[str],
+) -> None:
+    """Restore the target after a failed install (the transactional guarantee).
+
+    If the target did not exist before, it is removed entirely. Otherwise
+    overwritten (tracked) files are restored by resetting to the pre-install
+    ref, and created (untracked) files are deleted precisely — no `git clean`,
+    so an adopter's unrelated untracked files are never touched.
+    """
+    if not target_existed:
+        shutil.rmtree(target_root, ignore_errors=True)
+        return
+    if pre_install_ref is not None:
+        try:
+            gitops.reset_hard(target_root, pre_install_ref)
+        except gitops.GitError:
+            pass
+    for dest_rel in created:
+        path = target_root / dest_rel
+        if path.is_file():
+            path.unlink()
+
+
 def install(
     manifest: PackageManifest,
     package_root: Path,
     target_root: Path,
     *,
     force: bool = False,
+    kernel_version: str | None = None,
 ) -> InstallReceipt:
-    """Install a package into ``target_root`` and write an install receipt.
+    """Install a package into ``target_root``, transactionally and git-backed.
 
-    Existing files are skipped unless ``force`` is set, so an install never
-    silently clobbers an adopter's edits.
+    Refuses with ``InstallError`` if the running kernel is outside the
+    package's declared range (G1), or if the resulting org does not boot (G5).
+    On any failure the target is restored (G11). On success the install is a
+    git commit tagged ``install/<package>/<version>`` (R1). Existing files are
+    skipped unless ``force`` is set. ``kernel_version`` overrides the running
+    kernel version (for tests).
     """
-    target_root = Path(target_root)
-    plan = plan_install(manifest, package_root, target_root)
+    version = kernel_version or cognitive_firm.__version__
+    compat = check_kernel_compat(manifest.kernel, version)
+    if compat:
+        raise InstallError(
+            f"cannot install '{manifest.name}': " + "; ".join(compat)
+        )
 
+    target_root = Path(target_root)
+    target_existed = target_root.exists()
+    target_root.mkdir(parents=True, exist_ok=True)
+
+    if not gitops.is_repo(target_root):
+        gitops.init_repo(target_root)
+    pre_install_ref = gitops.current_ref(target_root)
+
+    plan = plan_install(manifest, package_root, target_root)
     installed: list[InstalledFile] = []
     skipped: list[str] = []
-    for src_file, dest_rel, conflict in plan:
-        if conflict and not force:
-            skipped.append(dest_rel)
-            installed.append(InstalledFile(dest_rel, "skipped"))
-            continue
-        dest_path = target_root / dest_rel
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src_file, dest_path)
-        installed.append(
-            InstalledFile(dest_rel, "overwritten" if conflict else "created")
+    created: list[str] = []
+    try:
+        for src_file, dest_rel, conflict in plan:
+            if conflict and not force:
+                skipped.append(dest_rel)
+                installed.append(InstalledFile(dest_rel, "skipped"))
+                continue
+            dest_path = target_root / dest_rel
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src_file, dest_path)
+            action = "overwritten" if conflict else "created"
+            installed.append(InstalledFile(dest_rel, action))
+            if action == "created":
+                created.append(dest_rel)
+
+        boot_issues = boot_check(target_root)
+        if boot_issues:
+            raise InstallError(
+                f"installed organization for '{manifest.name}' does not boot: "
+                + "; ".join(boot_issues)
+            )
+    except Exception:
+        _undo_failed_install(
+            target_root,
+            target_existed=target_existed,
+            pre_install_ref=pre_install_ref,
+            created=created,
         )
+        raise
+
+    # Commit the install — the boundary rollback undoes from (spec R1).
+    _ensure_gitignore(target_root)
+    gitops.stage_all(target_root)
+    if gitops.has_staged_changes(target_root):
+        commit_sha = gitops.commit(
+            target_root, f"install {manifest.name} {manifest.version}"
+        )
+    else:
+        commit_sha = gitops.current_ref(target_root) or ""
+    git_tag = f"install/{manifest.name}/{manifest.version}"
+    if commit_sha:
+        gitops.tag(target_root, git_tag)
 
     receipt = InstallReceipt(
         package=manifest.name,
@@ -153,13 +284,53 @@ def install(
         target_root=str(target_root.resolve()),
         files=tuple(installed),
         skipped_conflicts=tuple(skipped),
+        pre_install_ref=pre_install_ref,
+        commit_sha=commit_sha,
+        git_tag=git_tag if commit_sha else "",
     )
     receipt_dir = target_root / RECEIPT_DIRNAME
     receipt_dir.mkdir(parents=True, exist_ok=True)
     (receipt_dir / f"install-{manifest.name}.json").write_text(
         json.dumps(receipt.as_dict(), indent=2) + "\n"
     )
+    record_distribution_event(
+        target_root,
+        actor="installer",
+        verb="package.installed",
+        package=manifest.name,
+        payload={
+            "version": manifest.version,
+            "kind": manifest.kind,
+            "commit_sha": commit_sha,
+            "git_tag": receipt.git_tag,
+            "pre_install_ref": pre_install_ref,
+            "file_count": len(installed),
+        },
+    )
     return receipt
+
+
+def upgrade(
+    manifest: PackageManifest,
+    package_root: Path,
+    target_root: Path,
+    *,
+    kernel_version: str | None = None,
+) -> InstallReceipt:
+    """Install a (newer) package version over an existing org.
+
+    An upgrade is a forced install: the new version overwrites the old files,
+    commits with the new ``install/<package>/<version>`` tag, and records a
+    receipt whose ``pre_install_ref`` is the pre-upgrade HEAD — so a rollback
+    after an upgrade returns to the pre-upgrade state.
+    """
+    return install(
+        manifest,
+        package_root,
+        target_root,
+        force=True,
+        kernel_version=kernel_version,
+    )
 
 
 def load_receipt(target_root: Path, package: str) -> InstallReceipt:
@@ -171,44 +342,18 @@ def load_receipt(target_root: Path, package: str) -> InstallReceipt:
 
 
 def verify_install(receipt: InstallReceipt, target_root: Path) -> list[str]:
-    """Boot-proxy check over an installed organization.
+    """Verify an installed organization: files present + governance bootable.
 
-    This is a structural check, not a full kernel boot. It confirms every
-    non-skipped file landed, each installed ``roles/*.yaml`` parses and carries
-    the role.v1 required keys, and each role's ``mandate_path`` resolves inside
-    the target. An empty list means the organization is structurally bootable.
+    Confirms every non-skipped file in the receipt landed, then runs
+    ``boot_check`` over the target — the org parses, carries the role.v1 keys,
+    and has a sound governance graph. An empty list means the install is good.
     """
     target_root = Path(target_root)
     issues: list[str] = []
-
     for f in receipt.files:
         if f.action == "skipped":
             continue
         if not (target_root / f.dest).is_file():
             issues.append(f"installed file is missing: {f.dest}")
-
-    roles_dir = target_root / "roles"
-    role_files = sorted(roles_dir.glob("*.yaml")) if roles_dir.is_dir() else []
-    if not role_files:
-        issues.append("no role files under roles/ - organization cannot boot")
-    for role_file in role_files:
-        try:
-            role = yaml.safe_load(role_file.read_text())
-        except yaml.YAMLError as exc:
-            issues.append(f"role {role_file.name} does not parse: {exc}")
-            continue
-        if not isinstance(role, dict):
-            issues.append(f"role {role_file.name} is not a mapping")
-            continue
-        missing = [k for k in _ROLE_REQUIRED_KEYS if k not in role]
-        if missing:
-            issues.append(
-                f"role {role_file.name} missing keys: {', '.join(missing)}"
-            )
-        mandate_path = role.get("mandate_path")
-        if mandate_path and not (target_root / mandate_path).is_file():
-            issues.append(
-                f"role {role_file.name} mandate_path does not resolve: "
-                f"{mandate_path}"
-            )
+    issues.extend(boot_check(target_root))
     return issues

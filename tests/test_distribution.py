@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 
 from cognitive_firm.distribution import (
+    InstallError,
     ManifestError,
+    boot_check,
+    check_kernel_compat,
     discover_packages,
     install,
     load_manifest,
@@ -108,3 +111,91 @@ def test_cli_list_install_and_verify(tmp_path, capsys):
     assert (target / "roles" / "principal.yaml").is_file()
 
     assert distro_main(["verify", "starter-firm", "--into", str(target)]) == 0
+
+
+# --- G1: kernel-version gate -------------------------------------------------
+
+def test_install_refuses_incompatible_kernel(tmp_path):
+    manifest = load_manifest(STARTER / "package.yaml")
+    with pytest.raises(InstallError):
+        install(manifest, STARTER, tmp_path, kernel_version="0.0.1")
+
+
+def test_install_accepts_compatible_kernel(tmp_path):
+    manifest = load_manifest(STARTER / "package.yaml")
+    receipt = install(manifest, STARTER, tmp_path, kernel_version="0.1.0")
+    assert receipt.package == "starter-firm"
+
+
+def test_check_kernel_compat_directly():
+    manifest = load_manifest(STARTER / "package.yaml")
+    assert check_kernel_compat(manifest.kernel, "0.1.0") == []
+    assert check_kernel_compat(manifest.kernel, "0.0.9") != []
+
+
+# --- G4/G5: governance-graph boot check --------------------------------------
+
+def test_boot_check_passes_starter_firm(tmp_path):
+    manifest = load_manifest(STARTER / "package.yaml")
+    install(manifest, STARTER, tmp_path)
+    assert boot_check(tmp_path) == []
+
+
+def test_boot_check_catches_dangling_escalation(tmp_path):
+    manifest = load_manifest(STARTER / "package.yaml")
+    install(manifest, STARTER, tmp_path)
+    lead = tmp_path / "roles" / "lead.yaml"
+    lead.write_text(lead.read_text().replace("role.principal", "role.ghost"))
+    issues = boot_check(tmp_path)
+    assert any("ghost" in issue for issue in issues)
+
+
+def test_boot_check_catches_missing_authority(tmp_path):
+    manifest = load_manifest(STARTER / "package.yaml")
+    install(manifest, STARTER, tmp_path)
+    principal = tmp_path / "roles" / "principal.yaml"
+    principal.write_text(
+        principal.read_text().replace(
+            "role_class: authority", "role_class: manager"
+        )
+    )
+    assert any("authority" in issue for issue in boot_check(tmp_path))
+
+
+# --- G11 / R1: transactional, git-backed install -----------------------------
+
+def test_install_creates_git_boundary(tmp_path):
+    manifest = load_manifest(STARTER / "package.yaml")
+    receipt = install(manifest, STARTER, tmp_path)
+    assert (tmp_path / ".git").is_dir()
+    assert receipt.commit_sha
+    assert receipt.git_tag == "install/starter-firm/0.1.0"
+    assert receipt.pre_install_ref is None  # fresh repo, no prior commit
+
+
+def _write_broken_distro(root: Path) -> Path:
+    """A manifest-valid distro whose org cannot boot (no authority role)."""
+    pkg = root / "badpkg"
+    (pkg / "files" / "roles").mkdir(parents=True)
+    (pkg / "package.yaml").write_text(
+        "schema_version: 1\nname: badpkg\nversion: 0.1.0\nkind: distro\n"
+        "description: a distro with no authority role\n"
+        "components:\n  - source: roles\n    dest: roles\n"
+    )
+    (pkg / "files" / "roles" / "worker.yaml").write_text(
+        "schema_version: 1\nrole_id: worker\nrole_class: specialist\n"
+        "description: a worker role with no authority above it\n"
+        "authorized_paths: []\nforbidden_paths: []\n"
+        "delegates_to: []\nescalates_to: []\nbudget: {}\nmandate_path: null\n"
+    )
+    return pkg
+
+
+def test_install_is_transactional_on_unbootable_distro(tmp_path):
+    pkg = _write_broken_distro(tmp_path)
+    manifest = load_manifest(pkg / "package.yaml")
+    target = tmp_path / "target"
+    with pytest.raises(InstallError):
+        install(manifest, pkg, target)
+    # the target never existed; a failed install must leave no trace
+    assert not target.exists()

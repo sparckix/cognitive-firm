@@ -80,7 +80,6 @@ class PackageManifest:
     description: str
     components: tuple[Component, ...]
     kernel: KernelCompat = field(default_factory=KernelCompat)
-    requires: tuple[str, ...] = ()
     provides: tuple[str, ...] = ()
     post_install_message: str = ""
     schema_version: int = SCHEMA_VERSION
@@ -99,7 +98,6 @@ class PackageManifest:
             description=str(raw.get("description", "")).strip(),
             components=components,
             kernel=KernelCompat.from_raw(raw.get("kernel")),
-            requires=tuple(str(x) for x in (raw.get("requires") or [])),
             provides=tuple(str(x) for x in (raw.get("provides") or [])),
             post_install_message=str(raw.get("post_install_message", "")),
             schema_version=int(raw.get("schema_version", SCHEMA_VERSION)),
@@ -159,3 +157,42 @@ def load_manifest(path: Path) -> PackageManifest:
     if issues:
         raise ManifestError(f"invalid manifest {path}: " + "; ".join(issues))
     return manifest
+
+
+def _parse_version(version: str) -> tuple[int, ...]:
+    """Parse a dotted version string into a comparable integer tuple.
+
+    Parsing stops at the first non-numeric segment (e.g. ``1.2.0rc1`` -> (1,2)),
+    so a pre-release suffix never raises. An empty/garbage version is (0,).
+    """
+    parts: list[int] = []
+    for segment in str(version).strip().split("."):
+        segment = segment.strip()
+        try:
+            parts.append(int(segment))
+        except ValueError:
+            break
+    return tuple(parts) or (0,)
+
+
+def check_kernel_compat(
+    kernel: KernelCompat, kernel_version: str
+) -> list[str]:
+    """Return reasons the running kernel is outside a package's declared range.
+
+    An empty list means compatible. Used as the install-time version gate
+    (spec G1).
+    """
+    issues: list[str] = []
+    running = _parse_version(kernel_version)
+    if kernel.min_version and running < _parse_version(kernel.min_version):
+        issues.append(
+            f"kernel {kernel_version} is below the package minimum "
+            f"{kernel.min_version}"
+        )
+    if kernel.max_version and running > _parse_version(kernel.max_version):
+        issues.append(
+            f"kernel {kernel_version} is above the package maximum "
+            f"{kernel.max_version}"
+        )
+    return issues

@@ -1,7 +1,9 @@
-"""``cognitive-firm-distro`` - install and inspect distribution packages.
+"""``cognitive-firm-distro`` - install, inspect, and roll back distribution
+packages.
 
 This is the operator-facing installer of the OS analogy: one command turns an
-empty directory into a running governed organization.
+empty directory into a running governed organization, and one command rolls a
+bad install back.
 """
 
 from __future__ import annotations
@@ -13,17 +15,33 @@ from pathlib import Path
 from cognitive_firm.distribution.installer import (
     install,
     load_receipt,
+    upgrade,
     verify_install,
 )
 from cognitive_firm.distribution.registry import PackageIndex, discover_packages
+from cognitive_firm.distribution.rollback import RollbackError, rollback
 
-# src/cognitive_firm/distribution/cli.py -> repo root is parents[3].
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_DEFAULT_REGISTRY = _REPO_ROOT / "distro"
+
+def _default_registry() -> Path:
+    """Locate the bundled ``distro/`` registry, from a checkout or a wheel."""
+    here = Path(__file__).resolve()
+    # source checkout: <repo>/distro ; installed wheel: <site-packages>/distro
+    for candidate in (here.parents[3] / "distro", here.parents[2] / "distro"):
+        if candidate.is_dir():
+            return candidate
+    try:  # installed wheel — the packaged `distro` data tree
+        import importlib.resources as resources
+
+        packaged = Path(str(resources.files("distro")))
+        if packaged.is_dir():
+            return packaged
+    except (ImportError, ModuleNotFoundError, TypeError, AttributeError):
+        pass
+    return here.parents[3] / "distro"  # may not exist; reported as empty
 
 
 def _registry_root(args: argparse.Namespace) -> Path:
-    return Path(args.registry) if args.registry else _DEFAULT_REGISTRY
+    return Path(args.registry) if args.registry else _default_registry()
 
 
 def _index(args: argparse.Namespace) -> PackageIndex:
@@ -66,8 +84,6 @@ def _cmd_show(args: argparse.Namespace) -> int:
             f"kernel:      >= {m.kernel.min_version or '*'}, "
             f"<= {m.kernel.max_version or '*'}"
         )
-    if m.requires:
-        print(f"requires:    {', '.join(m.requires)}")
     if m.provides:
         print(f"provides:    {', '.join(m.provides)}")
     print("components:")
@@ -98,6 +114,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
         f"  files: {created} created, {overwritten} overwritten, "
         f"{len(receipt.skipped_conflicts)} skipped"
     )
+    print(f"  committed as {receipt.git_tag or receipt.commit_sha[:12]}")
     if receipt.skipped_conflicts and not args.force:
         print(
             "  skipped files already existed; re-run with --force to "
@@ -113,10 +130,32 @@ def _cmd_install(args: argparse.Namespace) -> int:
         for issue in issues:
             print(f"  - {issue}", file=sys.stderr)
         return 1
-    print("  verify: ok - the installed organization is structurally bootable")
+    print("  verify: ok - the installed organization boots and is governable")
     if entry.manifest.post_install_message:
         print()
         print(entry.manifest.post_install_message.rstrip())
+    return 0
+
+
+def _cmd_upgrade(args: argparse.Namespace) -> int:
+    index = _index(args)
+    entry = index.get(args.package)
+    if entry is None:
+        print(f"ERROR: package not found: {args.package}", file=sys.stderr)
+        return 2
+    target = Path(args.into)
+    receipt = upgrade(entry.manifest, entry.root, target)
+    print(
+        f"upgraded {receipt.package} to {receipt.version} "
+        f"-> {receipt.target_root}"
+    )
+    issues = verify_install(receipt, target)
+    if issues:
+        print("VERIFY FAILED:", file=sys.stderr)
+        for issue in issues:
+            print(f"  - {issue}", file=sys.stderr)
+        return 1
+    print("  verify: ok")
     return 0
 
 
@@ -133,18 +172,44 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         for issue in issues:
             print(f"  - {issue}", file=sys.stderr)
         return 1
-    print(f"verify ok: {args.package} at {target} is structurally bootable")
+    print(f"verify ok: {args.package} at {target} boots and is governable")
     return 0
+
+
+def _do_rollback(target: Path, package: str, reason: str) -> int:
+    try:
+        result = rollback(target, package, reason=reason)
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    except RollbackError as exc:
+        print(f"ROLLBACK BLOCKED: {exc}", file=sys.stderr)
+        return 1
+    print(f"rolled back {result.package} ({result.mode})")
+    if result.mode == "compensating":
+        print(
+            "  the org ran under the rolled-back config; review the work "
+            "produced in that window."
+        )
+    return 0
+
+
+def _cmd_rollback(args: argparse.Namespace) -> int:
+    return _do_rollback(Path(args.into), args.package, args.reason)
+
+
+def _cmd_uninstall(args: argparse.Namespace) -> int:
+    return _do_rollback(Path(args.into), args.package, "uninstall")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="cognitive-firm-distro",
-        description="Install and inspect cognitive-firm distribution packages.",
+        description="Install, inspect, and roll back distribution packages.",
     )
     parser.add_argument(
         "--registry",
-        help="Registry directory (default: the repo's distro/).",
+        help="Registry directory (default: the bundled distro/).",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -167,12 +232,35 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_install.set_defaults(func=_cmd_install)
 
+    p_upgrade = sub.add_parser(
+        "upgrade", help="Install a newer package version over an org."
+    )
+    p_upgrade.add_argument("package")
+    p_upgrade.add_argument("--into", required=True)
+    p_upgrade.set_defaults(func=_cmd_upgrade)
+
     p_verify = sub.add_parser("verify", help="Re-verify an installed package.")
     p_verify.add_argument("package")
-    p_verify.add_argument(
-        "--into", required=True, help="Installed organization directory."
-    )
+    p_verify.add_argument("--into", required=True)
     p_verify.set_defaults(func=_cmd_verify)
+
+    p_rollback = sub.add_parser(
+        "rollback", help="Roll back a package install."
+    )
+    p_rollback.add_argument("package")
+    p_rollback.add_argument("--into", required=True)
+    p_rollback.add_argument(
+        "--reason", default="operator-initiated rollback",
+        help="Why the install is being rolled back (recorded).",
+    )
+    p_rollback.set_defaults(func=_cmd_rollback)
+
+    p_uninstall = sub.add_parser(
+        "uninstall", help="Remove an installed package (rolls its install back)."
+    )
+    p_uninstall.add_argument("package")
+    p_uninstall.add_argument("--into", required=True)
+    p_uninstall.set_defaults(func=_cmd_uninstall)
 
     args = parser.parse_args(argv)
     return int(args.func(args))
