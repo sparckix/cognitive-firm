@@ -10,6 +10,8 @@ Verbs:
 - ``needs-me <actor_id>``  — the operator's escalation queue (L1 + L2).
 - ``inbox <actor_id>``     — a member-human's bounded work queue (L2).
 - ``vocabulary``           — the shared L4 glossary every surface speaks.
+- ``status``               — a plain-language read of overall org health.
+- ``resolve <gate_id>``    — act on a pending gate the operator saw in ``needs-me``.
 """
 
 from __future__ import annotations
@@ -81,6 +83,94 @@ def _cmd_vocabulary(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_status(_args: argparse.Namespace) -> int:
+    """Print a plain-language read of overall org health."""
+    response = dispatch_kernel_request("GET", "/kernel/org-surface")
+    if response.status != 200:
+        error = response.payload.get("error", "unknown error")
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
+    surface = response.payload.get("surface", {})
+    counts = surface.get("counts", {})
+
+    active_runs = counts.get("active_runs", 0)
+    failed_runs = counts.get("failed_runs", 0)
+    active_work = counts.get("active_human_work_sessions", 0)
+    waiting_work = counts.get("waiting_human_work_sessions", 0)
+    a2h_waiting = counts.get("a2h_waiting_on_human_sessions", 0)
+    blocked_obligations = counts.get("blocked_obligations", 0)
+    blocking_gaps = counts.get("blocking_evidence_gaps", 0)
+    pending_gov = counts.get("pending_governance_changes", 0)
+    open_cases = counts.get("open_accountability_cases", 0)
+    damage = counts.get("recent_damage_signals", 0)
+
+    blocked_total = (
+        blocked_obligations + blocking_gaps + a2h_waiting + waiting_work
+    )
+
+    print("org status")
+    print()
+    if active_runs or active_work:
+        print(
+            f"  running: {active_runs} active run(s), "
+            f"{active_work} open human-work session(s)."
+        )
+    else:
+        print("  running: nothing is currently in flight.")
+
+    if blocked_total:
+        print(
+            f"  blocked: {blocked_total} thing(s) waiting on someone — "
+            f"{waiting_work} human-work session(s), "
+            f"{a2h_waiting} agent request(s) waiting on a human, "
+            f"{blocked_obligations} blocked obligation(s), "
+            f"{blocking_gaps} blocking evidence gap(s)."
+        )
+    else:
+        print("  blocked: nothing is blocked.")
+
+    if failed_runs:
+        print(f"  attention: {failed_runs} run(s) have failed.")
+    if damage:
+        print(f"  attention: {damage} recent damage signal(s).")
+
+    print(
+        f"  governance: {pending_gov} pending change(s), "
+        f"{open_cases} open accountability case(s)."
+    )
+    return 0
+
+
+def _cmd_resolve(args: argparse.Namespace) -> int:
+    """Resolve one pending gate with the operator's option and reason."""
+    body: dict[str, str] = {"chosen_option": args.option}
+    if args.reason:
+        body["reason"] = args.reason
+    try:
+        response = dispatch_kernel_request(
+            "POST", f"/kernel/gates/{args.gate_id}/resolve", body
+        )
+    except OSError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    if response.status != 200:
+        error = response.payload.get("error", "unknown error")
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
+    result = response.payload.get("result", {})
+    if result.get("already_resolved"):
+        print(f"gate {args.gate_id} was already resolved.")
+    else:
+        print(f"gate {args.gate_id} resolved with option '{args.option}'.")
+        event_id = result.get("transition_event_id")
+        if event_id:
+            print(f"  transition: {event_id}")
+    path = result.get("path")
+    if path:
+        print(f"  record: {path}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="cognitive-firm-userland",
@@ -110,6 +200,27 @@ def main(argv: list[str] | None = None) -> int:
         "vocabulary", help="Show the shared userland glossary."
     )
     p_vocabulary.set_defaults(func=_cmd_vocabulary)
+
+    p_status = sub.add_parser(
+        "status", help="Show a plain-language read of overall org health."
+    )
+    p_status.set_defaults(func=_cmd_status)
+
+    p_resolve = sub.add_parser(
+        "resolve", help="Resolve a pending gate seen in needs-me."
+    )
+    p_resolve.add_argument("gate_id", help="The pending gate to resolve.")
+    p_resolve.add_argument(
+        "--option",
+        required=True,
+        help="The option to choose for this gate.",
+    )
+    p_resolve.add_argument(
+        "--reason",
+        default=None,
+        help="Why this option was chosen (optional).",
+    )
+    p_resolve.set_defaults(func=_cmd_resolve)
 
     args = parser.parse_args(argv)
     return int(args.func(args))

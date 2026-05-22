@@ -861,6 +861,38 @@ const server = createServer((req, res) => {
     return
   }
 
+  // ── Member-human work inbox (O1 L2, GP-230) ──────────────────────
+  // GET /api/work-inbox/<actor_id> → thin read proxy to the kernel's
+  // GET /kernel/work-inbox/{actor_id} route. The member-human's bounded
+  // task inbox is a kernel-computed read model over human_work.jsonl
+  // (not a filesystem projection rebuilt here), so — like /api/attention
+  // — it goes through the kernel service. Read-only; no surface-policy
+  // gate. Distinct from /api/attention: that is the operator's escalation
+  // feed, this is the member-human's work-to-do list.
+  if (req.url?.startsWith('/api/work-inbox/') && req.method === 'GET') {
+    const m = req.url.match(/^\/api\/work-inbox\/([A-Za-z0-9_.:-]+)$/)
+    if (!m) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'invalid actor_id' }))
+      return
+    }
+    const actorId = m[1]
+    getKernelService(`/kernel/work-inbox/${actorId}`)
+      .then(body => {
+        const result = body.result ?? body
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          actor_id: result.actor_id ?? actorId,
+          items: result.items ?? [],
+        }))
+      })
+      .catch(err => {
+        res.writeHead(502, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: String(err) }))
+      })
+    return
+  }
+
   // ── Agent-utilization (2026-05-02) ───────────────────────────────
   // Snapshot of today's per-role / per-cli utilization, plus an editor
   // for the agent_utilization caps in org/roles/<role>.yaml.

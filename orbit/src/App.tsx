@@ -21,6 +21,7 @@ import { BatchGateReview } from './components/BatchGateReview'
 import { ChatPane } from './components/ChatPane'
 import { HumanWorkPane } from './components/HumanWorkPane'
 import { NeedsMePane } from './components/NeedsMePane'
+import { WorkInboxPane } from './components/WorkInboxPane'
 
 const SpatialCanvas = lazy(() =>
   import('./components/SpatialCanvas').then(module => ({ default: module.SpatialCanvas }))
@@ -420,6 +421,14 @@ export function App() {
               </div>
             )}
             <NeedsMePane />
+          </div>
+
+          {/* Member-human work inbox — bounded tasks assigned to this
+              human (GP-230 O1 L2). A parallel lane to NeedsMePane: the
+              operator's escalation pager above, the member-human's
+              work-to-do list here. */}
+          <div style={{ marginTop: 24 }}>
+            <WorkInboxPane />
           </div>
         </div>
 

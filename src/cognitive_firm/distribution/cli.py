@@ -22,6 +22,7 @@ from cognitive_firm.distribution.installer import (
 from cognitive_firm.distribution.manifest import (
     ManifestError,
     PackageManifest,
+    load_manifest,
     validate_manifest,
 )
 from cognitive_firm.distribution.registry import (
@@ -318,6 +319,82 @@ def _cmd_install(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_install_overlay(args: argparse.Namespace) -> int:
+    """Governed install of an overlay onto a *running* organization (O3-P1).
+
+    Stages the overlay, computes the authority-diff, files a governance
+    proposal, and prints the diff. Without ``--approve`` it stops there (a
+    preview); with ``--approve`` it applies a non-blocked proposal.
+    """
+    from cognitive_firm.distribution.governed_install import (
+        GovernedInstallError,
+        apply_approved_install,
+        propose_overlay_install,
+    )
+
+    target = Path(args.into)
+    overlay_path = Path(args.package)
+    if (overlay_path / "package.yaml").is_file():
+        overlay_root = overlay_path
+        try:
+            manifest = load_manifest(overlay_root / "package.yaml")
+        except ManifestError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
+    else:
+        entry = _index(args).get(args.package)
+        if entry is None:
+            print(
+                f"ERROR: overlay not found: {args.package}", file=sys.stderr
+            )
+            return 2
+        overlay_root, manifest = entry.root, entry.manifest
+
+    try:
+        proposed = propose_overlay_install(
+            overlay_manifest=manifest,
+            overlay_root=overlay_root,
+            target_root=target,
+            governance_log=(
+                target / "governance_changes" / "governance_changes.jsonl"
+            ),
+        )
+    except GovernedInstallError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    print(
+        f"governance proposal {proposed.proposal.proposal_id} "
+        f"-> {proposed.proposal.status}"
+    )
+    print()
+    print(proposed.diff.render())
+    print()
+    if not proposed.can_proceed:
+        print(
+            "BLOCKED: this overlay cannot be installed - it fails a required "
+            "governance invariant (a package may not widen authority).",
+            file=sys.stderr,
+        )
+        return 1
+    if not args.approve:
+        print(
+            "review the authority-diff above, then re-run with --approve "
+            "to install."
+        )
+        return 0
+    try:
+        receipt = apply_approved_install(proposed, overlay_root, target)
+    except GovernedInstallError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(
+        f"installed overlay {receipt.package} {receipt.version} "
+        f"-> {receipt.target_root}"
+    )
+    return 0
+
+
 def _cmd_upgrade(args: argparse.Namespace) -> int:
     index = _index(args)
     entry = index.get(args.package)
@@ -421,6 +498,21 @@ def main(argv: list[str] | None = None) -> int:
         help="git ref to fetch when the package is a git URL (default HEAD).",
     )
     p_install.set_defaults(func=_cmd_install)
+
+    p_install_overlay = sub.add_parser(
+        "install-overlay",
+        help="Governed install of an overlay onto a running organization.",
+    )
+    p_install_overlay.add_argument("package")
+    p_install_overlay.add_argument(
+        "--into", required=True, help="The running organization directory."
+    )
+    p_install_overlay.add_argument(
+        "--approve",
+        action="store_true",
+        help="Approve and apply, after reviewing the authority-diff.",
+    )
+    p_install_overlay.set_defaults(func=_cmd_install_overlay)
 
     p_lint = sub.add_parser(
         "lint",

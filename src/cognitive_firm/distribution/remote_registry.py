@@ -17,9 +17,9 @@ parsed manifest, and a content hash — exactly the inputs the lockfile
 (``lockfile.py``) records. Fetch + lockfile ship together: a fetch without a
 lock is not a valid intermediate state, so :func:`fetch_and_lock` does both.
 
-This is package-manager (userland) layer code — no kernel change. It is built
-as a standalone, tested primitive and is **not** wired into ``install()``;
-that wiring is another lane's work.
+This is package-manager (userland) layer code — no kernel change.
+``cognitive-firm-distro install <git-url>`` runs this fetch path, then installs
+the SHA-pinned package from the content-addressed cache.
 """
 
 from __future__ import annotations

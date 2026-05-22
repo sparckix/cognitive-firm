@@ -43,6 +43,7 @@ COPY org ./org
 COPY schemas ./schemas
 COPY docs ./docs
 COPY deploy ./deploy
+COPY distro ./distro
 COPY orbit/src ./orbit/src
 COPY orbit/package*.json ./orbit/
 COPY --from=orbit-build /app/orbit/node_modules ./orbit/node_modules

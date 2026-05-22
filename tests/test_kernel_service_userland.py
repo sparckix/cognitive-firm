@@ -64,6 +64,26 @@ def test_attention_route_routes_a2h_work_to_the_member_human(tmp_path):
     assert other.payload["signals"] == []
 
 
+def test_work_inbox_route_lists_a_member_humans_tasks(tmp_path):
+    human_work = tmp_path / "hw.jsonl"
+    create_human_work_session(
+        requested_by="research_office",
+        human_actor="alice",
+        objective="review the draft",
+        work_mode="edit",
+        bottleneck_class="taste",
+        log_path=human_work,
+    )
+    config = KernelServiceConfig(human_work_log=human_work)
+    resp = dispatch_kernel_request(
+        "GET", "/kernel/work-inbox/alice", config=config
+    )
+    assert resp.status == 200
+    assert resp.payload["actor_id"] == "alice"
+    assert len(resp.payload["items"]) == 1
+    assert resp.payload["items"][0]["objective"] == "review the draft"
+
+
 def test_surface_policy_blocks_a_projection_only_surface(tmp_path):
     config = KernelServiceConfig(
         human_work_log=tmp_path / "hw.jsonl",

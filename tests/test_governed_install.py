@@ -108,6 +108,30 @@ def test_an_ungovernable_overlay_is_rejected_before_a_proposal(tmp_path):
         )
 
 
+def test_cli_install_overlay_previews_then_approves(tmp_path):
+    from cognitive_firm.distribution.cli import main as distro_main
+
+    target = _installed_org(tmp_path)
+    overlay = _overlay(
+        tmp_path, "cli-overlay", dest="preferences/principal.yaml",
+        op="replace", source_name="prefs.yaml",
+        body="principal_id: via_cli\nreview_cadence: weekly\n",
+    )
+    prefs = target / "preferences" / "principal.yaml"
+
+    # without --approve: a preview — the proposal is filed, nothing installed
+    assert distro_main(
+        ["install-overlay", str(overlay), "--into", str(target)]
+    ) == 0
+    assert "via_cli" not in prefs.read_text()
+
+    # with --approve: the overlay is applied
+    assert distro_main(
+        ["install-overlay", str(overlay), "--into", str(target), "--approve"]
+    ) == 0
+    assert "via_cli" in prefs.read_text()
+
+
 def test_apply_approved_install_materializes_and_attests(tmp_path):
     target = _installed_org(tmp_path)
     overlay = _overlay(

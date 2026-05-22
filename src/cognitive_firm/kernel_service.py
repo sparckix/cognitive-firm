@@ -287,6 +287,24 @@ def dispatch_kernel_request(
             mine = [s for s in routed if s.get("target_actor_id") == actor_id]
             return _ok({"actor_id": actor_id, "signals": mine})
 
+        if (
+            method == "GET"
+            and len(parts) == 3
+            and parts[:2] == ["kernel", "work-inbox"]
+        ):
+            from cognitive_firm.userland.work_inbox import list_inbox
+
+            actor_id = parts[2]
+            items = list_inbox(
+                actor_id=actor_id, log_path=config.human_work_log
+            )
+            return _ok(
+                {
+                    "actor_id": actor_id,
+                    "items": [item.as_dict() for item in items],
+                }
+            )
+
         if method == "POST" and route == "/kernel/human-work":
             _verify_mutation_lease("human_work:create", body, actor=actor, config=config)
             return _ok(
