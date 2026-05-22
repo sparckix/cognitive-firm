@@ -129,6 +129,11 @@ System of record: org/ (filesystem) + git history.
 
 ## 4. Repository map
 
+**New adopter? Start with [`docs/getting-started.md`](docs/getting-started.md)** —
+the shortest path from zero to a running governed firm (`pip install` →
+`cognitive-firm-distro install` → point the tools at it → run it). The table
+below is the full reading order.
+
 Read in this order if you are new:
 
 | # | Path | What you'll learn |
