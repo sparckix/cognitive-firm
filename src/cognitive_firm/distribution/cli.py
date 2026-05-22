@@ -28,6 +28,7 @@ from cognitive_firm.distribution.registry import (
     MANIFEST_FILENAME,
     PackageIndex,
     discover_packages,
+    resolve_extends,
 )
 from cognitive_firm.distribution.rollback import RollbackError, rollback
 
@@ -234,21 +235,56 @@ def _print_install_plan(
     return 0
 
 
-def _cmd_install(args: argparse.Namespace) -> int:
-    index = _index(args)
-    entry = index.get(args.package)
-    if entry is None:
-        available = ", ".join(e.name for e in index.entries) or "(none)"
-        print(f"ERROR: package not found: {args.package}", file=sys.stderr)
-        print(f"available: {available}", file=sys.stderr)
-        return 2
+def _is_git_url(value: str) -> bool:
+    return "://" in value or value.startswith("git@")
 
+
+def _cmd_install(args: argparse.Namespace) -> int:
     target = Path(args.into)
 
-    if args.dry_run:
-        return _print_install_plan(entry.manifest, entry.root, target)
+    # O3-P3: a git URL is fetched (SHA-pinned, locked); a plain name is
+    # resolved from the local registry.
+    if _is_git_url(args.package):
+        from cognitive_firm.distribution.remote_registry import (
+            RemoteFetchError,
+            RemotePackageSource,
+            fetch_and_lock,
+        )
 
-    receipt = install(entry.manifest, entry.root, target, force=args.force)
+        try:
+            fetched, _lockfile = fetch_and_lock(
+                RemotePackageSource(url=args.package, ref=args.ref or "HEAD"),
+                target,
+            )
+        except RemoteFetchError as exc:
+            print(f"ERROR: remote fetch failed: {exc}", file=sys.stderr)
+            return 2
+        manifest, package_root = fetched.manifest, fetched.package_root
+        print(f"fetched {fetched.pinned_id}")
+    else:
+        entry = _index(args).get(args.package)
+        if entry is None:
+            print(f"ERROR: package not found: {args.package}", file=sys.stderr)
+            return 2
+        manifest, package_root = entry.manifest, entry.root
+
+    if args.dry_run:
+        return _print_install_plan(manifest, package_root, target)
+
+    # O3-P5: a package that `extends` a base distro installs the base first.
+    if manifest.extends:
+        try:
+            base = resolve_extends(manifest, _index(args))
+        except ManifestError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
+        print(
+            f"installing base distro '{base.manifest.name}' "
+            f"(extended by '{manifest.name}')"
+        )
+        install(base.manifest, base.root, target, force=args.force)
+
+    receipt = install(manifest, package_root, target, force=args.force)
     created = sum(1 for f in receipt.files if f.action == "created")
     overwritten = sum(1 for f in receipt.files if f.action == "overwritten")
     print(
@@ -276,9 +312,9 @@ def _cmd_install(args: argparse.Namespace) -> int:
             print(f"  - {issue}", file=sys.stderr)
         return 1
     print("  verify: ok - the installed organization boots and is governable")
-    if entry.manifest.post_install_message:
+    if manifest.post_install_message:
         print()
-        print(entry.manifest.post_install_message.rstrip())
+        print(manifest.post_install_message.rstrip())
     return 0
 
 
@@ -379,6 +415,10 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run",
         action="store_true",
         help="Resolve and print the install plan without applying anything.",
+    )
+    p_install.add_argument(
+        "--ref",
+        help="git ref to fetch when the package is a git URL (default HEAD).",
     )
     p_install.set_defaults(func=_cmd_install)
 

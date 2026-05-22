@@ -100,6 +100,7 @@ class PackageManifest:
     kernel: KernelCompat = field(default_factory=KernelCompat)
     provides: tuple[str, ...] = ()
     post_install_message: str = ""
+    extends: str | None = None  # O3-P5: a base distro this package extends
     schema_version: int = SCHEMA_VERSION
 
     @classmethod
@@ -118,6 +119,11 @@ class PackageManifest:
             kernel=KernelCompat.from_raw(raw.get("kernel")),
             provides=tuple(str(x) for x in (raw.get("provides") or [])),
             post_install_message=str(raw.get("post_install_message", "")),
+            extends=(
+                str(raw["extends"]).strip() or None
+                if raw.get("extends")
+                else None
+            ),
             schema_version=int(raw.get("schema_version", SCHEMA_VERSION)),
         )
 

@@ -127,3 +127,32 @@ def remote_entry(
         source_url=source_url,
         resolved_sha=resolved_sha,
     )
+
+
+def resolve_extends(
+    manifest: PackageManifest, index: PackageIndex
+) -> RegistryEntry:
+    """Resolve a package's ``extends`` base distro to its registry entry (O3-P5).
+
+    One level only: the base must be a ``kind: distro`` and must not itself
+    declare ``extends``. Raises ``ManifestError`` if the base is missing or
+    ineligible.
+    """
+    if not manifest.extends:
+        raise ManifestError("package does not declare 'extends'")
+    base_name = manifest.extends.split("@", 1)[0]
+    base = index.get(base_name)
+    if base is None:
+        raise ManifestError(
+            f"extends base '{base_name}' is not in the registry"
+        )
+    if base.manifest.kind != "distro":
+        raise ManifestError(
+            f"extends base '{base_name}' must be a distro, not "
+            f"'{base.manifest.kind}'"
+        )
+    if base.manifest.extends:
+        raise ManifestError(
+            f"extends is one level only; base '{base_name}' itself extends"
+        )
+    return base
