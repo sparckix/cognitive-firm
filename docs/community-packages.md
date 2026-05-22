@@ -60,15 +60,25 @@ type-safe, not just allowed.
 
 ## Authoring a package
 
-1. Start from the `starter-firm` layout (`distro/starter-firm/`): a
-   `package.yaml` manifest and a `files/` tree.
+1. Copy the package template at `docs/templates/package/` (or start from the
+   `starter-firm` layout, `distro/starter-firm/`): a `package.yaml` manifest
+   and a `files/` tree.
 2. Keep authority narrow — every role's `authorized_paths` and mandate should
-   grant the least the role needs.
-3. Verify it boots: an installed organization must pass `boot_check` (one
+   grant the least the role needs. Installing an overlay onto a running org is
+   governed; an overlay that *widens* a role's authority is blocked outright.
+3. Lint the manifest as you author: `cognitive-firm-distro lint <package>`
+   reports every authoring problem at once (missing component sources, an
+   unknown composition `op`, escaping paths, a too-short description).
+4. Preview the install without applying it:
+   `cognitive-firm-distro install <package> --into <dir> --dry-run` prints the
+   full file plan and each component's composition `op`.
+5. Verify it boots: an installed organization must pass `boot_check` (one
    authority role, escalation reaches it, mandates resolve).
-4. Validate the manifest with `cognitive-firm-distro show <package>`.
-5. Publish it as a git repository — a package is just a repo with a
-   `package.yaml`; there is no central registry to clear.
+6. Publish it as a git repository — a package is just a repo with a
+   `package.yaml`. Anyone can install it directly:
+   `cognitive-firm-distro install <git-url> --into <dir>` fetches it SHA-pinned
+   and records a content-hashed `packages.lock`. There is no central registry
+   to clear.
 
 The kernel stays generic. A distro or overlay is policy; composing one must
 never require a kernel change.

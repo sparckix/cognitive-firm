@@ -244,7 +244,24 @@ repository, the install lands as a commit tagged
 `install/starter-firm/<version>`, and the installer verifies the new
 organization's governance graph before committing it. A bad install is
 reversible — `cognitive-firm-distro rollback starter-firm --into ./my-firm`.
-See [`docs/protocols/distribution.md`](docs/protocols/distribution.md).
+The `cognitive-firm-distro` CLI also covers `show`, `verify`, `upgrade`,
+`uninstall`, and `lint`; a package can be installed from a git URL (SHA-pinned,
+recorded in a content-hashed `packages.lock`), and installing an overlay onto a
+*running* org files a governed authority-diff proposal — a package may not
+widen a role's authority. See
+[`docs/protocols/distribution.md`](docs/protocols/distribution.md).
+
+The userland sits above the kernel as the operator-facing layer. The
+`cognitive-firm-userland` CLI shows what needs a human and the shared
+vocabulary:
+
+```bash
+cognitive-firm-userland needs-me <actor_id>   # the operator's attention queue
+cognitive-firm-userland inbox <actor_id>      # a member-human's bounded work
+cognitive-firm-userland vocabulary            # the shared userland glossary
+```
+
+The same attention queue is also rendered by the Orbit `NeedsMePane`.
 
 ---
 
@@ -326,8 +343,11 @@ make smoke-docker
 | Routine reviews (forgetting lifecycle) | `src/cognitive_firm/orchestration/routine_reviews.py` | `tests/test_routine_reviews.py` |
 | Governed resource allocation | `src/cognitive_firm/orchestration/resource_allocation.py` | `tests/test_resource_allocation.py` |
 | Residual decision rights | `src/cognitive_firm/orchestration/decision_rights.py` | `tests/test_decision_rights.py` |
-| Distribution layer (install / verify / rollback / upgrade) | `src/cognitive_firm/distribution/` | `tests/test_distribution.py`, `tests/test_rollback.py`, `tests/test_distro_content.py` |
-| Userland — attention router, needs-me, work inbox, vocabulary, enrollment | `src/cognitive_firm/userland/` | `tests/test_attention_router.py`, `tests/test_needs_me.py`, `tests/test_work_inbox.py`, `tests/test_vocabulary.py`, `tests/test_enrollment.py` |
+| Distribution layer (install / verify / rollback / upgrade / lint, `op` composition, `extends`) | `src/cognitive_firm/distribution/` | `tests/test_distribution.py`, `tests/test_rollback.py`, `tests/test_distro_content.py`, `tests/test_overlay_composition.py` |
+| Governed overlay install (authority-diff proposal, `package.install_approved`) | `src/cognitive_firm/distribution/governed_install.py` | `tests/test_governed_install.py` |
+| Remote packages (git-URL fetch, SHA pin, content-hashed lockfile) | `src/cognitive_firm/distribution/remote_registry.py`, `lockfile.py` | `tests/test_remote_registry.py` |
+| Userland — enrollment, attention router, needs-me, work inbox, vocabulary, surface policy | `src/cognitive_firm/userland/` | `tests/test_attention_router.py`, `tests/test_needs_me.py`, `tests/test_work_inbox.py`, `tests/test_vocabulary.py`, `tests/test_enrollment.py`, `tests/test_surface_policy.py` |
+| Userland CLI + kernel routes (`needs-me` / `inbox` / `vocabulary`, `GET /kernel/attention`, `GET /kernel/vocabulary`) | `src/cognitive_firm/userland/cli.py`, `src/cognitive_firm/kernel_service.py` | `tests/test_userland_cli.py`, `tests/test_kernel_service_userland.py` |
 | Primitive extension schemas | `src/cognitive_firm/orchestration/extension_schemas.py` | `tests/test_extension_schemas.py` |
 | EU AI Act deploy gate | `src/cognitive_firm/orchestration/eu_ai_act_deploy_gate.py` | `tests/test_eu_ai_act_deploy_gate.py`; `docs/protocols/eu-ai-act-deploy-gate.md` |
 | Property-based invariants (Hypothesis) | `tests/test_invariants_property_based.py` | 8/8 |

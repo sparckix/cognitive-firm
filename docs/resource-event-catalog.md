@@ -37,7 +37,7 @@ The implementation source is `src/cognitive_firm/orchestration/state_surface_inv
 | `runtime_adapters` | projection | projection | external runtime lifecycle into run checkpoints | `docs/protocols/runtime-adapters.md` |
 | `inbound_events` | canonical state | JSONL | verified external observations, quarantine, replay window, dead letters | `docs/protocols/inbound-events.md` |
 | `mcp_outbox` | canonical state | event stream | capability-gated enterprise-system calls | `docs/protocols/mcp.md` |
-| `distribution_events` | canonical state | event stream | typed install/upgrade/rollback events (`package.installed`, `package.rolled_back`) under the target's `.cognitive-firm/distribution-events.jsonl` | `docs/protocols/distribution.md` |
+| `distribution_events` | canonical state | event stream | typed install/upgrade/rollback events (`package.installed`, `package.rolled_back`, `package.install_approved`) under the target's `.cognitive-firm/distribution-events.jsonl` | `docs/protocols/distribution.md` |
 | `org_surface` | read model | projection | human and role-facing health/read model | `docs/PROTOCOLS.md` |
 | `strategy_office` | read model | projection | observer-only findings from org-surface state | `docs/protocols/strategy-office.md` |
 | `learning_transition_compiler` | read model | projection | proposed learning candidates | `docs/protocols/learning-transition-compiler.md` |
@@ -97,6 +97,7 @@ Good:
 - `learning_event.approved`
 - `package.installed`
 - `package.rolled_back`
+- `package.install_approved`
 
 Avoid:
 

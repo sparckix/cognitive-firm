@@ -11,8 +11,8 @@ mechanisms, not tenant strategy, app workflow, or model execution.
 | Protocols | H2A, A2H, A2A, MCP, runtime adapters, inbound events, app integration, state backends, distribution, extension schemas | provider-specific product behavior |
 | Service boundary | local HTTP/API surface over kernel primitives, actor context, leases, policy checks, attention/vocabulary routes | enterprise IAM administration or graph-runtime scheduling |
 | Runtime adapters | projection of external runtime lifecycle into kernel state | execution graph semantics, model inference, retry policy inside the runtime |
-| Distribution layer | versioned distro/overlay packages, package registry, transactional git-backed installer, verifier, rollback | the kernel itself; the installer only writes adopter-owned overlay files |
-| Userland | operator/member-human-facing layer over the kernel: enrollment, attention router, action queues, inspection, vocabulary spine — pure functions over kernel logs and the kernel service | durable state; it is an assembly layer, never a kernel primitive |
+| Distribution layer | versioned distro/overlay packages with `add`/`replace`/`patch` composition, package registry, transactional git-backed installer, verifier, rollback, governed overlay install (authority-diff), git-URL fetch + lockfile, `extends` inheritance, `lint`/`--dry-run` | the kernel itself; the installer only writes adopter-owned overlay files; a package may not widen a role's authority |
+| Userland | operator/member-human-facing layer over the kernel: enrollment, attention router, action queues, surface-policy inspection, vocabulary spine — pure functions over kernel logs and the kernel service, with the `cognitive-firm-userland` CLI and an Orbit `NeedsMePane` | durable state; it is an assembly layer, never a kernel primitive |
 | App surfaces | Orbit, Telegram, CLI, plus tenant-built Slack/Teams/Linear/GitHub adapters | durable source of truth |
 | Tenant overlay | role mandates, project charters, local metrics, private connectors, workflow-specific policy | reusable kernel mechanism |
 

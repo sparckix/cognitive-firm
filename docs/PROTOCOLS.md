@@ -514,14 +514,22 @@ transactional and git-backed: the installer ensures the target is its own git
 repo, applies the package, enforces a kernel-version gate, runs a
 governance-graph `boot_check`, and only then commits and tags the result
 `install/<package>/<version>`. A failed or unbootable install leaves the
-target untouched. `rollback` undoes a bad install — a clean `git reset` when
-nothing has run since the install boundary, or a compensating `git revert`
-forward commit when the org has run. The bundled `starter-firm` distro and the
-`cognitive-firm-distro` CLI (`list / show / install / verify / upgrade /
-rollback / uninstall`) ship in the wheel.
+target untouched. A component carries a composition `op` —
+`add` / `replace` / `patch` (RFC 7386 JSON Merge Patch). `rollback` undoes a
+bad install — a clean `git reset` when nothing has run since the install
+boundary, or a compensating `git revert` forward commit when the org has run.
+Installing an overlay onto a *running* org is governed: it files an
+authority-diff proposal and is blocked if it would widen a role's authority. A
+package can be installed from a git URL (SHA-pinned, recorded in a
+content-hashed `packages.lock`), and a distro may `extends` a base distro. The
+bundled `starter-firm` distro and the `cognitive-firm-distro` CLI (`list / show
+/ install / verify / upgrade / rollback / uninstall / lint`, with
+`install --dry-run`) ship in the wheel.
 
-Status: package registry, transactional installer, `boot_check` verifier,
-rollback, `starter-firm` distro, CLI, and tests shipped.
+Status: package registry, transactional installer with `op` composition,
+`boot_check` verifier, governed overlay install, remote git-URL fetch with
+lockfile, `extends` inheritance, rollback, `lint`/`--dry-run` authoring loop,
+`starter-firm` distro, CLI, and tests shipped.
 
 ### [Extension Schemas](protocols/extension-schemas.md)
 
