@@ -30,6 +30,10 @@ from cognitive_firm.distribution.manifest import (
     PackageManifest,
     check_kernel_compat,
 )
+from cognitive_firm.distribution.signing import (
+    SigningError,
+    verify_against_trust_store,
+)
 from cognitive_firm.orchestration.kernel_events import (
     append_kernel_event,
     create_kernel_event,
@@ -69,6 +73,7 @@ class InstallReceipt:
     pre_install_ref: str | None = None
     commit_sha: str = ""
     git_tag: str = ""
+    signature_verified: bool = False  # O3-P1(4): provenance outcome
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -82,6 +87,7 @@ class InstallReceipt:
             "pre_install_ref": self.pre_install_ref,
             "commit_sha": self.commit_sha,
             "git_tag": self.git_tag,
+            "signature_verified": self.signature_verified,
         }
 
     @classmethod
@@ -100,6 +106,7 @@ class InstallReceipt:
             pre_install_ref=raw.get("pre_install_ref"),
             commit_sha=raw.get("commit_sha", ""),
             git_tag=raw.get("git_tag", ""),
+            signature_verified=bool(raw.get("signature_verified", False)),
         )
 
 
@@ -236,13 +243,22 @@ def _undo_failed_install(
     target_existed: bool,
     pre_install_ref: str | None,
     created: list[str],
+    original_bytes: dict[str, bytes],
 ) -> None:
     """Restore the target after a failed install (the transactional guarantee).
 
-    If the target did not exist before, it is removed entirely. Otherwise
-    overwritten (tracked) files are restored by resetting to the pre-install
-    ref, and created (untracked) files are deleted precisely — no `git clean`,
-    so an adopter's unrelated untracked files are never touched.
+    If the target did not exist before, it is removed entirely. Otherwise:
+
+    - With a pre-install ref (branch 2), a ``git reset --hard`` restores every
+      tracked file exactly. A failed reset is *not* swallowed (F-3): it is
+      re-raised so the operator learns the target may be inconsistent.
+    - With no pre-install ref (branch 3 — the target existed but was not yet a
+      committed git repo), there is nothing to reset to, so each file the
+      installer mutated is restored from a byte snapshot captured before the
+      mutation (F-1): patched and overwritten files alike.
+
+    Newly created (untracked) files are then deleted precisely — no
+    ``git clean``, so an adopter's unrelated untracked files are never touched.
     """
     if not target_existed:
         shutil.rmtree(target_root, ignore_errors=True)
@@ -250,12 +266,59 @@ def _undo_failed_install(
     if pre_install_ref is not None:
         try:
             gitops.reset_hard(target_root, pre_install_ref)
-        except gitops.GitError:
-            pass
+        except gitops.GitError as exc:
+            raise InstallError(
+                "install failed AND the target could not be restored to its "
+                f"pre-install state ({pre_install_ref}): {exc}. The target "
+                "may be in an inconsistent state and needs manual recovery."
+            ) from exc
+    else:
+        # Branch 3: no commit to reset to — restore each mutated file from the
+        # byte snapshot captured before it was patched or overwritten.
+        for dest_rel, original in original_bytes.items():
+            (target_root / dest_rel).write_bytes(original)
     for dest_rel in created:
         path = target_root / dest_rel
         if path.is_file():
             path.unlink()
+
+
+def _verify_signature(
+    manifest: PackageManifest, package_root: Path, target_root: Path
+) -> bool:
+    """Verify a package's provenance before install (O3-P1 constraint 4).
+
+    If the manifest declares no ``signing`` block the package is *unsigned*:
+    returns ``False`` (recorded as ``signature_verified: false``) — unsigned
+    packages still install, so existing distros like ``starter-firm`` are never
+    broken.
+
+    If the manifest declares ``signing``, the detached Ed25519 signature is
+    verified against the publisher's key in the target org's local trust store
+    (``.cognitive-firm/trusted_publishers/``). A signed package whose signature
+    does not check out — a tampered package, the wrong key, or an untrusted
+    publisher — is refused with ``InstallError`` *before any file is written*.
+    """
+    if manifest.signing is None:
+        return False
+    try:
+        verified = verify_against_trust_store(
+            package_root,
+            manifest.signing.publisher,
+            manifest.signing.signature,
+            trust_root=target_root,
+        )
+    except SigningError as exc:
+        raise InstallError(
+            f"cannot install signed package '{manifest.name}': {exc}"
+        ) from exc
+    if not verified:
+        raise InstallError(
+            f"refusing to install '{manifest.name}': its declared signature "
+            f"from publisher '{manifest.signing.publisher}' does not verify — "
+            f"the package may be tampered or the trusted key is wrong"
+        )
+    return True
 
 
 def install(
@@ -270,10 +333,14 @@ def install(
 
     Refuses with ``InstallError`` if the running kernel is outside the
     package's declared range (G1), or if the resulting org does not boot (G5).
-    On any failure the target is restored (G11). On success the install is a
-    git commit tagged ``install/<package>/<version>`` (R1). Existing files are
-    skipped unless ``force`` is set. ``kernel_version`` overrides the running
-    kernel version (for tests).
+    If the manifest declares a ``signing`` block, the package's Ed25519
+    signature is verified against the target's trust store before any mutation
+    and a bad signature is refused (O3-P1 constraint 4); an unsigned package
+    still installs, with ``signature_verified: false`` on the receipt and
+    event. On any failure the target is restored (G11). On success the install
+    is a git commit tagged ``install/<package>/<version>`` (R1). Existing files
+    are skipped unless ``force`` is set. ``kernel_version`` overrides the
+    running kernel version (for tests).
     """
     version = kernel_version or cognitive_firm.__version__
     compat = check_kernel_compat(manifest.kernel, version)
@@ -281,6 +348,10 @@ def install(
         raise InstallError(
             f"cannot install '{manifest.name}': " + "; ".join(compat)
         )
+
+    signature_verified = _verify_signature(
+        manifest, Path(package_root), Path(target_root)
+    )
 
     target_root = Path(target_root)
     target_existed = target_root.exists()
@@ -293,6 +364,14 @@ def install(
     installed: list[InstalledFile] = []
     skipped: list[str] = []
     created: list[str] = []
+    # Byte snapshots of pre-existing files before they are patched/overwritten,
+    # so a failed install can restore them even with no prior git commit (F-1).
+    original_bytes: dict[str, bytes] = {}
+
+    def _snapshot(dest_rel: str, dest_path: Path) -> None:
+        if dest_rel not in original_bytes and dest_path.is_file():
+            original_bytes[dest_rel] = dest_path.read_bytes()
+
     try:
         for src_file, dest_rel, conflict, op in _component_files(
             manifest, package_root, target_root
@@ -303,6 +382,7 @@ def install(
                     raise InstallError(
                         f"patch component targets a missing file: {dest_rel}"
                     )
+                _snapshot(dest_rel, dest_path)
                 _apply_merge_patch(src_file, dest_path)
                 installed.append(InstalledFile(dest_rel, "patched"))
                 continue
@@ -312,6 +392,8 @@ def install(
                 continue
             # op == "add" (no conflict, or forced) or op == "replace"
             dest_path.parent.mkdir(parents=True, exist_ok=True)
+            if conflict:
+                _snapshot(dest_rel, dest_path)
             shutil.copyfile(src_file, dest_path)
             action = "overwritten" if conflict else "created"
             installed.append(InstalledFile(dest_rel, action))
@@ -330,6 +412,7 @@ def install(
             target_existed=target_existed,
             pre_install_ref=pre_install_ref,
             created=created,
+            original_bytes=original_bytes,
         )
         raise
 
@@ -357,6 +440,7 @@ def install(
         pre_install_ref=pre_install_ref,
         commit_sha=commit_sha,
         git_tag=git_tag if commit_sha else "",
+        signature_verified=signature_verified,
     )
     receipt_dir = target_root / RECEIPT_DIRNAME
     receipt_dir.mkdir(parents=True, exist_ok=True)
@@ -375,6 +459,7 @@ def install(
             "git_tag": receipt.git_tag,
             "pre_install_ref": pre_install_ref,
             "file_count": len(installed),
+            "signature_verified": signature_verified,
         },
     )
     return receipt

@@ -383,6 +383,106 @@ def test_lock_then_tampered_refetch_is_a_hard_error(tmp_path):
         verify_against_lock(org, "starter-firm", fetched.package_root)
 
 
+# --------------------------------------------------------------------------
+# supply-chain hardening (F-14, F-15, F-17)
+# --------------------------------------------------------------------------
+
+
+def test_resolve_ref_rejects_an_ambiguous_ref(tmp_path):
+    """F-14: a name that is BOTH a branch and a tag pointing at distinct
+    commits is ambiguous and must be a hard error, not a silent first-match."""
+    repo = tmp_path / "repo"
+    refs = _make_package_repo(repo, second_commit=True)
+    # Create a branch and a tag that share the name "shared" but point at
+    # two different commits. ls-remote will then print refs/heads/shared and
+    # refs/tags/shared with distinct SHAs.
+    _git(["branch", "shared", refs["v1"]], repo)
+    _git(["tag", "shared", refs["head2"]], repo)
+    with pytest.raises(RemoteFetchError):
+        resolve_ref(str(repo), "shared")
+
+
+def test_resolve_ref_allows_a_branch_and_tag_on_the_same_commit(tmp_path):
+    """A name that is both a branch and a tag is fine if they agree on the
+    SHA — only a genuine multi-SHA ambiguity is rejected."""
+    repo = tmp_path / "repo"
+    refs = _make_package_repo(repo)
+    _git(["branch", "agree", refs["v1"]], repo)
+    _git(["tag", "agree", refs["v1"]], repo)
+    assert resolve_ref(str(repo), "agree") == refs["v1"]
+
+
+def test_fetch_package_rejects_a_partial_cache_entry(tmp_path):
+    """F-15: a content-addressed cache dir left half-written by a killed
+    clone is non-empty but does not check out the expected SHA. It must not
+    be trusted — fetch_package must re-clone (or reject), never reuse it."""
+    repo = tmp_path / "repo"
+    refs = _make_package_repo(repo)
+    cache = tmp_path / "cache"
+    sha = refs["v1"]
+    # Simulate a process killed mid-clone: the SHA-keyed dir exists and is
+    # non-empty, but holds garbage rather than the real package at that SHA.
+    poisoned = cache_dir_for(cache, sha)
+    poisoned.mkdir(parents=True)
+    (poisoned / "partial-junk").write_text("half-written clone\n")
+    fetched = fetch_package(RemotePackageSource(url=str(repo), ref="v1"), cache)
+    # The poisoned entry must have been discarded and the real package fetched.
+    assert fetched.resolved_sha == sha
+    assert (fetched.package_root / "package.yaml").is_file()
+    assert not (poisoned / "partial-junk").exists()
+
+
+def test_refetch_with_changed_remote_content_raises_lockmismatch(tmp_path):
+    """F-17: re-fetching a package that already has a lock entry, where the
+    remote content at the SAME SHA changed underneath, must raise
+    LockMismatch — verify_against_lock is wired into fetch_and_lock."""
+    repo = tmp_path / "repo"
+    _make_package_repo(repo)
+    org = tmp_path / "org"
+    org.mkdir()
+    fetched, _ = fetch_and_lock(
+        RemotePackageSource(url=str(repo), ref="v1"), org
+    )
+    locked_sha = fetched.resolved_sha
+    # Rewrite the commit's content in place but keep the same tag name "v1".
+    # `commit --amend` produces a new SHA, so to keep the SHA stable we
+    # instead tamper with the cache entry that a forced re-fetch would reuse,
+    # then force a re-fetch. A re-fetch (force=True) re-clones from the
+    # remote; to model a tampered remote we amend the remote commit and move
+    # the v1 tag back is not same-SHA. Instead: tamper the cached content and
+    # re-fetch without force so the cache (poisoned) is what gets verified.
+    cache_entry = org / PKG_CACHE_DIRNAME / locked_sha
+    (cache_entry / "INJECTED.txt").write_text("supply-chain payload\n")
+    with pytest.raises(LockMismatch):
+        fetch_and_lock(RemotePackageSource(url=str(repo), ref="v1"), org)
+
+
+def test_first_fetch_and_lock_with_no_prior_lock_succeeds(tmp_path):
+    """F-17 regression guard: a legitimate first fetch (no prior lock entry)
+    must still simply write the lock, not raise."""
+    repo = tmp_path / "repo"
+    _make_package_repo(repo)
+    org = tmp_path / "org"
+    org.mkdir()
+    fetched, lockfile = fetch_and_lock(
+        RemotePackageSource(url=str(repo), ref="v1"), org
+    )
+    assert lockfile.get("starter-firm").content_hash == fetched.content_hash
+
+
+def test_refetch_of_unchanged_content_succeeds(tmp_path):
+    """F-17 regression guard: re-fetching identical content verifies clean."""
+    repo = tmp_path / "repo"
+    _make_package_repo(repo)
+    org = tmp_path / "org"
+    org.mkdir()
+    fetch_and_lock(RemotePackageSource(url=str(repo), ref="v1"), org)
+    fetched, lockfile = fetch_and_lock(
+        RemotePackageSource(url=str(repo), ref="v1"), org
+    )
+    assert lockfile.get("starter-firm").content_hash == fetched.content_hash
+
+
 def test_to_lock_entry_carries_signature_and_event_id(tmp_path):
     repo = tmp_path / "repo"
     _make_package_repo(repo)

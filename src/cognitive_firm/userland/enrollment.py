@@ -9,6 +9,7 @@ YAML diff. It adds no kernel mechanism.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -103,10 +104,20 @@ def preview(*, role_id: str, org_root: Path) -> AuthorityPreview:
 
 
 def _actor_id_for(auth_subject: str) -> str:
+    """Derive a firm actor id from an authenticated subject.
+
+    Authority is per-actor, so distinct subjects must always get distinct ids.
+    A readable slug alone collides — ``a.b@x.com``, ``a-b@x.com`` and
+    ``a_b@x.com`` all reduce to the same slug. So the id pairs a readable slug
+    with a short, deterministic hash of the *full original* ``auth_subject``;
+    the hash disambiguates subjects the slug cannot. Deterministic: the same
+    subject always yields the same id.
+    """
     slug = "".join(
         c if c.isalnum() else "_" for c in auth_subject.lower()
     ).strip("_")
-    return f"human_{slug}" if slug else "human_unknown"
+    digest = hashlib.sha256(auth_subject.encode("utf-8")).hexdigest()[:8]
+    return f"human_{slug}_{digest}" if slug else f"human_unknown_{digest}"
 
 
 def enroll(

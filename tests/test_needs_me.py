@@ -80,6 +80,38 @@ def test_singular_phrasing_for_one_item():
     assert "1 item," in view.waiting_line  # singular — no trailing 's'
 
 
+def test_off_taxonomy_urgency_leaves_no_stray_bucket():
+    # F-20: an off-taxonomy urgency must bucket into INFO without inserting a
+    # stray buckets key — otherwise a later buckets.items() double-counts.
+    from cognitive_firm.userland.needs_me import _bucket_signals
+
+    buckets = _bucket_signals(
+        [
+            _routed("b1", sc.BLOCKING_NOW),
+            _routed("weird", "off_taxonomy_urgency"),
+        ]
+    )
+    # The `buckets` dict must keep exactly the three taxonomy keys — no stray
+    # off-taxonomy key, so iterating buckets.items() never double-counts.
+    assert set(buckets.keys()) == {
+        sc.BLOCKING_NOW,
+        sc.APPROVAL_PENDING,
+        sc.INFO,
+    }
+    # The off-taxonomy item is bucketed under INFO, counted exactly once.
+    assert sum(len(items) for items in buckets.values()) == 2
+    assert [i.signal_id for i in buckets[sc.INFO]] == ["weird"]
+
+    # And it still surfaces in the full view, under INFO.
+    view = build_needs_me(
+        actor_id="op",
+        signals=[_routed("weird", "off_taxonomy_urgency")],
+    )
+    assert view.total_count == 1
+    assert [g.urgency for g in view.groups] == [sc.INFO]
+    assert view.groups[0].items[0].signal_id == "weird"
+
+
 def test_as_dict_carries_the_structure():
     view = build_needs_me(
         actor_id="op", signals=[_routed("b1", sc.BLOCKING_NOW)]

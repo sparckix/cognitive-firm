@@ -60,13 +60,26 @@ To run role daemons (agents taking governed ticks), point
 docker compose up
 ```
 
-This builds the image (kernel + bundled distros + Orbit) and brings up the
-daemon and the Orbit web surface. Today the compose runs against the repo's
-`org/`; to run a firm you installed elsewhere, install it into the directory
-the compose mounts as the org, or set `ORG_ROOT` in `.env`. A compose profile
-dedicated to running an *installed* firm — and one that also runs
-`cognitive-firm-kernel-service` so the Orbit panes have their data source — is
-a known next step.
+This builds the image (kernel + bundled distros + Orbit) and brings up a
+serviceable firm:
+
+- `kernel` runs `cognitive-firm-kernel-service` — the HTTP boundary — on
+  port **8765**. This is the data source the userland CLI and Orbit read and
+  write through.
+- `orbit-sync` is the Orbit projection daemon (port 3001); it depends on the
+  kernel service and proxies reads/writes to it.
+- `orbit-web` serves the Orbit web UI on port **3000**.
+- Role daemons (agents taking governed ticks, which spend LLM budget) are
+  **opt-in**: `docker compose --profile agents up` also starts the `daemon`
+  service. Its default tick is a dry-run; drop `--dry-run` for real governed
+  ticks.
+
+The CLIs are on PATH in the image, e.g.
+`docker compose exec kernel cognitive-firm-userland status`.
+
+Today the compose runs against the repo's `org/`; to run a firm you installed
+elsewhere, install it into the directory the compose mounts as the org, or set
+`ORG_ROOT` in `.env`.
 
 ## Rolling back
 

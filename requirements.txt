@@ -18,6 +18,7 @@ python-dotenv>=1.0.0
 PyYAML>=6.0
 jsonschema>=4.0    # role yaml validation in scripts/org_role_preflight.py
 requests>=2.30     # telegram + ad-hoc HTTP
+cryptography>=42.0 # Ed25519 package signing (distribution/signing.py, O3-P1)
 
 # Resilience + UX in scripts
 tenacity>=8.0

@@ -1,9 +1,8 @@
 # Extension Schemas — Uniform Primitive-Extension Validation
 
-**Status:** first-party interface shipped (O3-P6).
+**Status:** first-party interface shipped.
 **Module:** `cognitive_firm.orchestration.extension_schemas`
 **Tests:** `tests/test_extension_schemas.py`
-**Spec:** GP-230 OS-path spec §5.2; O3 package-ecosystem design O3-P6.
 
 The kernel is *designed open*. A
 [`WorkItem`](work-items.md) carries a free `kind` string and an uninterpreted
@@ -12,7 +11,7 @@ dict; a role YAML is `additionalProperties: true`. A tenant or a package may
 therefore declare a **custom type** — a new `kind` — purely as config, with no
 kernel change. That is the right design.
 
-But until O3-P6, custom types were **extensible but not validated**. A custom
+But until this protocol, custom types were **extensible but not validated**. A custom
 `WorkItem.kind` got a free `payload` dict the kernel could not check, and there
 was *no place for a package to register a per-`kind` payload schema*. Only
 roles had an extension-schema pattern (`schemas/role.v1.schema.json` — "domain
@@ -33,7 +32,7 @@ A package or an org ships JSON Schema files under a conventional path:
 
 For example `org/extension_schemas/work_item/refund_request.schema.json` is the
 payload schema for `WorkItem`s whose `kind == "refund_request"`. The directory
-is *config* — the O3 delivery vehicle. Installing a package that ships an
+is *config* — the package delivery vehicle. Installing a package that ships an
 extension schema is an ordinary governed install: a schema *constrains*
 behavior, so it correctly routes through governance.
 
@@ -43,8 +42,8 @@ are open.
 
 ### 2. One generic module — the one-time kernel revision
 
-`cognitive_firm.orchestration.extension_schemas` is the generic mechanism. Per
-spec §1.2, "adding a type must never require a kernel change" — and it does
+`cognitive_firm.orchestration.extension_schemas` is the generic mechanism.
+Adding a type must never require a kernel change — and it does
 not: this module is written **once**, and after it exists a package adds a
 custom *validated* type purely by dropping a schema file. The module exposes:
 
@@ -91,17 +90,17 @@ persists nothing.
 
 The *same one-line idiom* — one registry, one `validate_payload` signature,
 one call site — is how a future primitive (`OperatingUnit.metadata`, the role
-loader) opts in. This is the "uniform" in O3-P6: `role` is no longer the only
-primitive with an extension-schema pattern.
+loader) opts in. This is what makes the mechanism uniform: `role` is no longer
+the only primitive with an extension-schema pattern.
 
 ## Schema versioning
 
 A custom type's schema versions like any other. A breaking change to a custom
 type's schema is a package upgrade (governed). A breaking change to the
 *extension-schema protocol itself* — this module's contract — is a kernel v2,
-the rare case spec §5.2 reserves a kernel revision for.
+the rare case that reserves a kernel revision.
 
-## Residual risks (from the O3-P6 design)
+## Residual risks
 
 - **`additionalProperties` policy.** A registered schema with
   `additionalProperties: true` catches little; `false` is real type-safety but

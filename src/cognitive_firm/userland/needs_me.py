@@ -88,14 +88,18 @@ class NeedsMeView:
         }
 
 
-def build_needs_me(
-    *, actor_id: str, signals: Iterable[RoutedSignal]
-) -> NeedsMeView:
-    """Build the ``needs-me`` view for ``actor_id`` from routed signals."""
-    mine = signals_for_actor(signals, actor_id)
+def _bucket_signals(
+    signals: Iterable[RoutedSignal],
+) -> dict[str, list[NeedsMeItem]]:
+    """Group routed signals into the fixed urgency buckets.
 
+    The returned dict always has exactly the ``_URGENCY_ORDER`` keys — an
+    off-taxonomy urgency is folded into the INFO list rather than inserting a
+    stray key. A stray aliased key would make any later ``buckets.items()``
+    iteration double-count items.
+    """
     buckets: dict[str, list[NeedsMeItem]] = {u: [] for u in _URGENCY_ORDER}
-    for signal in mine:
+    for signal in signals:
         item = NeedsMeItem(
             signal_id=signal.signal_id,
             headline=signal.headline,
@@ -104,8 +108,20 @@ def build_needs_me(
             age_seconds=signal.age_seconds,
             source_ref=signal.source_ref,
         )
-        # An off-taxonomy urgency would otherwise vanish; bucket it as info.
-        buckets.setdefault(signal.urgency, buckets[sc.INFO]).append(item)
+        # An off-taxonomy urgency would otherwise vanish; bucket it as info
+        # WITHOUT inserting a stray key (no setdefault).
+        bucket = buckets.get(signal.urgency, buckets[sc.INFO])
+        bucket.append(item)
+    return buckets
+
+
+def build_needs_me(
+    *, actor_id: str, signals: Iterable[RoutedSignal]
+) -> NeedsMeView:
+    """Build the ``needs-me`` view for ``actor_id`` from routed signals."""
+    mine = signals_for_actor(signals, actor_id)
+
+    buckets = _bucket_signals(mine)
 
     groups: list[NeedsMeGroup] = []
     for urgency in _URGENCY_ORDER:

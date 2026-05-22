@@ -95,7 +95,9 @@ def test_surface_policy_blocks_a_projection_only_surface(tmp_path):
         body={"actor_context": {"surface": "orbit"}},
         config=config,
     )
-    assert resp.status == 409
+    # A surface-policy denial is an authorization failure, not a state
+    # conflict — 403, so clients do not retry it as transient.
+    assert resp.status == 403
 
 
 def test_surface_policy_allows_an_unrestricted_surface(tmp_path):
@@ -111,4 +113,4 @@ def test_surface_policy_allows_an_unrestricted_surface(tmp_path):
         body={"actor_context": {"surface": "cli"}},
         config=config,
     )
-    assert resp.status != 409
+    assert resp.status != 403

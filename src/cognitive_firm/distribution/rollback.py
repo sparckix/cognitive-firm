@@ -98,6 +98,18 @@ def rollback(
             f"install of '{package}' has no commit boundary to roll back"
         )
 
+    # A dirty working tree must be resolved before any rollback (F-2). Clean
+    # mode (`git reset --hard`) would silently discard uncommitted work;
+    # compensating mode (`git revert`) would fail and be misreported as a
+    # content merge conflict. Refuse with an accurate, actionable message that
+    # is distinct from the genuine post-install conflict diagnosis below.
+    if gitops.is_dirty(target_root):
+        raise RollbackError(
+            f"cannot roll back '{package}': the firm has uncommitted changes "
+            f"in its working tree. Commit or stash them first, then retry — "
+            f"rollback will not discard in-flight work."
+        )
+
     head = gitops.current_ref(target_root)
     clean = head == receipt.commit_sha
 

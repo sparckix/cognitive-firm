@@ -66,6 +66,32 @@ def test_unroutable_governance_signal_is_surfaced_not_dropped():
     assert routed[0].target_actor_id is None
 
 
+def test_unassigned_work_interrupt_falls_back_to_the_authority():
+    # F-19: an a2h_waiting session with no assigned human (target_actor_id
+    # None) must reach the authority to be assigned, not vanish.
+    unassigned = AttentionSignal(
+        signal_id="hws_unassigned",
+        kind="a2h_waiting",
+        headline="Unassigned human-work session",
+        source_ref="hws_unassigned",
+        target_role_id=None,
+        target_actor_id=None,
+    )
+    routed = route_signals(
+        [unassigned],
+        authority_actor_id="principal_actor",
+        authority_role_id="principal",
+    )
+    r = routed[0]
+    assert r.signal_class == sc.WORK_INTERRUPT
+    assert r.target_actor_id == "principal_actor"
+    assert r.target_role_id == "principal"
+    # And it actually lands in the authority's feed.
+    assert {x.signal_id for x in signals_for_actor(routed, "principal_actor")} == {
+        "hws_unassigned"
+    }
+
+
 def test_unknown_kind_is_informational():
     routed = route_signals(
         [AttentionSignal("x", "mystery_kind", "huh", "ref")],

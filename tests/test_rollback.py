@@ -101,6 +101,44 @@ def test_upgrade_reinstalls_over_existing_org(tmp_path):
     assert all(f.action == "overwritten" for f in receipt.files)
 
 
+def test_rollback_refuses_dirty_working_tree_with_accurate_message(tmp_path):
+    """F-2: a compensating rollback against a dirty working tree must report
+    the uncommitted changes accurately, not as a merge conflict."""
+    from cognitive_firm.distribution.rollback import RollbackError
+
+    target = tmp_path / "org"
+    _seeded_repo(target)
+    install(load_manifest(STARTER / "package.yaml"), STARTER, target)
+    # the org runs: a committed change, so rollback is compensating mode
+    (target / "log.txt").write_text("the org did some work\n")
+    gitops.stage_all(target)
+    gitops.commit(target, "post-install work")
+    # ...and now the working tree is DIRTY: uncommitted edits to a tracked file
+    (target / "log.txt").write_text("uncommitted in-flight work\n")
+
+    with pytest.raises(RollbackError) as excinfo:
+        rollback(target, "starter-firm", reason="bad install")
+    message = str(excinfo.value).lower()
+    assert "uncommitted" in message
+    assert "conflict" not in message  # must NOT misdiagnose as a merge conflict
+
+
+def test_rollback_clean_refuses_dirty_working_tree(tmp_path):
+    """F-2: a clean rollback must not silently discard uncommitted changes."""
+    from cognitive_firm.distribution.rollback import RollbackError
+
+    target = tmp_path / "org"
+    _seeded_repo(target)
+    install(load_manifest(STARTER / "package.yaml"), STARTER, target)
+    # uncommitted in-flight work on a tracked file, no commit since install
+    (target / "seed.txt").write_text("uncommitted in-flight work\n")
+
+    with pytest.raises(RollbackError) as excinfo:
+        rollback(target, "starter-firm", reason="undo")
+    assert "uncommitted" in str(excinfo.value).lower()
+    assert (target / "seed.txt").read_text() == "uncommitted in-flight work\n"
+
+
 def test_cli_install_then_rollback(tmp_path):
     target = tmp_path / "firm"
     assert distro_main(["install", "starter-firm", "--into", str(target)]) == 0

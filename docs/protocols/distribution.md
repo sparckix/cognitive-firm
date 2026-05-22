@@ -55,7 +55,7 @@ A `component` `source` is a path under `files/` (a directory or a file);
 `dest` is where it lands in the target. Both are validated to stay inside
 their roots — a `source` or `dest` that escapes is rejected.
 
-### Composition `op` (O3-P2)
+### Composition `op`
 
 Each component carries an `op` declaring how it composes onto the target:
 
@@ -96,7 +96,7 @@ having to ship and `replace` the whole file.
 - The installer never writes to the kernel. It only writes overlay files the
   adopter owns. `git` is a hard dependency of this layer.
 
-## Governed overlay install (O3-P1)
+## Governed overlay install
 
 Installing an overlay onto a directory is a file operation; installing one
 onto a *running* organization changes who-can-do-what, so it must be a
@@ -124,7 +124,7 @@ already exist, with no kernel change:
    attests a `package.install_approved` event tying the install to its
    proposal id.
 
-## Remote packages (O3-P3)
+## Remote packages
 
 `discover_packages` only indexes a *local* directory. A real ecosystem needs
 packages fetched from a git URL, and a git URL is not an immutable identity —
@@ -145,7 +145,7 @@ tags move and a force-push rewrites history. The fetch path
 `cognitive-firm-distro install <git-url>` runs this path; `--ref` selects the
 tag/branch/SHA to pin (default `HEAD`).
 
-## Distro inheritance (O3-P5)
+## Distro inheritance
 
 A manifest may declare `extends: <base-distro>`. Installing the extender first
 installs the named base distro, then composes the extender's components on top
@@ -170,7 +170,7 @@ automatically:
 whose receipt records the pre-upgrade ref, so a post-upgrade rollback returns
 to the pre-upgrade state.
 
-## Authoring loop (O3-P4)
+## Authoring loop
 
 A third-party author can iterate on a package without ever installing it into
 a live org:

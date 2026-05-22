@@ -131,3 +131,170 @@ def test_resolve_requires_an_option():
 def test_unknown_verb_exits_nonzero(capsys):
     with pytest.raises(SystemExit):
         main(["not-a-verb"])
+
+
+# --- governed-install human loop: proposals / approve / decline ----------
+
+from cognitive_firm.orchestration.governance_changes import (  # noqa: E402
+    InvariantCheck,
+    propose_governance_change,
+)
+from cognitive_firm.orchestration.kernel_events import (  # noqa: E402
+    list_kernel_events,
+)
+
+
+def _passing_checks() -> list[InvariantCheck]:
+    """Invariant checks that carry a proposal to ``review_ready``."""
+    return [
+        InvariantCheck(invariant=inv, status="pass", rationale="ok")
+        for inv in (
+            "principal_independence",
+            "deterministic_enforcement_floor",
+            "fail_closed_behavior",
+            "write_scope_preserved",
+            "tenant_boundary_preserved",
+        )
+    ]
+
+
+def _gov_config(tmp_path) -> KernelServiceConfig:
+    """A kernel config with an isolated org dir and transition log."""
+    return KernelServiceConfig(
+        org_dir=tmp_path / "org",
+        transition_log=tmp_path / "transitions.jsonl",
+        gates_dir=tmp_path / "gates" / "pending",
+        gates_resolved_dir=tmp_path / "gates" / "resolved",
+    )
+
+
+def _governance_log(config: KernelServiceConfig):
+    return config.org_dir / "governance_changes" / "governance_changes.jsonl"
+
+
+def _bind(monkeypatch, config: KernelServiceConfig) -> None:
+    monkeypatch.setattr(
+        cli, "dispatch_kernel_request",
+        functools.partial(dispatch_kernel_request, config=config),
+    )
+
+
+def test_proposals_lists_governance_changes_awaiting_review(
+    tmp_path, monkeypatch, capsys
+):
+    config = _gov_config(tmp_path)
+    propose_governance_change(
+        change_kind="role_change",
+        title="Widen analyst write scope",
+        proposed_by="operator",
+        target_ref="roles/analyst.yaml",
+        rationale="overlay install",
+        expected_behavior_change="analyst may write to drafts/",
+        invariant_checks=_passing_checks(),
+        log_path=_governance_log(config),
+    )
+    _bind(monkeypatch, config)
+
+    rc = main(["proposals"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "1 governance change(s) awaiting review:" in out
+    assert "Widen analyst write scope" in out
+    assert "analyst may write to drafts/" in out
+
+
+def test_proposals_when_none_await_review(tmp_path, monkeypatch, capsys):
+    config = _gov_config(tmp_path)
+    _bind(monkeypatch, config)
+
+    rc = main(["proposals"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "No governance changes are awaiting review." in out
+
+
+def test_approve_records_an_attested_event(tmp_path, monkeypatch, capsys):
+    config = _gov_config(tmp_path)
+    proposal = propose_governance_change(
+        change_kind="role_change",
+        title="Widen analyst write scope",
+        proposed_by="operator",
+        target_ref="roles/analyst.yaml",
+        rationale="overlay install",
+        invariant_checks=_passing_checks(),
+        log_path=_governance_log(config),
+    )
+    _bind(monkeypatch, config)
+
+    rc = main(["approve", proposal.proposal_id, "--reason", "reviewed"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert f"governance change {proposal.proposal_id} approved" in out
+    assert "attested event:" in out
+
+    events = list_kernel_events(log_path=config.transition_log)
+    approved = [e for e in events if e.verb == "governance_change.approved"]
+    assert len(approved) == 1
+    assert approved[0].object_ref == f"governance_change:{proposal.proposal_id}"
+    assert approved[0].payload["reason"] == "reviewed"
+
+
+def test_decline_records_an_attested_event(tmp_path, monkeypatch, capsys):
+    config = _gov_config(tmp_path)
+    proposal = propose_governance_change(
+        change_kind="role_change",
+        title="Widen analyst write scope",
+        proposed_by="operator",
+        target_ref="roles/analyst.yaml",
+        rationale="overlay install",
+        invariant_checks=_passing_checks(),
+        log_path=_governance_log(config),
+    )
+    _bind(monkeypatch, config)
+
+    rc = main(["decline", proposal.proposal_id, "--actor", "human_lead"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "declined by human_lead" in out
+
+    events = list_kernel_events(log_path=config.transition_log)
+    declined = [e for e in events if e.verb == "governance_change.declined"]
+    assert len(declined) == 1
+    assert declined[0].actor == "human_lead"
+
+
+def test_approve_a_missing_proposal_errors(tmp_path, monkeypatch, capsys):
+    config = _gov_config(tmp_path)
+    _bind(monkeypatch, config)
+
+    rc = main(["approve", "gcp_does_not_exist"])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "ERROR:" in captured.err
+
+
+def test_approve_a_blocked_proposal_is_refused(tmp_path, monkeypatch, capsys):
+    config = _gov_config(tmp_path)
+    # An expanding overlay fails write_scope_preserved -> status "blocked".
+    proposal = propose_governance_change(
+        change_kind="role_change",
+        title="Authority-expanding overlay",
+        proposed_by="operator",
+        target_ref="roles/analyst.yaml",
+        rationale="overlay install",
+        invariant_checks=[
+            InvariantCheck(
+                invariant="write_scope_preserved",
+                status="fail",
+                rationale="overlay widens authority",
+            )
+        ],
+        log_path=_governance_log(config),
+    )
+    assert proposal.status == "blocked"
+    _bind(monkeypatch, config)
+
+    rc = main(["approve", proposal.proposal_id])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "not awaiting review" in captured.err

@@ -95,6 +95,56 @@ def test_an_authority_expanding_overlay_is_blocked(tmp_path):
         apply_approved_install(proposed, overlay, target)
 
 
+# The live analyst role with its forbidden_paths emptied — nothing else
+# changed. Pre-fix this produced a zero-line diff and reached review_ready;
+# emptying a guardrail expands authority and must block.
+_UNGUARDED_ANALYST = """\
+schema_version: 1
+role_id: analyst
+role_class: specialist
+description: >
+  Production specialist. Performs the organization's analysis and work-product
+  tasks, records findings as durable state, and hands completed work to the
+  reviewer for accountable closure.
+authorized_paths:
+  - "projects/"
+forbidden_paths: []
+delegates_to: []
+escalates_to:
+  - role.lead
+budget:
+  daily_cap_usd: 25.00
+  session_cap_usd: 15.00
+  single_action_cap_usd: 5.00
+  warn_threshold_frac: 0.80
+  absolute_ceiling_usd: 25.00
+mandate_path: mandates/analyst_mandate.md
+"""
+
+
+def test_an_overlay_that_empties_forbidden_paths_is_blocked(tmp_path):
+    # F-6: removing forbidden_paths entries widens where a role may write.
+    # Such an overlay must fail write_scope_preserved and be blocked, not
+    # slip through as a zero-line diff.
+    target = _installed_org(tmp_path)
+    overlay = _overlay(
+        tmp_path, "unguard-overlay", dest="roles/analyst.yaml", op="replace",
+        source_name="analyst.yaml", body=_UNGUARDED_ANALYST,
+    )
+    proposed = propose_overlay_install(
+        overlay_manifest=load_manifest(overlay / "package.yaml"),
+        overlay_root=overlay, target_root=target,
+        governance_log=tmp_path / "gov.jsonl",
+    )
+    assert not proposed.diff.is_empty
+    assert proposed.diff.expands_authority
+    assert proposed.proposal.status == "blocked"
+    assert not proposed.can_proceed
+    assert "Expands authority" in proposed.proposal.expected_behavior_change
+    with pytest.raises(GovernedInstallError):
+        apply_approved_install(proposed, overlay, target)
+
+
 def test_an_ungovernable_overlay_is_rejected_before_a_proposal(tmp_path):
     target = _installed_org(tmp_path)
     overlay = _overlay(

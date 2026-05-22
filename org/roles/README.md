@@ -6,6 +6,10 @@ _Folder index. Prose may be added above the auto-index block._
 
 ## Index
 
+**Sub-folders**
+
+- None
+
 **Documents**
 
 - [engineer.yaml](engineer.yaml)
@@ -15,5 +19,5 @@ _Folder index. Prose may be added above the auto-index block._
 - [research_director.yaml](research_director.yaml)
 - [reviewer.yaml](reviewer.yaml)
 
-<sub>0 sub-folder(s), 6 document(s). Auto-generated; re-run `gen_folder_index.py` after adding files.</sub>
-<!-- AUTO-INDEX:END -->
+<sub>0 sub-folder(s), 6 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
+

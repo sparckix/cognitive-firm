@@ -20,7 +20,7 @@ organization. A `source` or `dest` that escapes its root is rejected.
 
 ## The authoring loop
 
-This template is built for the O3-P4 third-party authoring loop. You can
+This template is built for the third-party authoring loop. You can
 iterate on a package without ever installing it into a live, governed org:
 
 1. **Lint** — parse the manifest and report authoring problems (missing

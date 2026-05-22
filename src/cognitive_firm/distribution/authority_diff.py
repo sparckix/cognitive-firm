@@ -117,20 +117,107 @@ def _load_yaml_dir(directory: Path) -> dict[str, dict]:
 
 
 def _classify_paths(before: Any, after: Any) -> str:
-    """Classify a change to a role's ``authorized_paths`` set."""
+    """Classify a change to a role's ``authorized_paths`` set.
+
+    Polarity: a wider set is an expansion of write authority. A set that both
+    adds and removes paths cannot be called a pure expand or narrow, so it is
+    UNKNOWN — but see ``_path_set_delta`` and the rendering in
+    ``compute_authority_diff``: the added paths are still surfaced honestly as
+    an expansion component (F-7), and UNKNOWN is treated as expanding by the
+    governed-install gate (fail-closed).
+    """
+    classification, _, _ = _path_set_delta(before, after, widening_adds=True)
+    return classification
+
+
+def _path_set_delta(
+    before: Any, after: Any, *, widening_adds: bool
+) -> tuple[str, set[str], set[str]]:
+    """Classify a set change and return ``(classification, added, removed)``.
+
+    ``widening_adds`` encodes polarity. For ``authorized_paths`` and
+    ``delegates_to`` adding entries widens authority, so ``widening_adds`` is
+    True. For ``forbidden_paths`` the polarity is inverted: *removing* an entry
+    widens authority, so ``widening_adds`` is False.
+    """
     b = set(before or [])
     a = set(after or [])
-    if a == b:
-        return NEUTRAL
+    added = a - b
+    removed = b - a
+    if not added and not removed:
+        return NEUTRAL, added, removed
+
+    # "*" (write-anywhere) is a special widest element for path sets.
     if "*" in a and "*" not in b:
-        return EXPANDS
+        return (EXPANDS if widening_adds else NARROWS), added, removed
     if "*" in b and "*" not in a:
-        return NARROWS
-    if a > b:
-        return EXPANDS
-    if a < b:
-        return NARROWS
-    return UNKNOWN  # the sets diverge — cannot be called expand or narrow
+        return (NARROWS if widening_adds else EXPANDS), added, removed
+
+    widen, shrink = (
+        (EXPANDS, NARROWS) if widening_adds else (NARROWS, EXPANDS)
+    )
+    if added and not removed:
+        return widen, added, removed
+    if removed and not added:
+        return shrink, added, removed
+    # the sets diverge — both add and remove. Cannot be called a pure
+    # expand or narrow; UNKNOWN, which the gate treats as expanding.
+    return UNKNOWN, added, removed
+
+
+def _join(items: set[str]) -> str:
+    """Render a set of path/role tokens for an operator-readable diff line."""
+    return ", ".join(sorted(str(i) for i in items)) or "(none)"
+
+
+# Budget keys that bound spend authority. A higher value is more authority for
+# every one of these caps.
+_BUDGET_CAP_KEYS = (
+    "daily_cap_usd",
+    "session_cap_usd",
+    "single_action_cap_usd",
+    "absolute_ceiling_usd",
+)
+
+
+def _classify_budget(
+    role_id: str, before: Any, after: Any
+) -> tuple[str, str]:
+    """Classify a change to a role's spend ``budget``.
+
+    Raising any cap expands spend authority; lowering it narrows. A change that
+    raises some caps and lowers others is UNKNOWN (the gate treats it as
+    expanding — fail-closed).
+    """
+    b = before if isinstance(before, dict) else {}
+    a = after if isinstance(after, dict) else {}
+    raised: list[str] = []
+    lowered: list[str] = []
+    for key in _BUDGET_CAP_KEYS:
+        bv, av = b.get(key), a.get(key)
+        if not isinstance(bv, (int, float)) or not isinstance(av, (int, float)):
+            continue
+        if av > bv:
+            raised.append(f"{key} {bv} -> {av}")
+        elif av < bv:
+            lowered.append(f"{key} {bv} -> {av}")
+    if not raised and not lowered:
+        return NEUTRAL, ""
+    if raised and not lowered:
+        return EXPANDS, (
+            f"Raises the spend budget of role '{role_id}': "
+            f"{'; '.join(raised)} (an expansion of spend authority)."
+        )
+    if lowered and not raised:
+        return NARROWS, (
+            f"Lowers the spend budget of role '{role_id}': "
+            f"{'; '.join(lowered)}."
+        )
+    return UNKNOWN, (
+        f"Changes the spend budget of role '{role_id}': raises "
+        f"{'; '.join(raised)} (an expansion) while lowering "
+        f"{'; '.join(lowered)}."
+    )
 
 
 def _mandate_files(org_root: Path) -> dict[str, str]:
@@ -177,18 +264,105 @@ def compute_authority_diff(before_root: Path, after_root: Path) -> AuthorityDiff
         before = before_roles[role_id]
         after = after_roles[role_id]
 
-        paths_class = _classify_paths(
-            before.get("authorized_paths"), after.get("authorized_paths")
+        paths_class, paths_added, paths_removed = _path_set_delta(
+            before.get("authorized_paths"),
+            after.get("authorized_paths"),
+            widening_adds=True,
         )
         if paths_class != NEUTRAL:
+            text = (
+                f"Changes role '{role_id}': now "
+                f"{vocabulary.render('authorized_paths', after.get('authorized_paths') or [])}."
+            )
+            if paths_class == UNKNOWN:
+                # The set both adds and removes: not a pure expand/narrow, but
+                # the added paths ARE an expansion component — name them
+                # honestly rather than calling the change merely uninterpretable.
+                text = (
+                    f"Changes role '{role_id}' write scope: gains write access "
+                    f"to {_join(paths_added)} (an expansion) while losing "
+                    f"{_join(paths_removed)}. Now "
+                    f"{vocabulary.render('authorized_paths', after.get('authorized_paths') or [])}."
+                )
+            lines.append(DiffLine(f"role:{role_id}", paths_class, text))
+
+        forbidden_class, forbidden_added, forbidden_removed = _path_set_delta(
+            before.get("forbidden_paths"),
+            after.get("forbidden_paths"),
+            widening_adds=False,
+        )
+        if forbidden_class == EXPANDS:
+            text = (
+                f"Removes forbidden-path guardrail(s) from role '{role_id}': "
+                f"{_join(forbidden_removed)} — it may now write where it "
+                "previously could not (an expansion)."
+            )
+            if forbidden_added:
+                text = (
+                    f"Changes the forbidden-path guardrails of role "
+                    f"'{role_id}': drops {_join(forbidden_removed)} (an "
+                    f"expansion) while adding {_join(forbidden_added)}."
+                )
+            lines.append(DiffLine(f"role:{role_id}", EXPANDS, text))
+        elif forbidden_class == NARROWS:
             lines.append(
                 DiffLine(
                     f"role:{role_id}",
-                    paths_class,
-                    f"Changes role '{role_id}': now "
-                    f"{vocabulary.render('authorized_paths', after.get('authorized_paths') or [])}.",
+                    NARROWS,
+                    f"Adds forbidden-path guardrail(s) to role '{role_id}': "
+                    f"{_join(forbidden_added)}.",
                 )
             )
+        elif forbidden_class == UNKNOWN:
+            lines.append(
+                DiffLine(
+                    f"role:{role_id}",
+                    UNKNOWN,
+                    f"Changes the forbidden-path guardrails of role "
+                    f"'{role_id}': drops {_join(forbidden_removed)} (an "
+                    f"expansion) while adding {_join(forbidden_added)}.",
+                )
+            )
+
+        deleg_class, deleg_added, deleg_removed = _path_set_delta(
+            before.get("delegates_to"),
+            after.get("delegates_to"),
+            widening_adds=True,
+        )
+        if deleg_class == EXPANDS:
+            lines.append(
+                DiffLine(
+                    f"role:{role_id}",
+                    EXPANDS,
+                    f"Adds delegation edge(s) to role '{role_id}': it may now "
+                    f"delegate to {_join(deleg_added)}.",
+                )
+            )
+        elif deleg_class == NARROWS:
+            lines.append(
+                DiffLine(
+                    f"role:{role_id}",
+                    NARROWS,
+                    f"Removes delegation edge(s) from role '{role_id}': "
+                    f"{_join(deleg_removed)}.",
+                )
+            )
+        elif deleg_class == UNKNOWN:
+            lines.append(
+                DiffLine(
+                    f"role:{role_id}",
+                    UNKNOWN,
+                    f"Changes the delegation edges of role '{role_id}': adds "
+                    f"{_join(deleg_added)} (an expansion) while removing "
+                    f"{_join(deleg_removed)}.",
+                )
+            )
+
+        budget_class, budget_text = _classify_budget(
+            role_id, before.get("budget"), after.get("budget")
+        )
+        if budget_class != NEUTRAL:
+            lines.append(DiffLine(f"role:{role_id}", budget_class, budget_text))
 
         if before.get("role_class") != after.get("role_class"):
             to_authority = after.get("role_class") == "authority"

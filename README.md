@@ -264,7 +264,16 @@ vocabulary:
 cognitive-firm-userland needs-me <actor_id>   # the operator's attention queue
 cognitive-firm-userland inbox <actor_id>      # a member-human's bounded work
 cognitive-firm-userland vocabulary            # the shared userland glossary
+cognitive-firm-userland status                # plain-language org health
+cognitive-firm-userland resolve <gate_id> --option <opt>   # resolve a pending gate
+cognitive-firm-userland proposals             # governance changes awaiting review
+cognitive-firm-userland approve <proposal_id> # approve a governance change
+cognitive-firm-userland decline <proposal_id> # decline a governance change
 ```
+
+`proposals` / `approve` / `decline` are the governed-install human-review
+loop: a governance-change proposal awaits an operator decision, and
+`approve` / `decline` each record an attested kernel event.
 
 The same attention queue is also rendered by the Orbit `NeedsMePane`.
 
@@ -352,7 +361,7 @@ make smoke-docker
 | Governed overlay install (authority-diff proposal, `package.install_approved`) | `src/cognitive_firm/distribution/governed_install.py` | `tests/test_governed_install.py` |
 | Remote packages (git-URL fetch, SHA pin, content-hashed lockfile) | `src/cognitive_firm/distribution/remote_registry.py`, `lockfile.py` | `tests/test_remote_registry.py` |
 | Userland — enrollment, attention router, needs-me, work inbox, vocabulary, surface policy | `src/cognitive_firm/userland/` | `tests/test_attention_router.py`, `tests/test_needs_me.py`, `tests/test_work_inbox.py`, `tests/test_vocabulary.py`, `tests/test_enrollment.py`, `tests/test_surface_policy.py` |
-| Userland CLI + kernel routes (`needs-me` / `inbox` / `vocabulary`, `GET /kernel/attention`, `GET /kernel/vocabulary`) | `src/cognitive_firm/userland/cli.py`, `src/cognitive_firm/kernel_service.py` | `tests/test_userland_cli.py`, `tests/test_kernel_service_userland.py` |
+| Userland CLI + kernel routes (`needs-me` / `inbox` / `vocabulary` / `status` / `resolve` / `proposals` / `approve` / `decline`; `GET /kernel/attention`, `GET /kernel/vocabulary`, `GET /kernel/governance-changes`, `POST /kernel/governance-changes/{id}/decision`) | `src/cognitive_firm/userland/cli.py`, `src/cognitive_firm/kernel_service.py` | `tests/test_userland_cli.py`, `tests/test_kernel_service_userland.py` |
 | Primitive extension schemas | `src/cognitive_firm/orchestration/extension_schemas.py` | `tests/test_extension_schemas.py` |
 | EU AI Act deploy gate | `src/cognitive_firm/orchestration/eu_ai_act_deploy_gate.py` | `tests/test_eu_ai_act_deploy_gate.py`; `docs/protocols/eu-ai-act-deploy-gate.md` |
 | Property-based invariants (Hypothesis) | `tests/test_invariants_property_based.py` | 8/8 |

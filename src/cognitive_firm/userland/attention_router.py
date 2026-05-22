@@ -121,9 +121,11 @@ def route_signals(
 
     ``governance_interrupt`` and ``informational`` signals route to the
     authority (the operator); ``work_interrupt`` signals route to the
-    member-human the signal names. A governance signal with no resolvable
-    authority is returned with ``target_actor_id=None`` — unroutable, surfaced
-    rather than silently dropped.
+    member-human the signal names. A ``work_interrupt`` with no named human
+    (unassigned work) also falls back to the authority — unassigned work is
+    exactly what the authority must see to assign it. A governance signal with
+    no resolvable authority is returned with ``target_actor_id=None`` —
+    unroutable, surfaced rather than silently dropped.
     """
     now = now or datetime.now(timezone.utc)
     routed: list[RoutedSignal] = []
@@ -131,9 +133,17 @@ def route_signals(
         signal_class, urgency, action, pace = _CLASSIFICATION.get(
             signal.kind, _UNKNOWN
         )
-        if signal_class == sc.WORK_INTERRUPT:
+        if signal_class == sc.WORK_INTERRUPT and signal.target_actor_id:
             target_role = signal.target_role_id
             target_actor = signal.target_actor_id
+        elif signal_class == sc.WORK_INTERRUPT:
+            # A work signal with no assigned human (e.g. an a2h_waiting
+            # session not yet claimed) must not vanish: signals_for_actor
+            # matches on target_actor_id, so a None target reaches no one.
+            # Fall back to the authority — assigning unclaimed work is
+            # exactly the authority's job.
+            target_role = signal.target_role_id or authority_role_id
+            target_actor = authority_actor_id
         else:  # governance + informational -> the authority (operator)
             target_role = authority_role_id
             target_actor = authority_actor_id

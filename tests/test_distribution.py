@@ -199,3 +199,68 @@ def test_install_is_transactional_on_unbootable_distro(tmp_path):
         install(manifest, pkg, target)
     # the target never existed; a failed install must leave no trace
     assert not target.exists()
+
+
+def _write_broken_distro_that_patches(root: Path) -> Path:
+    """A manifest-valid distro whose org cannot boot, and which (before the
+    boot failure) PATCHES a pre-existing JSON file and OVERWRITES a pre-existing
+    text file. Used to prove a failed install fully restores the target."""
+    pkg = root / "patchpkg"
+    (pkg / "files" / "roles").mkdir(parents=True)
+    (pkg / "files" / "patches").mkdir(parents=True)
+    (pkg / "files" / "overwrites").mkdir(parents=True)
+    (pkg / "package.yaml").write_text(
+        "schema_version: 1\nname: patchpkg\nversion: 0.1.0\nkind: distro\n"
+        "description: a distro that patches files then fails to boot\n"
+        "components:\n"
+        "  - source: patches/config.json\n    dest: config.json\n    op: patch\n"
+        "  - source: overwrites/notes.txt\n    dest: notes.txt\n    op: replace\n"
+        "  - source: roles\n    dest: roles\n"
+    )
+    (pkg / "files" / "roles" / "worker.yaml").write_text(
+        "schema_version: 1\nrole_id: worker\nrole_class: specialist\n"
+        "description: a worker role with no authority above it\n"
+        "authorized_paths: []\nforbidden_paths: []\n"
+        "delegates_to: []\nescalates_to: []\nbudget: {}\nmandate_path: null\n"
+    )
+    (pkg / "files" / "patches" / "config.json").write_text(
+        '{"feature": "new-value"}\n'
+    )
+    (pkg / "files" / "overwrites" / "notes.txt").write_text(
+        "content installed by the package\n"
+    )
+    return pkg
+
+
+def test_failed_install_restores_patched_file_on_uncommitted_target(tmp_path):
+    """G11: a failed install onto an existing-but-uncommitted target must leave
+    a patched file byte-identical to before."""
+    pkg = _write_broken_distro_that_patches(tmp_path)
+    manifest = load_manifest(pkg / "package.yaml")
+    target = tmp_path / "target"
+    target.mkdir()
+    original = '{"feature": "original", "keep": true}\n'
+    (target / "config.json").write_text(original)
+    (target / "notes.txt").write_text("the adopter's own notes\n")
+
+    with pytest.raises(InstallError):
+        install(manifest, pkg, target)
+
+    assert (target / "config.json").read_text() == original
+
+
+def test_failed_install_restores_overwritten_file_on_uncommitted_target(tmp_path):
+    """G11: a failed install onto an existing-but-uncommitted target must leave
+    an overwritten file byte-identical to before."""
+    pkg = _write_broken_distro_that_patches(tmp_path)
+    manifest = load_manifest(pkg / "package.yaml")
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "config.json").write_text('{"feature": "original"}\n')
+    original_notes = "the adopter's own notes\n"
+    (target / "notes.txt").write_text(original_notes)
+
+    with pytest.raises(InstallError):
+        install(manifest, pkg, target)
+
+    assert (target / "notes.txt").read_text() == original_notes

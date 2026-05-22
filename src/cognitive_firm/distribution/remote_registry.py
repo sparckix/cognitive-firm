@@ -34,6 +34,8 @@ from cognitive_firm.distribution.lockfile import (
     Lockfile,
     hash_directory,
     lock_package,
+    read_lockfile,
+    verify_against_lock,
 )
 from cognitive_firm.distribution.manifest import (
     ManifestError,
@@ -139,7 +141,16 @@ def resolve_ref(url: str, ref: str = "HEAD") -> str:
     # ls-remote emits "<sha>\t<refname>" lines; an exact tag may also yield a
     # peeled "<sha>\t<refname>^{}" line — prefer the peeled (dereferenced) SHA
     # so an annotated tag pins the commit it points at, not the tag object.
-    sha_by_ref: dict[str, str] = {}
+    #
+    # A single name can match MULTIPLE refs (e.g. a branch and a tag both
+    # named "x", or refs/heads/x and refs/tags/x). For each ref we record the
+    # commit it ultimately points at: a peeled "^{}" line wins over the bare
+    # entry of the same ref (it dereferences an annotated tag to its commit).
+    # An ambiguous ref — distinct commit SHAs after peeling — is a HARD ERROR
+    # (F-14): silently taking ls-remote's first line resolves non-
+    # deterministically and is a supply-chain hazard.
+    raw_by_ref: dict[str, str] = {}
+    peeled_by_ref: dict[str, str] = {}
     for line in out.splitlines():
         parts = line.split("\t")
         if len(parts) != 2:
@@ -147,13 +158,27 @@ def resolve_ref(url: str, ref: str = "HEAD") -> str:
         sha, name = parts[0].strip(), parts[1].strip()
         if not _is_full_sha(sha):
             continue
-        sha_by_ref[name] = sha
-    for name, sha in sha_by_ref.items():
         if name.endswith("^{}"):
-            return sha
-    if sha_by_ref:
-        return next(iter(sha_by_ref.values()))
-    raise RemoteFetchError(f"could not resolve a SHA for {ref!r} on {url}")
+            peeled_by_ref[name[:-3]] = sha
+        else:
+            raw_by_ref[name] = sha
+    # The effective commit SHA per ref: the peeled value if present.
+    effective: dict[str, str] = dict(raw_by_ref)
+    effective.update(peeled_by_ref)
+    if not effective:
+        raise RemoteFetchError(f"could not resolve a SHA for {ref!r} on {url}")
+    distinct = set(effective.values())
+    if len(distinct) > 1:
+        detail = ", ".join(
+            f"{name} -> {sha}" for name, sha in sorted(effective.items())
+        )
+        raise RemoteFetchError(
+            f"ref {ref!r} is ambiguous on {url}: it resolves to multiple "
+            f"distinct commits ({detail}) — refusing to pick one. "
+            f"Disambiguate with refs/heads/<name> or refs/tags/<name>, "
+            f"or pin the 40-char SHA directly."
+        )
+    return next(iter(distinct))
 
 
 def cache_dir_for(cache_root: Path, sha: str) -> Path:
@@ -191,8 +216,13 @@ def fetch_package(
     cache_root.mkdir(parents=True, exist_ok=True)
     repo_dir = cache_dir_for(cache_root, sha)
 
+    # A non-empty cache dir is NOT proof of a complete, correct clone (F-15):
+    # a process killed mid-clone leaves a populated-but-garbage directory.
+    # Trust a cached entry only if it is a usable git repo whose HEAD is the
+    # expected SHA; otherwise discard it and re-clone.
     populated = repo_dir.is_dir() and any(repo_dir.iterdir())
-    if force or not populated:
+    reusable = populated and not force and _cache_entry_is_valid(repo_dir, sha)
+    if not reusable:
         if repo_dir.exists():
             shutil.rmtree(repo_dir)
         _clone_at_sha(source.url, sha, repo_dir)
@@ -224,6 +254,26 @@ def fetch_package(
         manifest=manifest,
         content_hash=content_hash,
     )
+
+
+def _cache_entry_is_valid(repo_dir: Path, sha: str) -> bool:
+    """True iff ``repo_dir`` is a usable git repo checked out at ``sha``.
+
+    The content-addressed cache is keyed by SHA, so a *complete* cache entry
+    must be a git repo whose ``HEAD`` is exactly that SHA. A partially-written
+    entry (process killed mid-clone) is non-empty but is not a usable repo, or
+    its ``HEAD`` does not match — either way this returns ``False`` and the
+    caller re-clones. Any git failure is treated as an invalid cache entry
+    rather than propagated, since a bad cache entry is always recoverable by
+    re-cloning.
+    """
+    if not (repo_dir / ".git").exists():
+        return False
+    try:
+        head = _git(["rev-parse", "HEAD"], cwd=repo_dir)
+    except RemoteFetchError:
+        return False
+    return head.lower() == sha.lower()
 
 
 def _clone_at_sha(url: str, sha: str, dest: Path) -> None:
@@ -287,6 +337,19 @@ def fetch_and_lock(
     if cache_root is None:
         cache_root = org_root / PKG_CACHE_DIRNAME
     fetched = fetch_package(source, cache_root, force=force)
+
+    # Immutability tripwire (F-17): if this package already has a lock entry,
+    # the recorded content hash is its immutable identity. A re-fetch whose
+    # content no longer matches that hash — a force-pushed/rewritten commit or
+    # a tampered remote — must raise LockMismatch instead of silently
+    # overwriting the lock. A legitimate first fetch has no prior entry and
+    # simply writes the lock below.
+    prior = read_lockfile(org_root).get(fetched.manifest.name)
+    if prior is not None:
+        # Raises LockMismatch if the freshly fetched content diverged from the
+        # recorded lock. An identical re-fetch verifies clean and proceeds.
+        verify_against_lock(org_root, fetched.manifest.name, fetched.package_root)
+
     entry = to_lock_entry(
         fetched,
         signature=signature,

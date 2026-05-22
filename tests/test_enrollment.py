@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from cognitive_firm.orchestration.actor_membership import list_actor_memberships
-from cognitive_firm.userland.enrollment import EnrollmentError, enroll, preview
+from cognitive_firm.userland.enrollment import (
+    EnrollmentError,
+    _actor_id_for,
+    enroll,
+    preview,
+)
 
 
 def _role(org_root: Path, role_id: str, body: str) -> None:
@@ -66,6 +71,19 @@ def test_enroll_registers_identity_and_grants_membership(tmp_path):
     )
     assert len(memberships) == 1
     assert memberships[0].role_id == "analyst"
+
+
+def test_distinct_auth_subjects_get_distinct_actor_ids():
+    # F-18: subjects differing only in a separator char must NOT collide.
+    # `a.b`, `a-b`, `a_b` previously all derived `human_a_b_x_com`.
+    subjects = ["a.b@x.com", "a-b@x.com", "a_b@x.com"]
+    ids = [_actor_id_for(s) for s in subjects]
+    assert len(set(ids)) == len(ids), f"actor ids collided: {ids}"
+    # Still human-readable: each carries a readable slug.
+    for actor_id in ids:
+        assert actor_id.startswith("human_")
+    # Deterministic — same subject always yields the same id.
+    assert _actor_id_for("a.b@x.com") == _actor_id_for("a.b@x.com")
 
 
 def test_enroll_requires_a_decision_right_basis(tmp_path):

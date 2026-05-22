@@ -8,16 +8,25 @@ The installed organization is always its own git repo rooted at the target.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 # A self-contained commit identity, so a fresh install does not depend on the
-# host having global git config set.
+# host having global git config set. ``commit.gpgsign``/``tag.gpgsign`` are
+# forced off (F-4): an adopter's global signing config must not make an
+# installer commit, revert, or tag fail or prompt for a passphrase.
 _COMMIT_IDENTITY = (
     "-c",
     "user.name=cognitive-firm installer",
     "-c",
     "user.email=installer@cognitive-firm.local",
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "tag.gpgsign=false",
 )
 
 
@@ -68,6 +77,13 @@ def has_staged_changes(path: Path) -> bool:
     return result.returncode != 0
 
 
+def is_dirty(path: Path) -> bool:
+    """True if the working tree has uncommitted changes (tracked-file edits,
+    staged changes, or untracked files) — i.e. ``git status --porcelain`` is
+    non-empty."""
+    return bool(_run(["status", "--porcelain"], Path(path)))
+
+
 def stage_all(path: Path) -> None:
     _run(["add", "-A"], Path(path))
 
@@ -82,8 +98,27 @@ def commit(path: Path, message: str) -> str:
 
 
 def tag(path: Path, name: str) -> None:
-    """Create or move a tag to the current HEAD."""
-    _run(["tag", "-f", name], Path(path))
+    """Create or move a tag to the current HEAD.
+
+    If ``name`` already exists it is moved (``-f``); that happens on a
+    re-install or upgrade. The move is logged (F-5) so the operator can see the
+    prior install boundary was superseded rather than silently lost.
+    """
+    path = Path(path)
+    existing = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{name}"],
+        cwd=str(path),
+        capture_output=True,
+        text=True,
+    )
+    if existing.returncode == 0 and existing.stdout.strip():
+        logger.warning(
+            "git tag '%s' already exists (was %s); moving it to the new "
+            "install boundary",
+            name,
+            existing.stdout.strip(),
+        )
+    _run(["-c", "tag.gpgsign=false", "tag", "-f", name], path)
 
 
 def reset_hard(path: Path, ref: str) -> None:

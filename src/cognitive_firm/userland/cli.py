@@ -12,6 +12,9 @@ Verbs:
 - ``vocabulary``           — the shared L4 glossary every surface speaks.
 - ``status``               — a plain-language read of overall org health.
 - ``resolve <gate_id>``    — act on a pending gate the operator saw in ``needs-me``.
+- ``proposals``            — governance changes awaiting a human decision.
+- ``approve <id>``         — approve a governance change (an attested event).
+- ``decline <id>``         — decline a governance change (an attested event).
 """
 
 from __future__ import annotations
@@ -171,6 +174,74 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_proposals(_args: argparse.Namespace) -> int:
+    """List governance changes awaiting a human decision."""
+    response = dispatch_kernel_request(
+        "GET", "/kernel/governance-changes?status=review_ready"
+    )
+    if response.status != 200:
+        error = response.payload.get("error", "unknown error")
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
+    proposals = response.payload.get("proposals", [])
+    if not proposals:
+        print("No governance changes are awaiting review.")
+        return 0
+    print(f"{len(proposals)} governance change(s) awaiting review:")
+    for proposal in proposals:
+        print()
+        print(f"  [{proposal['change_kind']}] {proposal['title']}")
+        print(f"    id:       {proposal['proposal_id']}")
+        print(f"    proposed: {proposal['proposed_by']}")
+        if proposal.get("expected_behavior_change"):
+            print(f"    effect:   {proposal['expected_behavior_change']}")
+        if proposal.get("risk_summary"):
+            print(f"    risk:     {proposal['risk_summary']}")
+        if proposal.get("rollback_plan"):
+            print(f"    rollback: {proposal['rollback_plan']}")
+        print(f"    decide:   cognitive-firm-userland approve {proposal['proposal_id']}")
+    return 0
+
+
+def _cmd_decide(args: argparse.Namespace, decision: str) -> int:
+    """Record an attested approve/decline decision on a governance change."""
+    body: dict[str, str] = {"decision": decision}
+    if args.reason:
+        body["reason"] = args.reason
+    if getattr(args, "actor", None):
+        body["decided_by"] = args.actor
+    try:
+        response = dispatch_kernel_request(
+            "POST",
+            f"/kernel/governance-changes/{args.proposal_id}/decision",
+            body,
+        )
+    except OSError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    if response.status != 200:
+        error = response.payload.get("error", "unknown error")
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
+    result = response.payload.get("result", {})
+    print(
+        f"governance change {result.get('proposal_id')} {decision}d "
+        f"by {result.get('decided_by')}."
+    )
+    event_id = result.get("event_id")
+    if event_id:
+        print(f"  attested event: {event_id}")
+    return 0
+
+
+def _cmd_approve(args: argparse.Namespace) -> int:
+    return _cmd_decide(args, "approve")
+
+
+def _cmd_decline(args: argparse.Namespace) -> int:
+    return _cmd_decide(args, "decline")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="cognitive-firm-userland",
@@ -221,6 +292,32 @@ def main(argv: list[str] | None = None) -> int:
         help="Why this option was chosen (optional).",
     )
     p_resolve.set_defaults(func=_cmd_resolve)
+
+    p_proposals = sub.add_parser(
+        "proposals",
+        help="List governance changes awaiting a human decision.",
+    )
+    p_proposals.set_defaults(func=_cmd_proposals)
+
+    for verb, func, helptext in (
+        ("approve", _cmd_approve, "Approve a governance change."),
+        ("decline", _cmd_decline, "Decline a governance change."),
+    ):
+        p_decide = sub.add_parser(verb, help=helptext)
+        p_decide.add_argument(
+            "proposal_id", help="The governance change to decide."
+        )
+        p_decide.add_argument(
+            "--reason",
+            default=None,
+            help="Why this decision was made (optional).",
+        )
+        p_decide.add_argument(
+            "--actor",
+            default=None,
+            help="The deciding participant (default: the kernel actor).",
+        )
+        p_decide.set_defaults(func=func)
 
     args = parser.parse_args(argv)
     return int(args.func(args))

@@ -171,14 +171,23 @@ def _vocabulary_payload() -> dict[str, Any]:
     }
 
 
+def _governance_changes_log(config: KernelServiceConfig) -> Path:
+    """The firm's governance-change proposal log, anchored to its org dir."""
+    return config.org_dir / "governance_changes" / "governance_changes.jsonl"
+
+
 def _attention_feed(config: KernelServiceConfig) -> list[dict[str, Any]]:
     """Gather the firm's pending signals and route them to participants (L1).
 
-    Pending gates plus A2H work requests are normalized, then the userland
-    attention router classifies each and resolves its target participant.
+    Pending gates, A2H work requests, and governance-change proposals awaiting
+    a human decision are normalized, then the userland attention router
+    classifies each and resolves its target participant.
     """
     from cognitive_firm.orchestration.actor_membership import (
         list_actor_memberships,
+    )
+    from cognitive_firm.orchestration.governance_changes import (
+        list_governance_changes,
     )
     from cognitive_firm.orchestration.human_work import (
         list_a2h_waiting_on_human_sessions,
@@ -191,6 +200,21 @@ def _attention_feed(config: KernelServiceConfig) -> list[dict[str, Any]]:
     )
 
     signals = list(pending_gate_signals(config.gates_dir))
+    for proposal in list_governance_changes(
+        status="review_ready", log_path=_governance_changes_log(config)
+    ):
+        # Governance signals leave the target empty — the router fills it with
+        # the authority. This closes the governed-install human loop: an
+        # overlay's authority-diff proposal surfaces in the operator's queue.
+        signals.append(
+            AttentionSignal(
+                signal_id=proposal.proposal_id,
+                kind="governance_change",
+                headline=f"Governance change awaiting review: {proposal.title}",
+                source_ref=proposal.proposal_id,
+                created_at_utc=proposal.created_at_utc,
+            )
+        )
     for session in list_a2h_waiting_on_human_sessions(
         log_path=config.human_work_log
     ):
@@ -215,7 +239,11 @@ def _attention_feed(config: KernelServiceConfig) -> list[dict[str, Any]]:
             log_path=config.actor_membership_log,
         )
         if memberships:
-            authority_actor = memberships[0].actor_id
+            # The authority role may have more than one active holder; pick
+            # deterministically (lowest actor_id) so a given firm state always
+            # routes governance interrupts to the same holder, not to whichever
+            # membership the log happened to return first.
+            authority_actor = min(m.actor_id for m in memberships)
 
     routed = route_signals(
         signals,
@@ -244,7 +272,11 @@ def dispatch_kernel_request(
     try:
         subject = _authenticate(headers or {}, config=config)
         actor = _actor_context(body, config=config, subject=subject)
-        if method == "POST":
+        # Surface-write gating is keyed on whether the request mutates, not on
+        # the literal verb: every non-GET request is a mutation here, so a
+        # PUT/PATCH/DELETE added later is gated by construction, not by being
+        # remembered. A denied mutation is an authorization failure -> 403.
+        if method != "GET":
             from cognitive_firm.userland.surface_policy import (
                 surface_write_allowed,
             )
@@ -255,7 +287,7 @@ def dispatch_kernel_request(
                 modes=config.surface_write_modes,
             )
             if not _surface_decision.allowed:
-                return _error(409, _surface_decision.reason)
+                return _error(403, _surface_decision.reason)
         if method == "GET" and route == "/health":
             return _ok({"ok": True, "service": "cognitive-firm-kernel"})
 
@@ -276,6 +308,20 @@ def dispatch_kernel_request(
 
         if method == "GET" and route == "/kernel/vocabulary":
             return _ok(_vocabulary_payload())
+
+        if method == "GET" and route == "/kernel/governance-changes":
+            from cognitive_firm.orchestration.governance_changes import (
+                list_governance_changes,
+            )
+
+            status_filter = query.get("status", [None])[0]
+            proposals = list_governance_changes(
+                status=status_filter,
+                log_path=_governance_changes_log(config),
+            )
+            return _ok(
+                {"proposals": [p.as_dict() for p in proposals]}
+            )
 
         if (
             method == "GET"
@@ -416,6 +462,69 @@ def dispatch_kernel_request(
                 actor=str(body.get("resolved_by") or actor.actor_id),
             )
             return _ok({"result": result.as_dict()})
+
+        if (
+            method == "POST"
+            and len(parts) == 4
+            and parts[:2] == ["kernel", "governance-changes"]
+            and parts[3] == "decision"
+        ):
+            from cognitive_firm.orchestration.governance_changes import (
+                list_governance_changes,
+            )
+            from cognitive_firm.orchestration.kernel_events import (
+                record_kernel_event,
+            )
+
+            proposal_id = parts[2]
+            decision = _required_str(body, "decision")
+            if decision not in ("approve", "decline"):
+                return _error(
+                    400, "decision must be 'approve' or 'decline'"
+                )
+            proposals = {
+                p.proposal_id: p
+                for p in list_governance_changes(
+                    log_path=_governance_changes_log(config)
+                )
+            }
+            proposal = proposals.get(proposal_id)
+            if proposal is None:
+                return _error(
+                    404, f"no governance change {proposal_id!r}"
+                )
+            if proposal.status != "review_ready":
+                return _error(
+                    409,
+                    f"governance change {proposal_id!r} is not awaiting "
+                    f"review (status: {proposal.status})",
+                )
+            verb = (
+                "governance_change.approved"
+                if decision == "approve"
+                else "governance_change.declined"
+            )
+            event = record_kernel_event(
+                actor=str(body.get("decided_by") or actor.actor_id),
+                verb=verb,
+                object_ref=f"governance_change:{proposal_id}",
+                payload={
+                    "title": proposal.title,
+                    "change_kind": proposal.change_kind,
+                    "reason": str(body.get("reason") or ""),
+                },
+                log_path=config.transition_log,
+            )
+            return _ok(
+                {
+                    "result": {
+                        "proposal_id": proposal_id,
+                        "decision": decision,
+                        "decided_by": event.actor,
+                        "event_id": event.event_id,
+                    }
+                }
+            )
 
         if method == "POST" and route == "/kernel/directives":
             target_role = _required_str(body, "target_role")

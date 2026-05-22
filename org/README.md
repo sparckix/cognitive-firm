@@ -291,14 +291,14 @@ architecture. Key paper claims grounded here:
 
 **Sub-folders**
 
-- [`mandates/`](mandates/) — 2 file(s)
-- [`patterns/`](patterns/) — 3 file(s)
-- [`preferences/`](preferences/) — 0 file(s)
-- [`roles/`](roles/) — 6 file(s)
+- [`mandates/`](mandates/) - 3 file(s)
+- [`patterns/`](patterns/) - 3 file(s)
+- [`preferences/`](preferences/) - 2 file(s)
+- [`roles/`](roles/) - 7 file(s)
 
 **Documents**
 
 - [bootstrap_manifest.yaml](bootstrap_manifest.yaml)
 
-<sub>4 sub-folder(s), 1 document(s). Auto-generated; re-run `gen_folder_index.py` after adding files.</sub>
-<!-- AUTO-INDEX:END -->
+<sub>4 sub-folder(s), 1 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
+

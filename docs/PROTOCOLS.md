@@ -542,7 +542,7 @@ kernel's open-typed baseline is preserved. The hook is wired into
 `enqueue_work_item` today; the same one-line idiom is how future primitives opt
 in.
 
-Status: first-party interface (O3-P6), `WorkItem` enqueue call site, and tests
+Status: first-party interface, `WorkItem` enqueue call site, and tests
 shipped.
 
 ## Organizational Learning

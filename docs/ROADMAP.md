@@ -47,24 +47,25 @@ tenant-specific research policy, scoring systems, and optimizer rules.
   governance-graph `boot_check` verification. Installs commit and tag the
   target (`install/<pkg>/<version>`); `rollback` undoes a bad install (clean
   git reset, or a compensating git revert if the org has run). The
-  `cognitive-firm-distro` CLI ships `list / show / install / verify / upgrade
-  / rollback / uninstall / lint`, and the bundled `starter-firm` distro ships a
+  `cognitive-firm-distro` CLI ships `list / show / install / install-overlay /
+  verify / upgrade / rollback / uninstall / lint`, and the bundled
+  `starter-firm` distro ships a
   day-one governance loop in the wheel.
-  - Overlay composition (O3-P2): a component carries an `op` —
+  - Overlay composition: a component carries an `op` —
     `add` / `replace` / `patch` (RFC 7386 JSON Merge Patch).
-  - Governed overlay install (O3-P1): installing an overlay onto a *running*
+  - Governed overlay install: installing an overlay onto a *running*
     org files a governance-change proposal whose `expected_behavior_change` is
     a rendered authority-diff; an overlay that expands a role's write scope (or
     changes authority uninterpretably) fails a required invariant and is
     blocked — a package may not widen authority. An approved install attests a
     `package.install_approved` event.
-  - Remote packages (O3-P3): `install <git-url>` fetches a package SHA-pinned,
+  - Remote packages: `install <git-url>` fetches a package SHA-pinned,
     recording a content-hashed `.cognitive-firm/packages.lock` that catches a
     moved tag or a force-push.
-  - Distro inheritance (O3-P5): a manifest may `extends` a base distro;
+  - Distro inheritance: a manifest may `extends` a base distro;
     installing it installs the base first, then composes the extender (one
     level).
-  - Authoring loop (O3-P4): `lint`, `install --dry-run`, and a package
+  - Authoring loop: `lint`, `install --dry-run`, and a package
     template at `docs/templates/package/`.
 - Userland layer (`src/cognitive_firm/userland/`): the operator- and
   member-human-facing layer over the kernel, with five layers — L0 enrollment,
@@ -72,13 +73,17 @@ tenant-specific research policy, scoring systems, and optimizer rules.
   inbox), L3 inspection/surface-policy, L4 vocabulary spine. Exposed by two
   kernel-service routes: `GET /kernel/attention/{actor_id}` and
   `GET /kernel/vocabulary`. The `cognitive-firm-userland` CLI ships `needs-me`,
-  `inbox`, and `vocabulary`. An Orbit `NeedsMePane` surfaces the operator's
+  `inbox`, `vocabulary`, `status`, `resolve`, and the governed-install
+  human-review verbs `proposals` / `approve` / `decline` (over the
+  `GET /kernel/governance-changes` and
+  `POST /kernel/governance-changes/{id}/decision` routes). An Orbit
+  `NeedsMePane` surfaces the operator's
   attention queue. The userland logic is built and tested; the operator CLI and
   the one `NeedsMePane` Orbit pane exist — not every Orbit pane over the
   userland is built yet.
 - L3 surface-policy guard: the kernel service refuses a mutation from a
   `projection_only` surface (`KernelServiceConfig.surface_write_modes`).
-- Extension schemas (O3-P6): packages register JSON Schemas to validate custom
+- Extension schemas: packages register JSON Schemas to validate custom
   primitive payload types, wired into `enqueue_work_item`. Open by default — a
   `kind` with no registered schema is unconstrained.
 
@@ -231,10 +236,11 @@ Shipped:
   queue, member-human work inbox), L3 inspection/surface-policy, L4 vocabulary
   spine — exposed by the `GET /kernel/attention/{actor_id}` and
   `GET /kernel/vocabulary` kernel-service routes. The `cognitive-firm-userland`
-  CLI (`needs-me` / `inbox` / `vocabulary`) and an Orbit `NeedsMePane` are
+  CLI (`needs-me` / `inbox` / `vocabulary` / `status` / `resolve` /
+  `proposals` / `approve` / `decline`) and an Orbit `NeedsMePane` are
   shipped over the built-and-tested userland logic. Not every Orbit pane over
   the userland is built yet.
-- Extension schemas (O3-P6) and the shareable community-package roadmap
+- Extension schemas and the shareable community-package roadmap
   (`docs/community-packages.md`).
 
 Planned, in sequence:

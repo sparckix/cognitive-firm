@@ -64,6 +64,33 @@ class KernelCompat:
 
 
 @dataclass(frozen=True)
+class SigningInfo:
+    """An optional package-provenance block (O3-P1 constraint 4).
+
+    ``publisher`` names the key in the operator's local trust store; ``signature``
+    is the detached Ed25519 signature (hex) over the package's canonical content
+    hash — see ``distribution/signing.py``. A manifest with no ``signing`` block
+    is an *unsigned* package: still installable, recorded as
+    ``signature_verified: false``.
+    """
+
+    publisher: str
+    signature: str
+
+    @classmethod
+    def from_raw(cls, raw: dict[str, Any]) -> "SigningInfo":
+        if not isinstance(raw, dict):
+            raise ManifestError("signing block must be a mapping")
+        publisher = str(raw.get("publisher", "")).strip()
+        signature = str(raw.get("signature", "")).strip()
+        if not publisher:
+            raise ManifestError("signing block is missing 'publisher'")
+        if not signature:
+            raise ManifestError("signing block is missing 'signature'")
+        return cls(publisher=publisher, signature=signature)
+
+
+@dataclass(frozen=True)
 class Component:
     """One installable unit: a directory or file under the package's files/.
 
@@ -101,6 +128,7 @@ class PackageManifest:
     provides: tuple[str, ...] = ()
     post_install_message: str = ""
     extends: str | None = None  # O3-P5: a base distro this package extends
+    signing: SigningInfo | None = None  # O3-P1(4): optional package provenance
     schema_version: int = SCHEMA_VERSION
 
     @classmethod
@@ -122,6 +150,11 @@ class PackageManifest:
             extends=(
                 str(raw["extends"]).strip() or None
                 if raw.get("extends")
+                else None
+            ),
+            signing=(
+                SigningInfo.from_raw(raw["signing"])
+                if raw.get("signing")
                 else None
             ),
             schema_version=int(raw.get("schema_version", SCHEMA_VERSION)),

@@ -35,6 +35,7 @@ dependencies = [
     "click>=8.1",
     "rich>=13.7",
     "jsonschema>=4.21",
+    "cryptography>=42.0",
 ]
 
 [project.optional-dependencies]
