@@ -51,6 +51,10 @@ COPY --from=orbit-build /app/orbit/dist ./orbit/dist
 
 RUN mkdir -p /app/cognitive_firm_workspace/gates/pending /app/cognitive_firm_workspace/gates/resolved
 
-EXPOSE 3001
+EXPOSE 8765 3001
 
-CMD ["python", "-m", "cognitive_firm.orchestration.org_surface"]
+# Default: serve the kernel HTTP boundary. The console scripts
+# (cognitive-firm-distro, cognitive-firm-userland, cognitive-firm-kernel-service)
+# are installed on PATH by `pip install -e .`, and the bundled distro/ tree is
+# present — so `docker compose exec kernel cognitive-firm-distro list` works.
+CMD ["cognitive-firm-kernel-service", "--host", "0.0.0.0", "--port", "8765"]

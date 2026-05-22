@@ -1,4 +1,12 @@
+# `docker compose up` brings up a serviceable kernel + the Orbit web surface.
+# Role daemons (which take governed agent ticks and spend LLM budget) are
+# opt-in: `docker compose --profile agents up`.
+#
+# The CLIs are on PATH in the image — e.g.
+#   docker compose exec kernel cognitive-firm-distro list
+#   docker compose exec kernel cognitive-firm-userland status
 services:
+  # The kernel HTTP boundary — what the userland CLI and Orbit read/write.
   kernel:
     build:
       context: .
@@ -17,8 +25,11 @@ services:
       - ./org:/app/org
       - ./cognitive_firm_workspace:/app/cognitive_firm_workspace
       - ./tenants:/app/tenants
-    command: ["python", "scripts/agent_daemon.py", "--role", "research_director", "--tick-once", "--dry-run"]
+    ports:
+      - "8765:8765"
+    command: ["cognitive-firm-kernel-service", "--host", "0.0.0.0", "--port", "8765"]
 
+  # The Orbit projection daemon — proxies reads/writes to the kernel service.
   orbit-sync:
     build:
       context: .
@@ -32,11 +43,14 @@ services:
       ORBIT_CORS_ORIGIN: ${ORBIT_CORS_ORIGIN:-http://localhost:3000}
       ORBIT_SURFACE_MODE: ${ORBIT_SURFACE_MODE:-projection_only}
       ORBIT_ALLOW_DIRECT_CONFIG_WRITES: ${ORBIT_ALLOW_DIRECT_CONFIG_WRITES:-0}
+      COGNITIVE_FIRM_KERNEL_SERVICE_URL: http://kernel:8765
       ORG_ROOT: /app/org
       COGNITIVE_FIRM_WORKSPACE: /app/cognitive_firm_workspace
       TRANSITIONS_LOG: /app/cognitive_firm_workspace/transitions.jsonl
       GATES_DIR: /app/cognitive_firm_workspace/gates/pending
       GATES_RESOLVED_DIR: /app/cognitive_firm_workspace/gates/resolved
+    depends_on:
+      - kernel
     ports:
       - "3001:3001"
     volumes:
@@ -45,6 +59,7 @@ services:
       - ./tenants:/app/tenants
     command: ["node", "orbit/node_modules/tsx/dist/cli.mjs", "orbit/src/server/git-sync.ts"]
 
+  # The Orbit web UI (static build served by nginx).
   orbit-web:
     build:
       context: .
@@ -54,3 +69,25 @@ services:
       - orbit-sync
     ports:
       - "3000:80"
+
+  # Opt-in role daemon (profile: agents). The default tick is a dry-run — it
+  # spends no LLM budget; drop `--dry-run` for real governed ticks.
+  daemon:
+    profiles: ["agents"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ORG_ROOT: /app/org
+      COGNITIVE_FIRM_WORKSPACE: /app/cognitive_firm_workspace
+      TRANSITIONS_LOG: /app/cognitive_firm_workspace/transitions.jsonl
+      GATES_DIR: /app/cognitive_firm_workspace/gates/pending
+      GATES_RESOLVED_DIR: /app/cognitive_firm_workspace/gates/resolved
+    volumes:
+      - ./org:/app/org
+      - ./cognitive_firm_workspace:/app/cognitive_firm_workspace
+      - ./tenants:/app/tenants
+    command: ["python", "scripts/agent_daemon.py", "--role", "research_director", "--tick-once", "--dry-run"]
