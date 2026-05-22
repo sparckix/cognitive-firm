@@ -397,6 +397,4 @@ surface before material work.
 
 **Contributing**: see `CONTRIBUTING.md`.
 
-**Provenance**: Extracted from a production research apparatus on 2026-05-07, after several weeks of single-principal use on a VPS. Theoretical grounding (Chandlerian M-form, Holmström informativeness, Tirole incomplete contracts, Nelson & Winter routines) is developed in a companion paper.
-
-**Not a Claude Code product.** cognitive-firm is independent of Anthropic; Claude is one of several agent runtimes the kernel can dispatch.
+**Provenance**: Extracted from a production research apparatus on 2026-05-07. Theoretical grounding (Chandlerian M-form, Holmström informativeness, Tirole incomplete contracts, Nelson & Winter routines) is developed in a companion paper: https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6543019
