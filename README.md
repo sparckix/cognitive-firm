@@ -281,6 +281,14 @@ recorded in a content-hashed `packages.lock`), and installing an overlay onto a
 widen a role's authority. See
 [`docs/protocols/distribution.md`](docs/protocols/distribution.md).
 
+**Building and publishing your own package** — distro or overlay — is covered
+in [`docs/community-packages.md`](docs/community-packages.md): the publication
+rule (authorship is open, adoption is governed), the step-by-step authoring
+loop (`lint` → `--dry-run` → `boot_check` → publish as a git repo, no central
+registry), and a roadmap of suggested packages the ecosystem could use. Start
+from the template at
+[`docs/templates/package/`](docs/templates/package/README.md).
+
 The userland sits above the kernel as the operator-facing layer. The
 `cognitive-firm-userland` CLI shows what needs a human and the shared
 vocabulary:
