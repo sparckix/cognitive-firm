@@ -134,6 +134,13 @@ the shortest path from zero to a running governed firm (`pip install` →
 `cognitive-firm-distro install` → point the tools at it → run it). The table
 below is the full reading order.
 
+> **Reading the docs in Obsidian.** This repository is an [Obsidian](https://obsidian.md)
+> vault — open the repo folder as a vault and `README.md` plus everything under
+> `docs/` is navigable with working links, backlinks, and graph view. The
+> committed `.obsidian/` directory carries the vault config (markdown links,
+> relative paths); per-user UI state is gitignored. No setup needed beyond
+> opening the folder.
+
 Read in this order if you are new:
 
 | # | Path | What you'll learn |

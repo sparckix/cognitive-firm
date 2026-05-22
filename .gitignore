@@ -53,3 +53,8 @@ org/key_results/
 org/tasks/active/
 org/tasks/done/
 org/directives/
+
+# Obsidian — per-user UI state (the vault config itself is tracked)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
