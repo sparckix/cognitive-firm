@@ -55,6 +55,23 @@ If you only want the kernel read model:
 python -m cognitive_firm.orchestration.org_surface
 ```
 
+If you want the shortest inspection path for a governed native workflow, the
+failure fixtures, and an external-runtime projection:
+
+```bash
+make adoption-demo
+```
+
+The demo first runs a fictional Kettle & Compass product-claim workflow using
+only native kernel primitives, then runs governance failure fixtures, then
+projects a LangGraph-style lifecycle into the kernel. All paths use
+deterministic stubs and make no external calls. For an existing run, export a
+compact review view with:
+
+```bash
+cognitive-firm-governed-run-bundle <run_id> --summary
+```
+
 ## The Fast Path: Install a Runnable Organization
 
 The smoke above verifies the kernel. To see a *running governed organization*
@@ -99,7 +116,7 @@ Read:
 
 The transition log is the local event/outbox adapter. New durable run or
 external-action semantics should append canonical transition events and derive
-projections from replay, not create a competing source of truth.
+projections from replay, not create a second source of truth.
 
 If you want to inspect the app-service boundary without starting the daemon:
 

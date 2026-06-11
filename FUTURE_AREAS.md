@@ -11,8 +11,8 @@ organizational state.
 
 ## Current Implementation Thesis
 
-`cognitive-firm` is a governance kernel, not an agent framework. Its strongest
-implementation claim is:
+`cognitive-firm` is a governance kernel with a first-party governed work
+runtime. Its strongest implementation claim is:
 
 > Probabilistic agents can propose, execute, and summarize work, but durable
 > organizational authority should pass through typed state, deterministic
@@ -22,6 +22,7 @@ The kernel currently supports this through:
 
 - role offices and mandates;
 - H2A and A2A protocol surfaces;
+- first-party work discovery, execution routing, and CLI/tool dispatch;
 - project charters;
 - evidence gaps;
 - human work sessions;
@@ -149,20 +150,20 @@ docs, tests, or kernel state.
 The kernel should support local review discipline without presenting every
 review method as a shipped primitive.
 
-### 9. Multi-Principal T2 Boundary
+### 9. Multi-Authority T2 Boundary
 
-T1 is single-principal. T2 should not be a vague enterprise mode; it should
+T1 is single-authority. T2 should not be a vague enterprise mode; it should
 activate only when the repo has:
 
 - signed policy changes;
 - approval quorums;
-- role-bound principal authority;
+- role-bound authority;
 - conflict resolution;
 - identity provider integration;
 - audit-preserving database backend;
 - cross-device and cross-operator threat model.
 
-Until then, multi-principal support should remain a documented boundary, not an
+Until then, multi-authority support should remain a documented boundary, not an
 implicit promise.
 
 ### 10. Kernel/App/Tenant Boundary Tests

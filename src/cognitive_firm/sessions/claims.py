@@ -1,6 +1,6 @@
 """Filesystem-backed task claims.
 
-Claims are a local membrane for trusted single-principal deployments. They
+Claims are a local membrane for trusted single-authority deployments. They
 prevent two daemon sessions from claiming the same task at the same time.
 """
 

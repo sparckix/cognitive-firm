@@ -1,0 +1,40 @@
+# langgraph-runtime-adapter overlay - schema_version 1
+#
+# Installs governance-side policy and conformance declarations for a LangGraph
+# runtime adapter. It does not install LangGraph or adapter executable code.
+
+schema_version: 1
+name: langgraph-runtime-adapter
+version: 0.1.0
+kind: overlay
+description: >
+  Installs adapter governance declarations for projecting LangGraph lifecycle
+  callbacks into cognitive-firm runtime events, human-work sessions, and
+  governed-run bundles without moving graph execution into the kernel.
+
+kernel:
+  min_version: "0.1.0"
+  max_version: null
+
+components:
+  - source: adapters
+    dest: adapters
+    op: add
+  - source: adapter_conformance
+    dest: adapter_conformance
+    op: add
+
+provides:
+  - runtime-adapter-policy
+  - langgraph-runtime-projection
+  - adapter-manifest
+  - runtime-event-conformance
+
+post_install_message: |
+  Installed the LangGraph runtime-adapter policy overlay.
+  This installs governance-side declarations only; it does not install or run LangGraph.
+  Next:
+    1. Install a LangGraph adapter module separately in the runtime environment.
+    2. Configure it to emit RuntimeEvent rows for started/checkpointed/interrupted/state_changed.
+    3. Run the conformance checks listed in adapter_conformance/langgraph-runtime-adapter.json.
+    4. Export a governed-run bundle for a fixture run and verify the bundle before production use.

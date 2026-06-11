@@ -147,7 +147,12 @@ from cognitive_firm.orchestration.kernel_events import (  # noqa: E402
 def _passing_checks() -> list[InvariantCheck]:
     """Invariant checks that carry a proposal to ``review_ready``."""
     return [
-        InvariantCheck(invariant=inv, status="pass", rationale="ok")
+        InvariantCheck(
+            invariant=inv,
+            status="pass",
+            rationale="ok",
+            evidence_refs=[f"test://{inv}"],
+        )
         for inv in (
             "principal_independence",
             "deterministic_enforcement_floor",
@@ -156,6 +161,15 @@ def _passing_checks() -> list[InvariantCheck]:
             "tenant_boundary_preserved",
         )
     ]
+
+
+def _review_ready_evidence() -> dict:
+    return {
+        "source_refs": ["authority_diff:test"],
+        "expected_behavior_change": "analyst may write to drafts/",
+        "risk_summary": "bounded test proposal; no production authority change",
+        "rollback_plan": "restore the previous role file",
+    }
 
 
 def _gov_config(tmp_path) -> KernelServiceConfig:
@@ -189,7 +203,7 @@ def test_proposals_lists_governance_changes_awaiting_review(
         proposed_by="operator",
         target_ref="roles/analyst.yaml",
         rationale="overlay install",
-        expected_behavior_change="analyst may write to drafts/",
+        **_review_ready_evidence(),
         invariant_checks=_passing_checks(),
         log_path=_governance_log(config),
     )
@@ -221,6 +235,7 @@ def test_approve_records_an_attested_event(tmp_path, monkeypatch, capsys):
         proposed_by="operator",
         target_ref="roles/analyst.yaml",
         rationale="overlay install",
+        **_review_ready_evidence(),
         invariant_checks=_passing_checks(),
         log_path=_governance_log(config),
     )
@@ -247,6 +262,7 @@ def test_decline_records_an_attested_event(tmp_path, monkeypatch, capsys):
         proposed_by="operator",
         target_ref="roles/analyst.yaml",
         rationale="overlay install",
+        **_review_ready_evidence(),
         invariant_checks=_passing_checks(),
         log_path=_governance_log(config),
     )
@@ -273,6 +289,7 @@ def test_an_approved_proposal_stops_appearing_in_proposals(
         proposed_by="operator",
         target_ref="roles/analyst.yaml",
         rationale="overlay install",
+        **_review_ready_evidence(),
         invariant_checks=_passing_checks(),
         log_path=_governance_log(config),
     )
@@ -297,6 +314,7 @@ def test_a_proposal_cannot_be_decided_twice(tmp_path, monkeypatch, capsys):
         proposed_by="operator",
         target_ref="roles/analyst.yaml",
         rationale="overlay install",
+        **_review_ready_evidence(),
         invariant_checks=_passing_checks(),
         log_path=_governance_log(config),
     )

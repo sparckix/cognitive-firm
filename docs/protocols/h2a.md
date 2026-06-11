@@ -4,11 +4,12 @@
 **Modules:** `cognitive_firm.notifications.channels`, `cognitive_firm.notifications.telegram`, `cognitive-firm/orbit/src/components/`, `cognitive_firm.orchestration.chat_handler`, `cognitive_firm.orchestration.human_work`
 **Tests:** `tests/test_notification_channels.py`, `tests/test_telegram_callback_flow.py`, `tests/test_human_work.py`; Orbit components have integration tests in their own subtree.
 
-H2A defines how the principal (the human) interacts with role offices. cognitive-firm intentionally provides three surfaces with distinct attention semantics rather than one universal interface, because principal attention is the load-bearing constraint and different signal classes need different cadences.
+H2A defines how the principal (the human) interacts with role offices. cognitive-firm intentionally provides three surfaces with distinct attention semantics rather than one universal interface, because attention is limited and different signal classes need different cadences.
 
 H2A covers three different interaction types:
 
-- **Decision gates** — the human grants or denies authority.
+- **Decision gates** — a human actor grants or denies authority when the
+  deployment routes that gate to H2A.
 - **Correction/editing** — the human repairs agent output or state.
 - **Joint work** — the human performs bounded work alongside role offices and
   produces or changes an artifact.
@@ -31,7 +32,8 @@ Following Stewart Brand's pace-layering principle, the H2A protocol assigns each
 | **Working** | hourly | Orbit objective-tree + chat pane | Task-level direction, gate approvals, charter critiques, debate seam shepherding |
 | **Fast** | seconds | Notification channel + Orbit damage-feed | Damage signals, gate-pending alerts, STOP authority, agent-CLI utilization caps |
 
-This layering is **not a feature** — it is the structural constraint that prevents principal attention from being consumed by fast-layer noise to the exclusion of slow-layer governance.
+This layering keeps fast alerts from consuming the attention needed for slower
+governance decisions.
 
 ## Surface 1: Notification Channel
 
@@ -266,7 +268,7 @@ Is the principal's response time-critical (< 1 minute matters)?
 
 ## Threat-model coverage
 
-| Primitive | T1 (single-principal) | T2 (regulated enterprise) |
+| Primitive | T1 (single-authority) | T2 (regulated enterprise) |
 |-----------|----------------------|---------------------------|
 | Notification channel facade | shipped | partial — provider identity/audit policy remains deployment-owned |
 | Telegram outbound provider | shipped | partial — requires tenant authentication and retention policy |
@@ -287,4 +289,4 @@ Is the principal's response time-critical (< 1 minute matters)?
 - A unified inbox merging Telegram + Orbit messages. Principal experience showed that merging them hurts attention layering.
 - A "voice mode" surface. No production demand.
 - An asynchronous email surface. Slack / Teams adapters are queued under MCP (treating those as enterprise systems the kernel reaches via MCP, not as an H2A surface).
-- A "follow-up reminder" primitive that re-pings the principal if a notification goes unanswered. The principal's attention is sovereign; nagging is excluded by design.
+- A "follow-up reminder" primitive that re-pings the principal if a notification goes unanswered. The current policy avoids automatic nagging; deployments can add reminders if they want that behavior.

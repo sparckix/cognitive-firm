@@ -3,7 +3,7 @@
 WHAT THIS PRIMITIVE DOES, IN PLAIN ENGLISH:
 
 When agent A delegates work to agent B, and B's work fails partway through,
-A's earlier writes may have already happened. In single-principal trusted-
+A's earlier writes may have already happened. In single-authority trusted-
 hardware (T1), git revert is a fine manual recovery. In regulated enterprise
 (T2), it is fatal — some of A's writes have external side effects that git
 cannot undo (e.g., a Salesforce activity record was created, an external

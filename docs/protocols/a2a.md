@@ -1,6 +1,6 @@
 # A2A — Agent-to-Agent Protocol
 
-**Status:** shipped for single-principal governance kernels at T1; remote-adapter work remains queued for T2 deployments.
+**Status:** shipped for single-authority governance kernels at T1; remote-adapter work remains queued for T2 deployments.
 **Module:** `cognitive_firm.orchestration.agent_channels` + `cognitive_firm.orchestration.artifact_dependencies` + `cognitive_firm.orchestration.a2a_projection`
 **Tests:** 38 across `tests/test_obligation_lifecycle.py` (18) + `tests/test_artifact_dependencies.py` (14) + downstream MCP integration.
 
@@ -212,7 +212,7 @@ these cards without granting any execution authority.
 
 ## Threat-model coverage
 
-| Primitive | T1 (single-principal) | T2 (regulated enterprise) |
+| Primitive | T1 (single-authority) | T2 (regulated enterprise) |
 |-----------|----------------------|---------------------------|
 | Typed AgentMessage envelope | shipped | shipped |
 | 7 performatives | shipped | shipped (FIPA-ACL expansion to 12 deferred) |
@@ -220,7 +220,7 @@ these cards without granting any execution authority.
 | Obligation lifecycle (Phase A) | shipped | shipped |
 | Artifact dependencies (Phase B) | shipped | shipped |
 | Predicate-hash drift detection | shipped | shipped |
-| Saga compensation (Phase C) | shipped (overkill for T1 but exercised) | shipped — load-bearing |
+| Saga compensation (Phase C) | shipped (often unnecessary for T1, but exercised) | shipped for deployment classes with external side effects |
 | Remote A2A/ACP adapter | not needed | **queued** — interop |
 | Idempotent at-least-once delivery | not needed (single-machine) | **queued** |
 | Conformance test suite | local tests shipped | **queued** for remote-adapter interoperability |

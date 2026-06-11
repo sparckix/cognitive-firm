@@ -99,13 +99,30 @@ POST /kernel/routine-reviews                       { "routine_ref": "...", "rout
 POST /kernel/routine-reviews/<id>/start            { "reviewer": "..." }
 POST /kernel/routine-reviews/<id>/record-outcome   { "outcome": "reaffirm", "reviewer": "...", "rationale": "...", "next_review_due_utc": "..." }
 POST /kernel/routine-reviews/<id>/retire           { "retired_by": "...", "reason": "..." }
-GET  /kernel/routine-reviews/due
+GET  /kernel/routine-reviews                       ?status=&routine_kind=&learning_event_id=&resource=true
+GET  /kernel/routine-reviews/due                   ?resource=true
 GET  /kernel/routine-reviews/summary
 ```
 
 `GET /kernel/routine-reviews/due` is the forgetting-pressure surface: every row
 it returns is a routine still firing as guidance that has not been re-justified
 by its deadline, ordered most-overdue first.
+
+## Resource Projection
+
+`routine_review_resource(...)` projects a routine review into the common
+[`Resource Envelope`](resource-envelope.md). The JSONL row remains canonical;
+the projection is for adapters, dashboards, migrations, and conformance
+fixtures:
+
+```bash
+python -m cognitive_firm.orchestration.routine_reviews list --resource
+```
+
+The resource links the routine, the typed learning event when present, outcome
+evidence refs, and any cadence follow-up review. It exposes overdue state as a
+derived status field; mutations still go through the routine-review lifecycle
+functions.
 
 ## T1 And T2 Modes
 

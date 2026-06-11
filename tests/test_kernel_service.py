@@ -19,7 +19,30 @@ from cognitive_firm.identity_providers import (  # noqa: E402
     AuthenticatedSubject,
     StaticBearerTokenIdentityProvider,
 )
+from cognitive_firm.orchestration.learning_events import (  # noqa: E402
+    create_learning_event,
+    record_learning_event_encounter,
+)
+from cognitive_firm.orchestration.governance_changes import REQUIRED_INVARIANTS  # noqa: E402
+from cognitive_firm.orchestration.outcome_links import (  # noqa: E402
+    create_outcome_link,
+    record_metric_snapshot,
+    record_verdict,
+)
+from cognitive_firm.orchestration.routine_reviews import schedule_routine_review  # noqa: E402
 from cognitive_firm.orchestration.state_backends import SqliteMutationBackend  # noqa: E402
+
+
+def _passing_governance_checks() -> list[dict[str, object]]:
+    return [
+        {
+            "invariant": invariant,
+            "status": "pass",
+            "rationale": f"{invariant} preserved by deterministic guard.",
+            "evidence_refs": [f"test:{invariant}"],
+        }
+        for invariant in sorted(REQUIRED_INVARIANTS)
+    ]
 
 
 def test_kernel_service_creates_and_updates_a2h_human_work(tmp_path: Path):
@@ -150,6 +173,201 @@ def test_kernel_service_surfaces_accountability_cases(tmp_path: Path):
         for item in summary.payload["summary"]["items"]
     }
     assert "accountability_case" in kinds
+
+
+def test_kernel_service_org_surface_uses_configured_learning_logs(tmp_path: Path):
+    config = KernelServiceConfig(
+        project_root=tmp_path,
+        human_work_log=tmp_path / "human_work.jsonl",
+        accountability_cases_log=tmp_path / "accountability_cases.jsonl",
+        actor_identity_log=tmp_path / "actors.jsonl",
+        leases_log=tmp_path / "leases.jsonl",
+        evidence_gaps_log=tmp_path / "evidence_gaps.jsonl",
+        forecast_market_summary=tmp_path / "forecast_summary.json",
+        action_impact_summary=tmp_path / "action_impact_summary.json",
+        learning_events_log=tmp_path / "learning_events.jsonl",
+        learning_encounters_log=tmp_path / "learning_encounters.jsonl",
+        outcome_links_log=tmp_path / "outcome_links.jsonl",
+        routine_reviews_log=tmp_path / "routine_reviews.jsonl",
+        transition_log=tmp_path / "transitions.jsonl",
+    )
+    event = create_learning_event(
+        learning_unit_kind="routine_change",
+        decision_use="Prefer a lower-friction review path for recurring quality checks.",
+        future_application_cue="When a recurring quality check repeats with the same inputs.",
+        approved_by="role.owner",
+        approval_ref="decision:test-learning",
+        source_carrier_refs=["work:test-1"],
+        log_path=config.learning_events_log,
+    )
+    record_learning_event_encounter(
+        learning_event_id=event.learning_event_id,
+        role="role.operator",
+        cue="Recurring quality check repeated.",
+        outcome="applied",
+        work_ref="work:test-2",
+        log_path=config.learning_encounters_log,
+    )
+    link = create_outcome_link(
+        change_ref=f"learning_event:{event.learning_event_id}",
+        change_kind="learning_event",
+        metric_name="review_cycles",
+        metric_unit="count",
+        created_by="role.owner",
+        learning_event_id=event.learning_event_id,
+        log_path=config.outcome_links_log,
+    )
+    record_metric_snapshot(
+        link.outcome_link_id,
+        kind="baseline",
+        value=3,
+        captured_by="role.owner",
+        log_path=config.outcome_links_log,
+    )
+    record_metric_snapshot(
+        link.outcome_link_id,
+        kind="post",
+        value=2,
+        captured_by="role.owner",
+        log_path=config.outcome_links_log,
+    )
+    record_verdict(
+        link.outcome_link_id,
+        verdict="improved",
+        recorded_by="role.owner",
+        rationale="Fewer review cycles on the same class of work.",
+        log_path=config.outcome_links_log,
+    )
+    schedule_routine_review(
+        routine_ref=f"learning_event:{event.learning_event_id}",
+        routine_kind="learning_event",
+        review_due_utc="2000-01-01T00:00:00+00:00",
+        scheduled_by="role.owner",
+        learning_event_id=event.learning_event_id,
+        log_path=config.routine_reviews_log,
+    )
+
+    surface = dispatch_kernel_request("GET", "/kernel/org-surface", config=config)
+
+    assert surface.status == 200
+    counts = surface.payload["surface"]["counts"]
+    summary = surface.payload["surface"]["learning_event_summary"]
+    assert counts["active_learning_events"] == 1
+    assert counts["learning_events_with_encounters"] == 1
+    assert counts["learning_event_outcome_links"] == 1
+    assert counts["learning_event_overdue_reviews"] == 1
+    assert summary["outcome_verdict_coverage"] == 1.0
+
+
+def test_kernel_service_routes_governance_change_lifecycle(tmp_path: Path):
+    config = KernelServiceConfig(
+        org_dir=tmp_path / "org",
+        transition_log=tmp_path / "transitions.jsonl",
+    )
+
+    created = dispatch_kernel_request(
+        "POST",
+        "/kernel/governance-changes",
+        {
+            "change_kind": "mandate_change",
+            "title": "Clarify evaluator escalation authority",
+            "target_ref": "org/mandates/evaluator.md",
+            "rationale": "Recent review work found ambiguous escalation language.",
+            "source_refs": ["work:review-42"],
+            "expected_behavior_change": (
+                "Evaluator escalates unclear authority cases before execution."
+            ),
+            "risk_summary": "Narrows execution authority; no new capability grant.",
+            "rollback_plan": "Restore the previous mandate file from git.",
+            "owner_role": "role.principal",
+            "tenant_id": "tenant-a",
+            "project_id": "project-alpha",
+            "invariant_checks": _passing_governance_checks(),
+            "metadata": {"review_queue": "governance"},
+            "actor_context": {
+                "actor_id": "agent.org_evolver",
+                "actor_kind": "agent",
+                "role_id": "role.org_evolver",
+                "tenant_id": "tenant-a",
+                "project_id": "project-alpha",
+            },
+        },
+        config=config,
+    )
+    assert created.status == 201
+    proposal = created.payload["proposal"]
+    proposal_id = proposal["proposal_id"]
+    assert proposal["status"] == "review_ready"
+    assert proposal["proposed_by"] == "agent.org_evolver"
+
+    filtered = dispatch_kernel_request(
+        "GET",
+        (
+            "/kernel/governance-changes"
+            "?status=review_ready&change_kind=mandate_change"
+            "&tenant_id=tenant-a&project_id=project-alpha"
+        ),
+        config=config,
+    )
+    assert filtered.status == 200
+    assert [row["proposal_id"] for row in filtered.payload["proposals"]] == [
+        proposal_id
+    ]
+    assert filtered.payload["proposals"][0]["decided"] is False
+
+    listed_resources = dispatch_kernel_request(
+        "GET", "/kernel/governance-changes?resource=true", config=config
+    )
+    assert listed_resources.status == 200
+    resource = listed_resources.payload["proposals"][0]
+    assert resource["kind"] == "GovernanceChangeProposal"
+    assert resource["metadata"]["resource_id"] == proposal_id
+    assert resource["metadata"]["labels"]["review_ready"] == "true"
+
+    fetched_resource = dispatch_kernel_request(
+        "GET", f"/kernel/governance-changes/{proposal_id}?resource=true", config=config
+    )
+    assert fetched_resource.status == 200
+    assert fetched_resource.payload["proposal"]["spec"]["title"] == (
+        "Clarify evaluator escalation authority"
+    )
+
+    decided = dispatch_kernel_request(
+        "POST",
+        f"/kernel/governance-changes/{proposal_id}/decision",
+        {
+            "decision": "approve",
+            "reason": "Evidence and invariant checks are sufficient.",
+            "actor_context": {
+                "actor_id": "human.principal",
+                "actor_kind": "human",
+                "role_id": "role.principal",
+            },
+        },
+        config=config,
+    )
+    assert decided.status == 200
+    assert decided.payload["result"]["decided_by"] == "human.principal"
+
+    fetched = dispatch_kernel_request(
+        "GET", f"/kernel/governance-changes/{proposal_id}", config=config
+    )
+    assert fetched.status == 200
+    assert fetched.payload["proposal"]["decided"] is True
+
+    duplicate = dispatch_kernel_request(
+        "POST",
+        f"/kernel/governance-changes/{proposal_id}/decision",
+        {"decision": "decline"},
+        config=config,
+    )
+    assert duplicate.status == 409
+    assert "already been decided" in duplicate.payload["error"]
+
+    missing = dispatch_kernel_request(
+        "GET", "/kernel/governance-changes/gcp_missing", config=config
+    )
+    assert missing.status == 404
 
 
 def test_kernel_service_can_enforce_registered_actor_and_lease(tmp_path: Path):
@@ -547,6 +765,46 @@ def test_kernel_service_auth_provider_supplies_actor_context(tmp_path: Path):
         headers={"Authorization": "Bearer secret"},
     )
     assert created.status == 201
+
+
+def test_kernel_service_auth_provider_pins_governance_proposer(tmp_path: Path):
+    provider = StaticBearerTokenIdentityProvider(
+        {
+            "secret": AuthenticatedSubject(
+                auth_subject="oidc:alice",
+                identity_provider="test-idp",
+                actor_id="human.alice",
+                actor_kind="human",
+            )
+        }
+    )
+    config = KernelServiceConfig(
+        org_dir=tmp_path / "org",
+        transition_log=tmp_path / "transitions.jsonl",
+        identity_provider=provider,
+    )
+
+    created = dispatch_kernel_request(
+        "POST",
+        "/kernel/governance-changes",
+        {
+            "change_kind": "mandate_change",
+            "title": "Clarify review handoff",
+            "proposed_by": "agent.spoof",
+            "target_ref": "org/mandates/reviewer.md",
+            "rationale": "Review handoff should be explicit.",
+            "source_refs": ["work:review-1"],
+            "expected_behavior_change": "Reviewer escalates ambiguous authority.",
+            "risk_summary": "Narrows authority; no new capability grant.",
+            "rollback_plan": "Restore previous mandate from git.",
+            "invariant_checks": _passing_governance_checks(),
+        },
+        config=config,
+        headers={"Authorization": "Bearer secret"},
+    )
+
+    assert created.status == 201
+    assert created.payload["proposal"]["proposed_by"] == "human.alice"
 
 
 def test_kernel_service_http_get_forwards_auth_headers(tmp_path: Path):
@@ -974,10 +1232,67 @@ def test_kernel_service_runs_a_work_item_through_an_operating_unit(tmp_path: Pat
             "owner_role": "role.support_manager",
             "allowed_work_kinds": ["triage_ticket"],
             "allowed_exits": ["resolved", "escalated"],
+            "worker_roles": ["role.support_agent", "role.support_reviewer"],
+            "worker_role_classes": {
+                "role.support_agent": "agent",
+                "role.support_reviewer": "governance",
+            },
+            "worker_role_archetypes": {
+                "role.support_agent": "fungible_agent_worker",
+                "role.support_reviewer": "independent_reviewer",
+            },
+            "tenant_id": "tenant-a",
         },
         config=config,
     )
     assert defined.status == 201
+    assert defined.payload["operating_unit"]["worker_role_classes"] == {
+        "role.support_agent": "agent",
+        "role.support_reviewer": "governance",
+    }
+    assert defined.payload["operating_unit"]["worker_role_archetypes"] == {
+        "role.support_agent": "fungible_agent_worker",
+        "role.support_reviewer": "independent_reviewer",
+    }
+
+    units = dispatch_kernel_request(
+        "GET", "/kernel/operating-units?tenant_id=tenant-a", config=config
+    )
+    assert units.status == 200
+    assert [unit["unit_id"] for unit in units.payload["operating_units"]] == ["support_desk"]
+
+    other_tenant_units = dispatch_kernel_request(
+        "GET", "/kernel/operating-units?tenant_id=tenant-b", config=config
+    )
+    assert other_tenant_units.status == 200
+    assert other_tenant_units.payload["operating_units"] == []
+
+    unit_resource = dispatch_kernel_request(
+        "GET", "/kernel/operating-units?resource=true", config=config
+    )
+    assert unit_resource.status == 200
+    assert unit_resource.payload["operating_units"][0]["kind"] == "OperatingUnit"
+    assert (
+        unit_resource.payload["operating_units"][0]["metadata"]["resource_id"]
+        == "support_desk"
+    )
+
+    fetched_unit = dispatch_kernel_request(
+        "GET", "/kernel/operating-units/support_desk", config=config
+    )
+    assert fetched_unit.status == 200
+    assert fetched_unit.payload["operating_unit"]["tenant_id"] == "tenant-a"
+
+    fetched_unit_resource = dispatch_kernel_request(
+        "GET", "/kernel/operating-units/support_desk?resource=true", config=config
+    )
+    assert fetched_unit_resource.status == 200
+    assert fetched_unit_resource.payload["operating_unit"]["kind"] == "OperatingUnit"
+
+    missing_unit = dispatch_kernel_request(
+        "GET", "/kernel/operating-units/missing_unit", config=config
+    )
+    assert missing_unit.status == 404
 
     enqueued = dispatch_kernel_request(
         "POST",
@@ -988,10 +1303,36 @@ def test_kernel_service_runs_a_work_item_through_an_operating_unit(tmp_path: Pat
     assert enqueued.status == 201
     work_id = enqueued.payload["work_item"]["work_id"]
 
+    queued = dispatch_kernel_request(
+        "GET", "/kernel/work-items?unit_id=support_desk&status=queued", config=config
+    )
+    assert queued.status == 200
+    assert [item["work_id"] for item in queued.payload["work_items"]] == [work_id]
+
+    queued_resources = dispatch_kernel_request(
+        "GET",
+        "/kernel/work-items?unit_id=support_desk&status=queued&resource=true",
+        config=config,
+    )
+    assert queued_resources.status == 200
+    assert queued_resources.payload["work_items"][0]["kind"] == "WorkItem"
+    assert (
+        queued_resources.payload["work_items"][0]["metadata"]["resource_id"]
+        == work_id
+    )
+
+    fetched = dispatch_kernel_request("GET", f"/kernel/work-items/{work_id}", config=config)
+    assert fetched.status == 200
+    assert fetched.payload["work_item"]["payload"] == {"ticket": "T-1"}
+
     claimed = dispatch_kernel_request(
         "POST",
         "/kernel/work-items/claim-next",
-        {"unit_id": "support_desk", "actor": "actor.agent_1"},
+        {
+            "unit_id": "support_desk",
+            "actor": "actor.agent_1",
+            "role_id": "role.support_agent",
+        },
         config=config,
     )
     assert claimed.status == 200
@@ -1006,6 +1347,24 @@ def test_kernel_service_runs_a_work_item_through_an_operating_unit(tmp_path: Pat
     assert completed.status == 200
     assert completed.payload["work_item"]["status"] == "done"
 
+    done = dispatch_kernel_request(
+        "GET", "/kernel/work-items?unit_id=support_desk&status=done", config=config
+    )
+    assert done.status == 200
+    assert [item["work_id"] for item in done.payload["work_items"]] == [work_id]
+
+    done_resource = dispatch_kernel_request(
+        "GET", f"/kernel/work-items/{work_id}?resource=true", config=config
+    )
+    assert done_resource.status == 200
+    assert done_resource.payload["work_item"]["kind"] == "WorkItem"
+    assert done_resource.payload["work_item"]["status"]["status"] == "done"
+
+    missing = dispatch_kernel_request(
+        "GET", "/kernel/work-items/work_missing", config=config
+    )
+    assert missing.status == 404
+
     dashboard = dispatch_kernel_request(
         "GET", "/kernel/operating-unit-dashboard", config=config
     )
@@ -1013,6 +1372,112 @@ def test_kernel_service_runs_a_work_item_through_an_operating_unit(tmp_path: Pat
     unit = dashboard.payload["dashboard"]["units"][0]
     assert unit["unit_id"] == "support_desk"
     assert unit["done"] == 1
+
+
+def test_kernel_service_routes_run_checkpoint_lifecycle(tmp_path: Path):
+    config = KernelServiceConfig(
+        transition_log=tmp_path / "transitions.jsonl",
+        actor_identity_log=tmp_path / "actors.jsonl",
+        leases_log=tmp_path / "leases.jsonl",
+    )
+
+    started = dispatch_kernel_request(
+        "POST",
+        "/kernel/runs",
+        {
+            "owner_role": "role.operator",
+            "objective": "sync external state",
+            "tenant_id": "tenant-a",
+            "project_id": "project-a",
+            "idempotency_key": "sync:external-state",
+        },
+        config=config,
+    )
+    assert started.status == 201
+    run_id = started.payload["run"]["run_id"]
+
+    repeated = dispatch_kernel_request(
+        "POST",
+        "/kernel/runs",
+        {
+            "owner_role": "role.operator",
+            "objective": "duplicate start",
+            "tenant_id": "tenant-a",
+            "project_id": "project-a",
+            "idempotency_key": "sync:external-state",
+        },
+        config=config,
+    )
+    assert repeated.status == 201
+    assert repeated.payload["run"]["run_id"] == run_id
+
+    fetched = dispatch_kernel_request("GET", f"/kernel/runs/{run_id}", config=config)
+    assert fetched.status == 200
+    assert fetched.payload["run"]["objective"] == "sync external state"
+
+    checkpoint = dispatch_kernel_request(
+        "POST",
+        f"/kernel/runs/{run_id}/checkpoints",
+        {
+            "actor": "role.operator",
+            "step_id": "fetch",
+            "status": "completed",
+            "summary": "fetched source state",
+            "side_effect_key": "fetch:source",
+        },
+        config=config,
+    )
+    assert checkpoint.status == 201
+
+    skipped = dispatch_kernel_request(
+        "POST",
+        f"/kernel/runs/{run_id}/checkpoints",
+        {
+            "actor": "role.operator",
+            "step_id": "fetch_retry",
+            "status": "completed",
+            "summary": "retry saw same side effect",
+            "side_effect_key": "fetch:source",
+        },
+        config=config,
+    )
+    assert skipped.status == 201
+
+    resume = dispatch_kernel_request("GET", f"/kernel/runs/{run_id}/resume", config=config)
+    assert resume.status == 200
+    assert resume.payload["summary"]["completed_step_ids"] == ["fetch"]
+    assert resume.payload["summary"]["checkpoints"][-1]["status"] == "skipped"
+
+    listed = dispatch_kernel_request(
+        "GET", "/kernel/runs?state=running&tenant_id=tenant-a", config=config
+    )
+    assert listed.status == 200
+    assert [run["run_id"] for run in listed.payload["runs"]] == [run_id]
+
+    completed = dispatch_kernel_request(
+        "POST",
+        f"/kernel/runs/{run_id}/state",
+        {"actor": "role.operator", "state": "completed"},
+        config=config,
+    )
+    assert completed.status == 200
+
+    terminal_checkpoint = dispatch_kernel_request(
+        "POST",
+        f"/kernel/runs/{run_id}/checkpoints",
+        {
+            "actor": "role.operator",
+            "step_id": "late",
+            "status": "completed",
+            "summary": "too late",
+        },
+        config=config,
+    )
+    assert terminal_checkpoint.status == 400
+    assert "terminal run" in terminal_checkpoint.payload["error"]
+
+    missing = dispatch_kernel_request("GET", "/kernel/runs/run_missing", config=config)
+    assert missing.status == 404
 
 
 def test_kernel_service_rejects_unbounded_work_item_exit(tmp_path: Path):
@@ -1060,6 +1525,8 @@ def test_kernel_service_rejects_unbounded_work_item_exit(tmp_path: Path):
 
 def test_kernel_service_routes_the_durable_learning_layer(tmp_path: Path):
     config = KernelServiceConfig(
+        learning_events_log=tmp_path / "learning_events.jsonl",
+        learning_encounters_log=tmp_path / "learning_encounters.jsonl",
         outcome_links_log=tmp_path / "outcome_links.jsonl",
         routine_reviews_log=tmp_path / "routine_reviews.jsonl",
         resource_allocation_log=tmp_path / "resource_allocation.jsonl",
@@ -1067,6 +1534,71 @@ def test_kernel_service_routes_the_durable_learning_layer(tmp_path: Path):
         residual_decisions_log=tmp_path / "residual_decisions.jsonl",
         kernel_events_log=tmp_path / "kernel_events.jsonl",
     )
+
+    event = create_learning_event(
+        learning_unit_kind="routine_change",
+        decision_use="Require reviewer handoff when a similar queue stalls.",
+        future_application_cue="similar queue stalls",
+        approved_by="role.owner",
+        approval_ref="decision:learning-42",
+        owner_role="role.manager",
+        tenant_id="tenant-a",
+        log_path=config.learning_events_log,
+    )
+    listed = dispatch_kernel_request(
+        "GET", "/kernel/learning-events?resource=true", config=config
+    )
+    assert listed.status == 200
+    assert listed.payload["learning_events"][0]["kind"] == "LearningEvent"
+
+    replayed = dispatch_kernel_request(
+        "GET",
+        "/kernel/learning-events/replay?role=role.manager&tenant_id=tenant-a&cue=queue+stalls",
+        config=config,
+    )
+    assert replayed.status == 200
+    assert [row["learning_event_id"] for row in replayed.payload["learning_events"]] == [
+        event.learning_event_id
+    ]
+    other_tenant = dispatch_kernel_request(
+        "GET",
+        "/kernel/learning-events/replay?role=role.manager&tenant_id=tenant-b&cue=queue+stalls",
+        config=config,
+    )
+    assert other_tenant.status == 200
+    assert other_tenant.payload["learning_events"] == []
+
+    encounter = dispatch_kernel_request(
+        "POST",
+        "/kernel/learning-event-encounters",
+        {
+            "learning_event_id": event.learning_event_id,
+            "role": "role.manager",
+            "cue": "A similar queue stalls during triage.",
+            "outcome": "applied",
+            "work_ref": "work:triage-1",
+            "tenant_id": "tenant-a",
+        },
+        config=config,
+    )
+    assert encounter.status == 201
+    missing_encounter = dispatch_kernel_request(
+        "POST",
+        "/kernel/learning-event-encounters",
+        {
+            "learning_event_id": "learn_missing",
+            "role": "role.manager",
+            "cue": "A similar queue stalls during triage.",
+        },
+        config=config,
+    )
+    assert missing_encounter.status == 404
+    learning_summary = dispatch_kernel_request(
+        "GET", "/kernel/learning-events/summary?tenant_id=tenant-a", config=config
+    )
+    assert learning_summary.status == 200
+    assert learning_summary.payload["summary"]["active"] == 1
+    assert learning_summary.payload["summary"]["encounter_counts"]["applied"] == 1
 
     # Outcome link: open, measure baseline + post, record a verdict.
     link = dispatch_kernel_request(
@@ -1100,6 +1632,15 @@ def test_kernel_service_routes_the_durable_learning_layer(tmp_path: Path):
     assert verdict.status == 200
     summary = dispatch_kernel_request("GET", "/kernel/outcome-links/summary", config=config)
     assert summary.status == 200
+    outcome_resources = dispatch_kernel_request(
+        "GET", "/kernel/outcome-links?resource=true", config=config
+    )
+    assert outcome_resources.status == 200
+    assert outcome_resources.payload["outcome_links"][0]["kind"] == "OutcomeLink"
+    assert (
+        outcome_resources.payload["outcome_links"][0]["metadata"]["resource_id"]
+        == link_id
+    )
 
     # Routine review: schedule one already overdue, confirm it surfaces as due.
     scheduled = dispatch_kernel_request(
@@ -1115,9 +1656,24 @@ def test_kernel_service_routes_the_durable_learning_layer(tmp_path: Path):
         config=config,
     )
     assert scheduled.status == 201
+    review_id = scheduled.payload["routine_review"]["review_id"]
     due = dispatch_kernel_request("GET", "/kernel/routine-reviews/due", config=config)
     assert due.status == 200
     assert len(due.payload["due_reviews"]) == 1
+    review_resources = dispatch_kernel_request(
+        "GET", "/kernel/routine-reviews?resource=true", config=config
+    )
+    assert review_resources.status == 200
+    assert review_resources.payload["routine_reviews"][0]["kind"] == "RoutineReview"
+    assert (
+        review_resources.payload["routine_reviews"][0]["metadata"]["resource_id"]
+        == review_id
+    )
+    due_resources = dispatch_kernel_request(
+        "GET", "/kernel/routine-reviews/due?resource=true", config=config
+    )
+    assert due_resources.status == 200
+    assert due_resources.payload["due_reviews"][0]["status"]["overdue"] is True
 
     # Resource allocation: record a move, apply it, read the ledger.
     decision = dispatch_kernel_request(

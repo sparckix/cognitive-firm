@@ -64,6 +64,31 @@ For existing authorization surfaces, prefer a wrapper such as
 `policy_decision_from_authorization(...)` so fields like `required_approval`,
 `terminal`, and `matched_paths` are preserved.
 
+## Resource Projection
+
+The JSONL decision row remains canonical state. `policy_decision_resource(...)`
+projects a `PolicyDecision` into the common
+[Resource Envelope](resource-envelope.md) for adapter, dashboard, migration, and
+conformance use.
+
+The projection carries:
+
+- `spec`: request, policy ref, matched rule, source decision, reason, matched
+  paths, and evidence refs;
+- `status`: effect, `allowed`, match/default status, required approval,
+  terminal flag, and decision timestamp;
+- `links`: actor, role, target resource, policy, source decision, and evidence
+  refs where present.
+
+The CLI evaluator can emit either the canonical decision row or the resource
+view:
+
+```bash
+python -m cognitive_firm.orchestration.policy_decisions \
+  --request-json '{"action":"kernel.mutate","actor_id":"human.alice","resource_ref":"human_work:hws_1"}' \
+  --resource
+```
+
 ## Tests
 
 Covered by `tests/test_policy_decisions.py`.

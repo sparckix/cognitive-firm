@@ -633,7 +633,7 @@ def execute_task(
             prior_status = prior.get("status") or ""
             prior_intent = prior.get("task_intent") or ""
             prior_checkpoint_hint = (
-                "\nPRIOR TICK CHECKPOINT (read first, decide if it's still load-bearing):\n"
+                "\nPRIOR TICK CHECKPOINT (read first, decide if it is still relevant):\n"
                 f"- last status: {prior_status}\n"
                 f"- last task: {prior_intent[:200]}\n"
                 f"- last summary: {prior_summary[:400]}\n"
@@ -656,7 +656,7 @@ IMPORTANT:
 - If the route is `route_only`, decide the route and create the next task; do not execute a live run.
 - If the route is `artifact_build` and you are a director/reviewer role, write the artifact_build_spec.md and a handoff task for an authorized builder role; do not silently edit implementation artifacts.
 - If the route is `experiment_loop`, run the implementation-specific preflight substrate audit first; do not launch if the contract/gates are unstable.
-- Conflict resolution: canonical priority is in `org/bootstrap_manifest.yaml` under `conflict_resolution_priority`. When in doubt, the role yaml `forbidden_paths` typed contract wins; AGENTS.md §0–§5b load-bearing rules win over §6+ reference sections; role mandate wins over task description for SCOPE; task description wins for SUBJECT MATTER.
+- Conflict resolution: canonical priority is in `org/bootstrap_manifest.yaml` under `conflict_resolution_priority`. When in doubt, the role yaml `forbidden_paths` typed contract wins; AGENTS.md §0–§5b controlling rules win over §6+ reference sections; role mandate wins over task description for SCOPE; task description wins for SUBJECT MATTER.
 - For experiment-style work, follow the project charter and `docs/field-validation-pilot.md`
 - Stay within the role's authorized paths and forbidden paths
 - Record all findings in EXPERIMENT_TRACK_RECORD.md
@@ -1249,7 +1249,7 @@ def tick(
 ) -> bool:
     """One governance tick: discover → propose → (approve) → execute → record.
 
-    Returns True if the daemon dispatched real work to an agent CLI this
+    Returns True if the daemon dispatched execution to an agent CLI this
     tick, False otherwise (no_work / refused / dry_run / queued_for_principal /
     gate_not_approved / claim_failed). Used by the main loop to switch
     between ACTIVE and IDLE tick intervals."""

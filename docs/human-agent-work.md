@@ -58,6 +58,12 @@ and continue the work.
 The kernel records this through human work sessions and, when initiated by a
 role office, the A2H work-coordination pattern.
 
+When the work is not fully observable by the kernel, the session can carry a
+structured receipt. The receipt records a bounded human claim with an actor,
+summary, receipt type/ref, subject refs, artifact refs, confidence, and review
+flag. It does not mechanize the work; it makes the claim visible enough for
+integration, sampling, and accountability.
+
 ### 4. Accountable closure
 
 Accountable closure is required when ordinary follow-up is not enough. It names
@@ -113,7 +119,7 @@ Before treating a workflow as a special human-agent pattern, ask two questions:
 If the first answer explains the whole workflow, the problem is probably
 ordinary delegation or workflow design. If the second answer names authority,
 taste, relationship, safety, private access, or residual-risk ownership, the
-human boundary is load-bearing and should be represented as human work or
+human boundary is material and should be represented as human work or
 accountable closure.
 
 ## A2H Is Not Agent Management Of Humans
@@ -179,10 +185,12 @@ boundary.
 1. Define role mandates and budget envelopes.
 2. Decide which human-work bottlenecks are intentionally human.
 3. Decide which receipt types are sufficient for each domain.
-4. Add A2H requests only when the human deliverable is bounded.
-5. Review A2H pressure weekly: preserve, batch, automate, or escalate.
-6. Open accountability cases only at residual-risk boundaries.
-7. Promote repeated lessons into approved learning events or tenant policy.
+4. Use structured receipts when human work must be reflected without storing a
+   full transcript or pretending the kernel observed it directly.
+5. Add A2H requests only when the human deliverable is bounded.
+6. Review A2H pressure weekly: preserve, batch, automate, or escalate.
+7. Open accountability cases only at residual-risk boundaries.
+8. Promote repeated lessons into approved learning events or tenant policy.
 
 ## Related Documents
 

@@ -36,10 +36,21 @@ self-modifications with deterministic invariant checks before review.
 [Approved Learning Events](learning-events.md) records reviewed behavior-change
 events after candidate approval. [Audit Integrity](audit-integrity.md) defines
 tamper-evident chain manifests for JSONL kernel logs.
+[Governed Run Attestation Bundle](governed-run-attestation.md) defines the
+portable export view over one run's checkpoints, action attestations, human
+work, formal verifications, outcome links, accountability cases, linked
+leases, referenced governance approvals, observability refs, and authority
+snapshot. The v1 schema validates packet shape and digest for interchange.
+[Loop Engineering](loop-engineering.md) maps repeated agent and human-agent
+loops to shipped kernel records without moving execution semantics out of the
+runtime that owns them.
 [Actor Identity](actor-identity.md) defines first-party actor context while
 leaving authentication to [Identity Provider Adapters](identity-providers.md).
 [Actor Membership](actor-membership.md) defines scoped role authority for
 multiple humans, agents, or services inside one deployment.
+[Authority Domains](authority-domains.md) define scoped authority resolution
+for tenant, project, operating-unit, resource-class, and decision-class
+governance interrupts.
 [Identity Provisioning](identity-provisioning.md) defines the adapter seam that
 compiles external directory facts into actor identity and membership records.
 [Tenant Isolation](tenant-isolation.md) defines the lean local scope guard and
@@ -51,11 +62,16 @@ residual-risk acceptance, and accountable closure; [Accountability Summary](acco
 is the read model. [State Surface Inventory](state-surface-inventory.md) defines
 the connector-inventory surface. [Action Attestation](action-attestation.md)
 records compact machine-side provenance for actions, tool calls, runtime events,
-and artifacts. [EU AI Act Deploy Gate](eu-ai-act-deploy-gate.md) defines the
+and artifacts. [Formal Verification](formal-verification.md) records
+provider-agnostic certificate rows from formal checkers and joins them into the
+governed-run bundle. [EU AI Act Deploy Gate](eu-ai-act-deploy-gate.md) defines the
 optional T2 mapping check for roles that opt into it.
 [Work Items And Operating Units](work-items.md) defines the production layer:
 typed operating-unit contracts and a durable, lease-fenced work queue with
 retries, dead letters, and bounded exits.
+[Worker Taxonomy](worker-taxonomy.md) defines the capability, fungibility,
+state, and transport vocabulary used to describe worker roles without changing
+authorization.
 [Outcome Links](outcome-links.md) record whether an approved change improved a
 measured outcome. [Routine Reviews](routine-reviews.md) schedule review and
 accountable retirement of stale routines. [Resource Allocation](resource-allocation.md)
@@ -96,6 +112,7 @@ Re-run the folder index generator when refreshing the managed index below.
 - [extension-schemas.md](extension-schemas.md)
 - [forecast-market.md](forecast-market.md)
 - [governance-changes.md](governance-changes.md)
+- [governed-run-attestation.md](governed-run-attestation.md)
 - [h2a.md](h2a.md)
 - [identity-providers.md](identity-providers.md)
 - [identity-provisioning.md](identity-provisioning.md)
@@ -122,7 +139,7 @@ Re-run the folder index generator when refreshing the managed index below.
 - [state-surface-inventory.md](state-surface-inventory.md)
 - [strategy-office.md](strategy-office.md)
 - [tenant-isolation.md](tenant-isolation.md)
+- [worker-taxonomy.md](worker-taxonomy.md)
 - [work-items.md](work-items.md)
 
-<sub>0 sub-folder(s), 44 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
-
+<sub>0 sub-folder(s), 46 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>

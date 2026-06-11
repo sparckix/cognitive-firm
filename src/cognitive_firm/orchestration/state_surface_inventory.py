@@ -47,6 +47,18 @@ STATE_SURFACES: tuple[StateSurface, ...] = (
         conformance_tests=["tests/test_run_checkpoints.py", "tests/test_mcp_outbox_relay.py"],
     ),
     StateSurface(
+        primitive="run_checkpoints",
+        module="cognitive_firm.orchestration.run_checkpoints",
+        surface_kind="projection",
+        connector_family="state_backend",
+        state_class="read_model",
+        default_location="cognitive_firm_workspace/transitions.jsonl as run.* transition rows",
+        writer="start_run / append_checkpoint / set_run_state",
+        reader="list_runs / get_run / resume_summary",
+        notes="Read/write interface over transition_log run.* events; not a second ledger.",
+        conformance_tests=["tests/test_run_checkpoints.py"],
+    ),
+    StateSurface(
         primitive="state_backends",
         module="cognitive_firm.orchestration.state_backends",
         surface_kind="event_stream",
@@ -84,13 +96,13 @@ STATE_SURFACES: tuple[StateSurface, ...] = (
     StateSurface(
         primitive="policy_decisions",
         module="cognitive_firm.orchestration.policy_decisions",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/policy/policy_decisions.jsonl",
         writer="evaluate_policy / append_policy_decision",
-        reader="list_policy_decisions, conformance fixtures, audit review",
-        notes="Auditable bounded policy decisions; does not replace mandates or role authorization.",
+        reader="list_policy_decisions, conformance fixtures, audit review, policy_decision_resource",
+        notes="Auditable bounded policy decisions; does not replace mandates or role authorization. Resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_policy_decisions.py"],
     ),
     StateSurface(
@@ -130,75 +142,108 @@ STATE_SURFACES: tuple[StateSurface, ...] = (
         conformance_tests=["tests/test_audit_integrity.py"],
     ),
     StateSurface(
+        primitive="governed_run_attestation",
+        module="cognitive_firm.orchestration.artifact_bundle",
+        surface_kind="artifact",
+        connector_family="state_backend",
+        state_class="projection",
+        default_location="computed export from run/action/human/outcome/accountability logs",
+        writer="build_governed_run_attestation_bundle",
+        reader="governed_run_bundle_to_dict",
+        notes="Portable export view over one governed run; not a second ledger.",
+        conformance_tests=["tests/test_governed_run_attestation_bundle.py"],
+    ),
+    StateSurface(
         primitive="actor_identity",
         module="cognitive_firm.orchestration.actor_identity",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/identity/actor_identities.jsonl",
         writer="register_actor_identity",
-        reader="actor_context_from_payload, kernel service, audit/accountability surfaces",
-        notes="First-party organizational actor context; external IdPs authenticate subjects.",
+        reader="actor_context_from_payload, kernel service, audit/accountability surfaces, actor_identity_resource",
+        notes="First-party organizational actor context; external IdPs authenticate subjects. Resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_actor_identity.py", "tests/test_kernel_service.py"],
     ),
     StateSurface(
         primitive="actor_membership",
         module="cognitive_firm.orchestration.actor_membership",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/identity/actor_memberships.jsonl",
         writer="grant_actor_membership / revoke_actor_membership",
-        reader="actor_context_from_payload, kernel service, audit/accountability surfaces",
-        notes="Scoped role membership for multi-principal T1/T2 deployments.",
+        reader="actor_context_from_payload, kernel service, audit/accountability surfaces, actor_membership_resource",
+        notes="Scoped role membership for multi-authority T1/T2 deployments. Resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_actor_membership.py", "tests/test_kernel_service.py"],
+    ),
+    StateSurface(
+        primitive="authority_domains",
+        module="cognitive_firm.orchestration.authority_domains",
+        surface_kind="json + resource projection",
+        connector_family="state_backend",
+        state_class="canonical_state",
+        default_location="org/authority_domains/authority_domains.json",
+        writer="authority-domain file authoring / distro overlays",
+        reader="resolve_authority_assignment_from_org, attention router, kernel service, authority_domain_resource",
+        notes="Scope-to-authority-role map for multi-authority routing. Resource projection is a compatibility view, not canonical state.",
+        conformance_tests=["tests/test_authority_domains.py", "tests/test_attention_router.py", "tests/test_kernel_service_userland.py"],
     ),
     StateSurface(
         primitive="leases",
         module="cognitive_firm.orchestration.leases",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/leases/leases.jsonl",
         writer="acquire_lease / release_lease",
-        reader="verify_lease, kernel service mutation boundary",
-        notes="Time-bounded resource mutation claims with fencing tokens.",
+        reader="verify_lease, kernel service mutation boundary, lease_resource",
+        notes="Time-bounded resource mutation claims with fencing tokens. Resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_leases.py", "tests/test_kernel_service.py"],
     ),
     StateSurface(
         primitive="accountability_cases",
         module="cognitive_firm.orchestration.accountability_cases",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/accountability/accountability_cases.jsonl",
         writer="create_accountability_case / update_accountability_case_status",
-        reader="list_accountability_cases, review queues, future org surface",
-        notes="Write-side records for authority, residual-risk acceptance, recourse, and accountable closure.",
+        reader="list_accountability_cases, review queues, future org surface, accountability_case_resource",
+        notes="Write-side records for authority, residual-risk acceptance, recourse, and accountable closure. Resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_accountability_cases.py"],
     ),
     StateSurface(
         primitive="evidence_gaps",
         module="cognitive_firm.orchestration.evidence_gaps",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/evidence_gaps/evidence_gaps.jsonl",
         writer="create_evidence_gap / update_evidence_gap_status",
-        reader="list_evidence_gaps, work discovery, org surface",
+        reader="list_evidence_gaps, work discovery, org surface, evidence_gap_resource",
+        notes="Durable missing-evidence work records. Resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_evidence_gaps.py", "tests/test_org_surface.py"],
     ),
     StateSurface(
         primitive="human_work",
         module="cognitive_firm.orchestration.human_work",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/human_work/human_work.jsonl",
-        writer="create_human_work_session / create_agent_requested_human_work_session / update_human_work_state",
+        writer=(
+            "create_human_work_session / create_agent_requested_human_work_session / "
+            "update_human_work_state / append_human_work_receipt"
+        ),
         reader=(
             "list_human_work_sessions, A2H waiting/follow-up/pressure, "
-            "work discovery, org surface"
+            "work discovery, org surface, human_work_resource"
+        ),
+        notes=(
+            "Bounded human work and A2H coordination with receipt-before-integration, "
+            "including optional structured receipts for non-digitized work; resource "
+            "projection is a compatibility view, not canonical state."
         ),
         conformance_tests=["tests/test_human_work.py", "tests/test_org_surface.py"],
     ),
@@ -229,16 +274,41 @@ STATE_SURFACES: tuple[StateSurface, ...] = (
         conformance_tests=["tests/test_action_impact_interface.py"],
     ),
     StateSurface(
+        primitive="business_function_bandit",
+        module="cognitive_firm.orchestration.business_function_bandit",
+        surface_kind="projection",
+        connector_family="tenant_adapter",
+        state_class="projection",
+        default_location="computed from action-impact rows",
+        writer="propose_business_function_policy",
+        reader="action-impact offline evaluation and governance review packets",
+        tenant_owned=False,
+        notes="Conservative candidate-map proposer only; it does not write live policy or choose authority.",
+        conformance_tests=["tests/test_business_function_bandit.py", "tests/test_decision_log_replay_demo.py"],
+    ),
+    StateSurface(
         primitive="action_attestation",
         module="cognitive_firm.orchestration.action_attestation",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/attestations/action_attestations.jsonl",
         writer="create_action_attestation",
-        reader="list_action_attestations, release/review queues, future signed-audit surfaces",
-        notes="Machine-side provenance counterpart to human work receipts.",
+        reader="list_action_attestations, release/review queues, governed-run bundle, action_attestation_resource",
+        notes="Machine-side provenance counterpart to human work receipts. Resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_action_attestation.py"],
+    ),
+    StateSurface(
+        primitive="formal_verification",
+        module="cognitive_firm.orchestration.formal_verification",
+        surface_kind="jsonl",
+        connector_family="state_backend",
+        state_class="canonical_state",
+        default_location="org/attestations/formal_verifications.jsonl",
+        writer="create_formal_verification",
+        reader="list_formal_verifications, governed-run bundle, audit review",
+        notes="Typed certificate records from Lean, SMT, Isabelle, Coq, Alloy, TLA+, or tenant checkers.",
+        conformance_tests=["tests/test_formal_verification.py", "tests/test_governed_run_attestation_bundle.py"],
     ),
     StateSurface(
         primitive="runtime_adapters",
@@ -326,13 +396,13 @@ STATE_SURFACES: tuple[StateSurface, ...] = (
     StateSurface(
         primitive="governance_changes",
         module="cognitive_firm.orchestration.governance_changes",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/governance_changes/governance_changes.jsonl",
         writer="propose_governance_change",
-        reader="list_governance_changes, org surface, tenant review queues",
-        notes="Governed self-modification proposals; records invariant checks but does not apply changes.",
+        reader="list_governance_changes, org surface, tenant review queues, governance_change_resource",
+        notes="Governed self-modification proposals; records invariant checks and structural evidence sufficiency but does not apply changes. Resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_governance_changes.py", "tests/test_org_surface.py"],
     ),
     StateSurface(
@@ -350,13 +420,13 @@ STATE_SURFACES: tuple[StateSurface, ...] = (
     StateSurface(
         primitive="learning_events",
         module="cognitive_firm.orchestration.learning_events",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/learning_events/learning_events.jsonl",
-        writer="create_learning_event / learning_event_from_candidate",
-        reader="list_learning_events, org surface, tenant review queues",
-        notes="Approved durable behavior-change events; does not apply the referenced change.",
+        writer="create_learning_event / create_compounded_learning_event / learning_event_from_candidate",
+        reader="list_learning_events, summarize_learning_events, org surface, tenant review queues, learning_event_resource",
+        notes="Approved durable behavior-change units with explicit source carriers and optional parent learning-event lineage; resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_learning_events.py"],
     ),
     StateSurface(
@@ -386,25 +456,25 @@ STATE_SURFACES: tuple[StateSurface, ...] = (
     StateSurface(
         primitive="operating_units",
         module="cognitive_firm.orchestration.operating_units",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/operating_units/operating_units.jsonl",
         writer="define_operating_unit / set_operating_unit_status",
-        reader="list_operating_units, work items, operating-unit dashboard",
-        notes="Typed contracts for recurring production lanes; tenants own the work kinds and exit meanings.",
+        reader="list_operating_units, work items, operating-unit dashboard, operating_unit_resource",
+        notes="Typed contracts for recurring production lanes; tenants own the work kinds and exit meanings. Resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_operating_units.py"],
     ),
     StateSurface(
         primitive="work_items",
         module="cognitive_firm.orchestration.work_items",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/work_items/work_items.jsonl",
         writer="enqueue_work_item / claim_work_item / complete_work_item / fail_work_item",
-        reader="list_work_items, operating-unit dashboard, kernel event stream",
-        notes="Durable production queue with lease-fenced claims, retries, dead letters, and bounded exits.",
+        reader="list_work_items, operating-unit dashboard, kernel event stream, work_item_resource",
+        notes="Durable production queue with lease-fenced claims, retries, dead letters, and bounded exits. Resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_work_items.py"],
     ),
     StateSurface(
@@ -422,25 +492,25 @@ STATE_SURFACES: tuple[StateSurface, ...] = (
     StateSurface(
         primitive="outcome_links",
         module="cognitive_firm.orchestration.outcome_links",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/outcome_links/outcome_links.jsonl",
         writer="create_outcome_link / record_metric_snapshot / record_verdict / void_outcome_link",
-        reader="summarize_outcome_links, routine reviews, org surface",
-        notes="Ties an approved change to a tenant-measured outcome and verdict; kernel owns the record and lifecycle, tenant owns the metric.",
+        reader="summarize_outcome_links, routine reviews, org surface, outcome_link_resource",
+        notes="Ties an approved change to a tenant-measured outcome and verdict; kernel owns the record and lifecycle, tenant owns the metric. Resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_outcome_links.py"],
     ),
     StateSurface(
         primitive="routine_reviews",
         module="cognitive_firm.orchestration.routine_reviews",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/routine_reviews/routine_reviews.jsonl",
         writer="schedule_routine_review / start_routine_review / record_review_outcome / retire_routine",
-        reader="list_due_reviews, summarize_routine_reviews, review queues, org surface",
-        notes="Review-and-retirement lifecycle over durable routines; the overdue surface is the organizational-forgetting pressure.",
+        reader="list_due_reviews, summarize_routine_reviews, review queues, org surface, routine_review_resource",
+        notes="Review-and-retirement lifecycle over durable routines; the overdue surface is the organizational-forgetting pressure. Resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_routine_reviews.py"],
     ),
     StateSurface(
@@ -458,25 +528,25 @@ STATE_SURFACES: tuple[StateSurface, ...] = (
     StateSurface(
         primitive="residual_right_assignments",
         module="cognitive_firm.orchestration.decision_rights",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/decision_rights/residual_right_assignments.jsonl",
         writer="assign_residual_right",
-        reader="get_residual_right_holder, summarize_decision_rights, governance review",
-        notes="Names the default decider (residual control right) per scope when a mandate is silent; idempotent on scope with supersede.",
+        reader="get_residual_right_holder, summarize_decision_rights, governance review, residual_right_assignment_resource",
+        notes="Names the default decider (residual control right) per scope when a mandate is silent; idempotent on scope with supersede. Resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_decision_rights.py"],
     ),
     StateSurface(
         primitive="residual_decisions",
         module="cognitive_firm.orchestration.decision_rights",
-        surface_kind="jsonl",
+        surface_kind="jsonl + resource projection",
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/decision_rights/residual_decisions.jsonl",
         writer="record_residual_decision / review_residual_decision",
-        reader="list_residual_decisions, summarize_decision_rights, governance review",
-        notes="Decisions taken where no mandate clause applied; unauthorized flag fails open; promote_to_mandate_clause bridges back to a complete contract.",
+        reader="list_residual_decisions, summarize_decision_rights, governance review, residual_decision_resource",
+        notes="Decisions taken where no mandate clause applied; unauthorized flag fails open; promote_to_mandate_clause bridges back to a complete contract. Resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_decision_rights.py"],
     ),
 )
@@ -524,12 +594,162 @@ def state_surface_inventory() -> list[dict[str, object]]:
     return [surface.as_dict() for surface in STATE_SURFACES]
 
 
+CAPABILITY_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "Authority and access",
+        (
+            "actor_identity",
+            "actor_membership",
+            "authority_domains",
+            "leases",
+            "policy_decisions",
+            "residual_right_assignments",
+            "residual_decisions",
+            "mcp_outbox",
+        ),
+    ),
+    (
+        "Human-agent work",
+        (
+            "human_work",
+            "work_items",
+            "operating_units",
+            "operating_unit_surface",
+            "notifications",
+        ),
+    ),
+    (
+        "Runtime projection",
+        (
+            "transition_log",
+            "kernel_events",
+            "run_checkpoints",
+            "runtime_adapters",
+            "otel_export",
+            "state_backends",
+        ),
+    ),
+    (
+        "Evidence and audit",
+        (
+            "evidence_gaps",
+            "action_attestation",
+            "formal_verification",
+            "audit_integrity",
+            "governed_run_attestation",
+            "accountability_cases",
+            "accountability",
+            "resource_envelope",
+        ),
+    ),
+    (
+        "Learning and change",
+        (
+            "strategy_office",
+            "learning_transition_compiler",
+            "learning_events",
+            "learning_event_encounters",
+            "governance_changes",
+            "outcome_links",
+            "routine_reviews",
+            "resource_allocation",
+            "business_function_bandit",
+        ),
+    ),
+    (
+        "External and tenant inputs",
+        (
+            "inbound_events",
+            "forecast_market",
+            "action_impact",
+            "intelligence_sources",
+        ),
+    ),
+    (
+        "Support and compatibility",
+        (
+            "migrations",
+            "org_surface",
+        ),
+    ),
+)
+
+
+def _surfaces_by_id() -> dict[str, StateSurface]:
+    return {surface.primitive: surface for surface in STATE_SURFACES}
+
+
+def capability_inventory() -> list[dict[str, object]]:
+    """Return state surfaces grouped by the organizational problem they address."""
+    by_id = _surfaces_by_id()
+    grouped: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for group_name, primitives in CAPABILITY_GROUPS:
+        rows: list[dict[str, object]] = []
+        for primitive in primitives:
+            surface = by_id.get(primitive)
+            if surface is None:
+                continue
+            seen.add(primitive)
+            rows.append(surface.as_dict())
+        grouped.append({"group": group_name, "surfaces": rows})
+
+    ungrouped = [
+        surface.as_dict()
+        for surface in STATE_SURFACES
+        if surface.primitive not in seen
+    ]
+    if ungrouped:
+        grouped.append({"group": "Ungrouped", "surfaces": ungrouped})
+    return grouped
+
+
+def render_capability_inventory_markdown() -> str:
+    lines = [
+        "# Capability Map",
+        "",
+        "This map is rendered from `state_surface_inventory.py`. It groups kernel",
+        "surfaces by the organizational problem they address. It is a map of",
+        "implemented and tested interfaces, not a list of product promises.",
+        "",
+    ]
+    for group in capability_inventory():
+        lines.append(f"## {group['group']}")
+        lines.append("")
+        lines.append("| Surface | Class | Kind | Writer | Tests |")
+        lines.append("|---|---|---|---|---|")
+        for row in group["surfaces"]:  # type: ignore[index]
+            assert isinstance(row, dict)
+            tests = ", ".join(str(item) for item in row.get("conformance_tests", []))
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        f"`{row['primitive']}`",
+                        str(row["state_class"]).replace("_", " "),
+                        str(row["surface_kind"]).replace("_", " "),
+                        f"`{row['writer']}`",
+                        tests or "-",
+                    ]
+                )
+                + " |"
+            )
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Render cognitive-firm state surface inventory.")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--capability-json", action="store_true")
+    parser.add_argument("--capability-markdown", action="store_true")
     args = parser.parse_args(argv)
     if args.json:
         print(json.dumps(state_surface_inventory(), indent=2, sort_keys=True))
+    elif args.capability_json:
+        print(json.dumps(capability_inventory(), indent=2, sort_keys=True))
+    elif args.capability_markdown:
+        print(render_capability_inventory_markdown(), end="")
     else:
         for surface in STATE_SURFACES:
             print(

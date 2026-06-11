@@ -14,7 +14,11 @@ from cognitive_firm.orchestration.human_work import (  # noqa: E402
     create_human_work_session,
     update_human_work_state,
 )
-from cognitive_firm.orchestration.learning_events import create_learning_event  # noqa: E402
+from cognitive_firm.orchestration.learning_events import (  # noqa: E402
+    create_compounded_learning_event,
+    create_learning_event,
+    record_learning_event_encounter,
+)
 from cognitive_firm.orchestration.org_surface import (  # noqa: E402
     build_org_surface,
     format_surface_brief,
@@ -227,6 +231,7 @@ def test_org_surface_includes_run_checkpoint_projection(tmp_path: Path):
 
 def test_org_surface_includes_approved_learning_events(tmp_path: Path):
     learning_log = tmp_path / "learning_events.jsonl"
+    encounters_log = tmp_path / "learning_encounters.jsonl"
     event = create_learning_event(
         learning_unit_kind="routine_change",
         decision_use="Require independent evidence before retrying a branch.",
@@ -234,6 +239,67 @@ def test_org_surface_includes_approved_learning_events(tmp_path: Path):
         approved_by="role.principal",
         approval_ref="review/1",
         source_carrier_refs=["forecast/c1"],
+        log_path=learning_log,
+    )
+    record_learning_event_encounter(
+        learning_event_id=event.learning_event_id,
+        role="role.researcher",
+        cue="same failure mode repeats across reviewed runs",
+        outcome="applied",
+        work_ref="work:item-1",
+        log_path=encounters_log,
+    )
+
+    surface = build_org_surface(
+        project_root=tmp_path,
+        evidence_gaps_log=tmp_path / "missing_gaps.jsonl",
+        human_work_log=tmp_path / "missing_human.jsonl",
+        learning_events_log=learning_log,
+        learning_encounters_log=encounters_log,
+        damage_limit=0,
+    )
+
+    assert surface.counts["active_learning_events"] == 1
+    assert surface.counts["learning_events_with_encounters"] == 1
+    assert surface.counts["learning_event_outcome_links"] == 0
+    assert surface.active_learning_events[0].learning_event_id == event.learning_event_id
+    assert surface.learning_event_summary["encounter_counts"]["applied"] == 1
+    assert surface.learning_event_summary["recommendation"] == (
+        "attach outcome links to approved learning units"
+    )
+    brief = format_surface_brief(surface)
+    assert "Approved Learning Events" in brief
+    assert "Learning Unit Health" in brief
+    assert "same failure mode repeats" in brief
+
+
+def test_org_surface_counts_compounded_learning_units(tmp_path: Path):
+    learning_log = tmp_path / "learning_events.jsonl"
+    first = create_learning_event(
+        learning_unit_kind="evidence_standard_change",
+        decision_use="Require source freshness checks.",
+        future_application_cue="source freshness is material",
+        approved_by="role.principal",
+        approval_ref="review/1",
+        source_carrier_refs=["accountability/case-1"],
+        log_path=learning_log,
+    )
+    second = create_learning_event(
+        learning_unit_kind="review_threshold_change",
+        decision_use="Escalate stale-source retries.",
+        future_application_cue="retry uses stale evidence",
+        approved_by="role.principal",
+        approval_ref="review/2",
+        source_carrier_refs=["human_work/hws-1"],
+        log_path=learning_log,
+    )
+    create_compounded_learning_event(
+        source_learning_event_ids=[first.learning_event_id, second.learning_event_id],
+        learning_unit_kind="routine_change",
+        decision_use="Apply freshness check and escalation together.",
+        future_application_cue="stale evidence retry",
+        approved_by="role.principal",
+        approval_ref="review/3",
         log_path=learning_log,
     )
 
@@ -245,8 +311,6 @@ def test_org_surface_includes_approved_learning_events(tmp_path: Path):
         damage_limit=0,
     )
 
-    assert surface.counts["active_learning_events"] == 1
-    assert surface.active_learning_events[0].learning_event_id == event.learning_event_id
-    brief = format_surface_brief(surface)
-    assert "Approved Learning Events" in brief
-    assert "same failure mode repeats" in brief
+    assert surface.counts["active_learning_events"] == 3
+    assert surface.counts["learning_events_compounded"] == 1
+    assert surface.learning_event_summary["root_units"] == 2

@@ -1,0 +1,47 @@
+# leanmill-formal-verification overlay - schema_version 1
+#
+# Installs org-owned trust policy for accepting LeanMill formal-verification
+# provider payloads. It does not install LeanMill binaries.
+
+schema_version: 1
+name: leanmill-formal-verification
+version: 0.1.0
+kind: overlay
+description: >
+  Installs a formal-verification trust policy for LeanMill provider payloads,
+  requiring signed, re-runnable, and faithfulness-backed evidence before
+  verified rows count as clean governed-run bundle evidence.
+
+kernel:
+  min_version: "0.1.0"
+  max_version: null
+
+components:
+  - source: formal_verification
+    dest: formal_verification
+    op: add
+  - source: adapters
+    dest: adapters
+    op: add
+  - source: adapter_conformance
+    dest: adapter_conformance
+    op: add
+
+provides:
+  - formal-verification-provider
+  - leanmill-provider-trust-policy
+  - adapter-manifest
+  - adapter-conformance-config
+  - governed-run-attestation-evidence
+
+post_install_message: |
+  Installed the LeanMill formal-verification overlay.
+  This installs org-owned trust policy only; it does not install or run LeanMill.
+  Install it onto an existing governed organization, not an empty directory.
+  Next:
+    1. Install or point to the LeanMill adapter separately.
+    2. Add the adapter's Ed25519 public key with cognitive-firm-formal-verification trust-provider.
+    3. Configure the adapter to emit signed formal-verification-provider/v1 JSON.
+    4. Run the conformance checks listed in adapter_conformance/leanmill-formal-verification.json.
+    5. Record payloads with cognitive-firm-formal-verification create-from-provider-payload --authority-root <org>.
+    6. Export a governed-run bundle and validate the bundle JSON before sharing.

@@ -1,0 +1,28 @@
+schema_version: cognitive-firm-adapter-manifest/v1
+adapter_id: leanmill-formal-verification
+family: formal_verification_provider
+protocol: formal_verification_provider_payload
+description: >
+  LeanMill provider adapter that emits signed formal-verification payloads for
+  governed-run evidence. The adapter and checker run outside the kernel.
+executable:
+  kind: repository
+  ref: leanmill
+  public_key_ref: configure://leanmill-ed25519-public-key
+  install_hint: >
+    Install or point to the LeanMill adapter separately, then configure the
+    adapter public key with cognitive-firm-formal-verification trust-provider.
+trust_requirements:
+  payload_signature: required
+  reverification_refs: required
+  faithfulness_refs: required
+  executable_installation: external
+conformance_checks:
+  - accepts_signed_verified_payload
+  - rejects_forged_payload_signature
+  - preserves_checker_evidence_refs
+  - preserves_faithfulness_refs
+  - governed_bundle_caveats_missing_trust
+evidence_refs:
+  - tests/test_formal_verification.py
+  - tests/test_governed_run_attestation_bundle.py

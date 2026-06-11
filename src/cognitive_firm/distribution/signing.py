@@ -194,6 +194,11 @@ def _load_public_key(public_pem: str) -> Ed25519PublicKey:
     return key
 
 
+def validate_public_key(public_pem: str) -> None:
+    """Raise ``SigningError`` unless ``public_pem`` is an Ed25519 public key."""
+    _load_public_key(public_pem)
+
+
 # --------------------------------------------------------------------------
 # Sign / verify
 # --------------------------------------------------------------------------
@@ -213,6 +218,30 @@ def sign_package(package_root: Path, private_key: str) -> str:
     return signature.hex()
 
 
+def sign_message(message: bytes, private_key: str) -> str:
+    """Return a detached Ed25519 signature over arbitrary bytes.
+
+    This is shared by package signing and provider-payload signing. Callers own
+    the canonicalization of ``message`` before signing.
+    """
+    key = _load_private_key(private_key)
+    return key.sign(message).hex()
+
+
+def verify_message_signature(message: bytes, signature: str, public_key: str) -> bool:
+    """Return True iff ``signature`` is a valid Ed25519 signature of bytes."""
+    key = _load_public_key(public_key)
+    try:
+        raw_sig = bytes.fromhex(signature)
+    except ValueError as exc:
+        raise SigningError(f"signature is not valid hex: {exc}") from exc
+    try:
+        key.verify(raw_sig, message)
+    except InvalidSignature:
+        return False
+    return True
+
+
 def verify_package_signature(
     package_root: Path, signature: str, public_key: str
 ) -> bool:
@@ -224,17 +253,8 @@ def verify_package_signature(
     :class:`SigningError` only when the inputs are structurally unusable (an
     unparseable key, a non-hex signature, a missing package).
     """
-    key = _load_public_key(public_key)
-    try:
-        raw_sig = bytes.fromhex(signature)
-    except ValueError as exc:
-        raise SigningError(f"signature is not valid hex: {exc}") from exc
     content_hash = canonical_content_hash(package_root)
-    try:
-        key.verify(raw_sig, content_hash.encode("utf-8"))
-    except InvalidSignature:
-        return False
-    return True
+    return verify_message_signature(content_hash.encode("utf-8"), signature, public_key)
 
 
 # --------------------------------------------------------------------------

@@ -48,6 +48,7 @@ from typing import Any, Callable, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
 from cognitive_firm.orchestration.kernel_events import record_kernel_event
+from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
 
 
 OutcomeLinkStatus = Literal["open", "measuring", "verdict_recorded", "voided"]
@@ -594,6 +595,71 @@ def summarize_outcome_links(
     )
 
 
+def outcome_link_resource(link: OutcomeLink) -> KernelResource:
+    """Project an outcome link into the common resource envelope.
+
+    The JSONL row remains canonical. This projection gives adapters, dashboards,
+    migrations, and conformance fixtures the same object model used by other
+    kernel-owned state surfaces.
+    """
+    labels = {
+        "change_kind": link.change_kind,
+        "status": link.status,
+        "metric_name": link.metric_name,
+    }
+    if link.verdict:
+        labels["verdict"] = link.verdict
+    if link.owner_role:
+        labels["owner_role"] = link.owner_role
+
+    links: list[dict[str, str]] = [{"rel": "change", "href": link.change_ref}]
+    if link.learning_event_id:
+        links.append({"rel": "learning_event", "href": f"learning_event:{link.learning_event_id}"})
+    if link.baseline and link.baseline.get("measurement_ref"):
+        links.append({"rel": "baseline_measurement", "href": str(link.baseline["measurement_ref"])})
+    for snapshot in link.post_snapshots:
+        if snapshot.get("measurement_ref"):
+            links.append({"rel": "post_measurement", "href": str(snapshot["measurement_ref"])})
+
+    return make_resource(
+        kind="OutcomeLink",
+        name=link.outcome_link_id,
+        resource_id=link.outcome_link_id,
+        tenant_id=link.tenant_id,
+        project_id=link.project_id,
+        stability="alpha",
+        labels=labels,
+        annotations={
+            key: str(value)
+            for key, value in link.metadata.items()
+            if isinstance(key, str) and value is not None
+        },
+        spec={
+            "change_ref": link.change_ref,
+            "change_kind": link.change_kind,
+            "learning_event_id": link.learning_event_id,
+            "metric_name": link.metric_name,
+            "metric_unit": link.metric_unit,
+            "direction": link.direction,
+            "owner_role": link.owner_role,
+            "created_by": link.created_by,
+        },
+        status={
+            "status": link.status,
+            "baseline": link.baseline,
+            "post_snapshot_count": len(link.post_snapshots),
+            "verdict": link.verdict,
+            "verdict_recorded_by": link.verdict_recorded_by,
+            "verdict_rationale": link.verdict_rationale,
+            "verdict_recorded_at_utc": link.verdict_recorded_at_utc,
+            "void_reason": link.void_reason,
+            "created_at_utc": link.created_at_utc,
+            "updated_at_utc": link.updated_at_utc,
+        },
+        links=links,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Manage cognitive-firm outcome links (outcome-linked learning)."
@@ -647,6 +713,7 @@ def main(argv: list[str] | None = None) -> int:
     list_parser.add_argument("--tenant-id")
     list_parser.add_argument("--project-id")
     list_parser.add_argument("--log-path", type=Path)
+    list_parser.add_argument("--resource", action="store_true", help="render resource envelopes")
 
     summarize = sub.add_parser("summarize")
     summarize.add_argument("--tenant-id")
@@ -715,7 +782,8 @@ def main(argv: list[str] | None = None) -> int:
             project_id=args.project_id,
             log_path=args.log_path,
         ):
-            print(json.dumps(link.as_dict(), sort_keys=True))
+            payload = outcome_link_resource(link).as_dict() if args.resource else link.as_dict()
+            print(json.dumps(payload, sort_keys=True))
         return 0
     if args.cmd == "summarize":
         summary = summarize_outcome_links(

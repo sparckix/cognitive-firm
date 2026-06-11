@@ -48,6 +48,27 @@ structure or amend existing structure precisely.
 | `incident-response` | an incident operating unit, an on-call routing config, a post-incident review routine | orgs that need a governed incident loop |
 | `hiring-pipeline` | a hiring operating unit with typed stages and bounded exits, a hiring-manager role | orgs running a recurring hiring process |
 | `treasury` | a finance/treasury role with narrow `authorized_paths`, gated approval for any movement of funds | orgs that handle money and want it tightly scoped |
+| `leanmill-formal-verification` | provider trust policy for LeanMill `formal-verification-provider/v1` payloads; requires signed, re-runnable, and faithfulness-backed evidence | orgs that want formal-verification evidence in governed-run bundles without importing checker code into the kernel |
+
+## Adapter Packs
+
+An adapter pack is an overlay for a runtime, provider, or external system. It
+does not need to contain the executable adapter. It installs the governed side
+of the integration: role policy, capability grants, extension schemas,
+trusted-provider keys or key placeholders, example project files, conformance
+fixture config, and post-install instructions.
+
+| Idea | What it installs | External code path |
+|---|---|---|
+| `langgraph-runtime-adapter` | a role/mandate example for graph-owned work, runtime-adapter conformance fixture config, and human-interrupt A2H policy | a Python adapter that maps LangGraph callbacks to `RuntimeEvent` rows |
+| `openai-agents-runtime-adapter` | lifecycle projection policy, trace-reference conventions, and action-attestation examples | an adapter over the OpenAI Agents SDK lifecycle and tracing hooks |
+| `mcp-linear-readonly` | mandate capability grants for read-only Linear tools and projection-fixture config | the Linear MCP server and existing MCP transport |
+| `leanmill-formal-verification` | formal-verification trust policy and evidence requirements | the LeanMill adapter/checker process |
+
+This split is deliberate. The package manager composes governed organization
+state. Executable code is installed by its normal route — a Python package, a
+container, a local binary, or a hosted service — then proved acceptable through
+adapter conformance, signatures, digest references, or provider trust policy.
 
 ## Extension-schema packages
 
@@ -57,6 +78,18 @@ required payload shape. Useful community packages here are *schema packs*: a
 bundle of validated work-item and operating-unit types for a domain (a
 code-review schema pack, a research-claim schema pack), so custom types are
 type-safe, not just allowed.
+
+## Adapter-policy packages
+
+Some packages install policy for an external adapter rather than adapter
+binaries. For example, `leanmill-formal-verification` installs the org-owned
+trust policy used by governed-run bundle export. The LeanMill adapter can be
+distributed separately; the overlay only states which provider payloads this
+org will treat as trusted evidence and what proof artifacts must accompany
+them. The operator still configures the provider public key before signed
+payloads can clear without caveats. This keeps executable checker code outside
+the kernel while still making adoption inspectable and reversible through the
+package manager.
 
 ## Authoring a package
 
@@ -72,9 +105,14 @@ type-safe, not just allowed.
 4. Preview the install without applying it:
    `cognitive-firm-distro install <package> --into <dir> --dry-run` prints the
    full file plan and each component's composition `op`.
-5. Verify it boots: an installed organization must pass `boot_check` (one
-   authority role, escalation reaches it, mandates resolve).
-6. Publish it as a git repository — a package is just a repo with a
+5. For overlays, preview against a real org before filing a proposal:
+   `cognitive-firm-distro preview-overlay <overlay> --into <org> --json`
+   stages the overlay on a copy, reports the authority diff, and exits nonzero
+   when the overlay widens or ambiguously changes authority.
+6. Verify it boots: an installed organization must pass `boot_check` (authority
+   roles are scoped, escalation reaches authority, mandates resolve) and any
+   installed adapter/provider policy must validate.
+7. Publish it as a git repository — a package is just a repo with a
    `package.yaml`. Anyone can install it directly:
    `cognitive-firm-distro install <git-url> --into <dir>` fetches it SHA-pinned
    and records a content-hashed `packages.lock`. There is no central registry
@@ -82,3 +120,10 @@ type-safe, not just allowed.
 
 The kernel stays generic. A distro or overlay is policy; composing one must
 never require a kernel change.
+
+The bundled `langgraph-runtime-adapter` overlay is the reference runtime
+adapter-policy package. It installs only `adapters/` and
+`adapter_conformance/` declarations: the adapter manifest, required fixture
+checks, and the boundary statement that LangGraph owns graph execution while
+cognitive-firm owns the organizational projection. It is intentionally
+authority-neutral and should pass `preview-overlay` without a proposal.

@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
 from cognitive_firm.orchestration.actor_membership import actor_has_membership
+from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
 
 
 ActorKind = Literal["human", "agent", "service"]
@@ -118,6 +119,47 @@ def get_actor_identity(actor_id: str, *, log_path: Path | None = None) -> ActorI
         if identity.actor_id == actor_id:
             return identity
     return None
+
+
+def actor_identity_resource(identity: ActorIdentity) -> KernelResource:
+    """Project an actor identity into the common kernel resource envelope."""
+    labels = {
+        "actor_kind": identity.actor_kind,
+        "status": identity.status,
+    }
+    if identity.identity_provider:
+        labels["identity_provider"] = identity.identity_provider
+    links: list[dict[str, str]] = []
+    for role_id in identity.roles_allowed:
+        links.append({"rel": "allowed_role", "href": role_id})
+    for tenant_id in identity.tenant_ids:
+        links.append({"rel": "tenant", "href": tenant_id})
+    return make_resource(
+        kind="ActorIdentity",
+        name=identity.actor_id,
+        resource_id=identity.actor_id,
+        stability="alpha",
+        labels=labels,
+        annotations={
+            key: str(value)
+            for key, value in identity.metadata.items()
+            if isinstance(key, str) and value is not None
+        },
+        spec={
+            "actor_kind": identity.actor_kind,
+            "display_name": identity.display_name,
+            "auth_subject": identity.auth_subject,
+            "identity_provider": identity.identity_provider,
+            "roles_allowed": identity.roles_allowed,
+            "tenant_ids": identity.tenant_ids,
+        },
+        status={
+            "status": identity.status,
+            "created_at_utc": identity.created_at_utc,
+            "updated_at_utc": identity.updated_at_utc,
+        },
+        links=links,
+    )
 
 
 def build_actor_context(
@@ -277,6 +319,7 @@ def main(argv: list[str] | None = None) -> int:
     list_parser.add_argument("--actor-kind")
     list_parser.add_argument("--status")
     list_parser.add_argument("--log-path", type=Path)
+    list_parser.add_argument("--resource", action="store_true", help="render resource envelopes")
     args = parser.parse_args(argv)
     if args.cmd == "register":
         identity = register_actor_identity(
@@ -297,7 +340,8 @@ def main(argv: list[str] | None = None) -> int:
             status=args.status,
             log_path=args.log_path,
         ):
-            print(json.dumps(asdict(identity), sort_keys=True))
+            payload = actor_identity_resource(identity).as_dict() if args.resource else asdict(identity)
+            print(json.dumps(payload, sort_keys=True))
         return 0
     return 2
 

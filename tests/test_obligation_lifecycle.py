@@ -242,8 +242,8 @@ def test_update_on_no_obligation_message_rejects(isolated_channels):
 
 def test_list_blocked_obligations_finds_blocked(isolated_channels):
     """Ship a request, drive it to blocked_input, confirm it surfaces in
-    the list. This is the load-bearing UX primitive — what Orbit + the
-    manager daemon use to render "B is blocked on A" to the principal."""
+    the list. This is the central UX primitive: what Orbit + the manager
+    daemon use to render "B is blocked on A" to the principal."""
     msg = send_agent_message(
         from_role="alice", to_role="bob",
         kind="request", subject="needs your input", body="...",

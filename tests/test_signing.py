@@ -2,7 +2,7 @@
 
 Covers the canonical content hash, Ed25519 sign/verify, the local trust store,
 the manifest ``signing`` block, and the installer's verify-or-refuse wiring.
-The load-bearing invariant: signed packages are gated, unsigned packages still
+The core invariant: signed packages are gated, unsigned packages still
 install (``starter-firm`` must not break).
 """
 

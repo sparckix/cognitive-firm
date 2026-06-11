@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
+
 from cognitive_firm.kernel_service import (
     KernelServiceConfig,
     dispatch_kernel_request,
 )
+from cognitive_firm.orchestration.actor_membership import grant_actor_membership
 from cognitive_firm.orchestration.human_work import create_human_work_session
 
 
@@ -62,6 +65,87 @@ def test_attention_route_routes_a2h_work_to_the_member_human(tmp_path):
         "GET", "/kernel/attention/bob", config=config
     )
     assert other.payload["signals"] == []
+
+
+def test_attention_route_uses_authority_domain_for_governance_gate(tmp_path):
+    roles = tmp_path / "roles"
+    roles.mkdir()
+    (roles / "principal.yaml").write_text("role_id: principal\nrole_class: authority\n")
+    (roles / "tenant_authority.yaml").write_text(
+        "role_id: tenant_authority\nrole_class: authority\n"
+    )
+    domains = tmp_path / "authority_domains" / "authority_domains.json"
+    domains.parent.mkdir()
+    domains.write_text(
+        json.dumps(
+            {
+                "authority_domains": [
+                    {
+                        "domain_id": "global",
+                        "authority_role_id": "role.principal",
+                        "scope_kind": "global",
+                        "scope_id": "*",
+                    },
+                    {
+                        "domain_id": "tenant_a",
+                        "authority_role_id": "role.tenant_authority",
+                        "scope_kind": "tenant",
+                        "scope_id": "tenant-a",
+                    },
+                ]
+            }
+        )
+    )
+    gates = tmp_path / "gates"
+    gates.mkdir()
+    (gates / "tenant_gate.json").write_text(
+        json.dumps(
+            {
+                "goal_name": "Approve tenant policy",
+                "gate_description": "tenant scoped review",
+                "tenant_id": "tenant-a",
+            }
+        )
+    )
+    membership_log = tmp_path / "memberships.jsonl"
+    grant_actor_membership(
+        actor_id="agent.tenant_governor",
+        role_id="tenant_authority",
+        granted_by="human.root",
+        decision_right_basis="tenant operating agreement delegates bounded policy review",
+        tenant_id="tenant-a",
+        log_path=membership_log,
+    )
+    grant_actor_membership(
+        actor_id="human.root",
+        role_id="principal",
+        granted_by="human.root",
+        decision_right_basis="founding authority",
+        log_path=membership_log,
+    )
+
+    config = KernelServiceConfig(
+        human_work_log=tmp_path / "hw.jsonl",
+        gates_dir=gates,
+        org_dir=tmp_path,
+        actor_membership_log=membership_log,
+    )
+
+    tenant_feed = dispatch_kernel_request(
+        "GET", "/kernel/attention/agent.tenant_governor", config=config
+    )
+    root_feed = dispatch_kernel_request(
+        "GET", "/kernel/attention/human.root", config=config
+    )
+
+    assert tenant_feed.status == 200
+    assert [signal["target_role_id"] for signal in tenant_feed.payload["signals"]] == [
+        "tenant_authority"
+    ]
+    assert [signal["target_actor_id"] for signal in tenant_feed.payload["signals"]] == [
+        "agent.tenant_governor"
+    ]
+    assert root_feed.payload["signals"] == []
 
 
 def test_work_inbox_route_lists_a_member_humans_tasks(tmp_path):

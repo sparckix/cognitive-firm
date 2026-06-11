@@ -6,7 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from cognitive_firm.orchestration.action_impact import summary_from_mapping  # noqa: E402
 
 
 REQUIRED_FILES = {
@@ -38,9 +44,19 @@ REQUIRED_FILES = {
         "Residual Risks",
     ],
 }
+ACTION_IMPACT_SUMMARY_NAMES = (
+    "action-impact-summary.json",
+    "action_impact_summary.json",
+    "org/action_impact/action_impact_summary.json",
+)
 
 
-def validate_pilot(path: Path) -> dict[str, object]:
+def validate_pilot(
+    path: Path,
+    *,
+    require_action_impact: bool = False,
+    min_action_impact_records: int = 0,
+) -> dict[str, object]:
     errors: list[str] = []
     warnings: list[str] = []
     for filename, required_terms in REQUIRED_FILES.items():
@@ -61,6 +77,17 @@ def validate_pilot(path: Path) -> dict[str, object]:
         errors.append("pilot-scope.md: success criteria appear blank")
     if metrics and "n/a" not in metrics:
         warnings.append("metrics-table.md: expected n/a baseline markers for pilot-only metrics")
+    action_impact = _action_impact_status(path, errors=errors, warnings=warnings)
+    if require_action_impact and not action_impact["present"]:
+        errors.append(
+            "action-impact summary required; add one of: "
+            + ", ".join(ACTION_IMPACT_SUMMARY_NAMES)
+        )
+    if action_impact["present"] and action_impact["n_total"] < min_action_impact_records:
+        errors.append(
+            "action-impact summary has too few records: "
+            f"{action_impact['n_total']} < {min_action_impact_records}"
+        )
 
     ok = not errors
     return {
@@ -69,6 +96,7 @@ def validate_pilot(path: Path) -> dict[str, object]:
         "errors": errors,
         "warnings": warnings,
         "required_files": sorted(REQUIRED_FILES),
+        "action_impact": action_impact,
     }
 
 
@@ -88,6 +116,65 @@ def _has_blank_table_rows(text: str) -> bool:
     return False
 
 
+def _action_impact_status(
+    path: Path,
+    *,
+    errors: list[str],
+    warnings: list[str],
+) -> dict[str, object]:
+    summary_path = _find_action_impact_summary(path)
+    if summary_path is None:
+        return {
+            "present": False,
+            "path": None,
+            "n_total": 0,
+            "n_measured": 0,
+            "n_review_required": 0,
+            "n_local_with_negative_externalities": 0,
+        }
+    try:
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("summary JSON must be an object")
+        summary = summary_from_mapping(payload, root=str(summary_path.parent))
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        errors.append(f"{summary_path.name}: invalid action-impact summary: {exc}")
+        return {
+            "present": True,
+            "path": str(summary_path),
+            "n_total": 0,
+            "n_measured": 0,
+            "n_review_required": 0,
+            "n_local_with_negative_externalities": 0,
+        }
+    if summary.n_total and not summary.n_measured:
+        warnings.append(f"{summary_path.name}: action-impact rows are present but none are measured")
+    if summary.n_review_required:
+        warnings.append(
+            f"{summary_path.name}: {summary.n_review_required} action-impact rows require review"
+        )
+    if summary.n_local_with_negative_externalities:
+        warnings.append(
+            f"{summary_path.name}: {summary.n_local_with_negative_externalities} local rows carry negative externalities"
+        )
+    return {
+        "present": True,
+        "path": str(summary_path),
+        "n_total": summary.n_total,
+        "n_measured": summary.n_measured,
+        "n_review_required": summary.n_review_required,
+        "n_local_with_negative_externalities": summary.n_local_with_negative_externalities,
+    }
+
+
+def _find_action_impact_summary(path: Path) -> Path | None:
+    for name in ACTION_IMPACT_SUMMARY_NAMES:
+        candidate = path / name
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pilot_dir", type=Path)
@@ -97,8 +184,23 @@ def main() -> int:
         action="store_true",
         help="Return success for a freshly scaffolded but incomplete pilot pack.",
     )
+    parser.add_argument(
+        "--require-action-impact",
+        action="store_true",
+        help="Require a machine-readable action-impact summary in the pilot folder.",
+    )
+    parser.add_argument(
+        "--min-action-impact-records",
+        type=int,
+        default=0,
+        help="Minimum action-impact rows required when a summary is present.",
+    )
     args = parser.parse_args()
-    result = validate_pilot(args.pilot_dir)
+    result = validate_pilot(
+        args.pilot_dir,
+        require_action_impact=args.require_action_impact,
+        min_action_impact_records=args.min_action_impact_records,
+    )
     exit_ok = bool(result["ok"]) or args.allow_draft
     if args.allow_draft and not result["ok"]:
         result = {**result, "ready": False, "draft_allowed": True, "ok": True}

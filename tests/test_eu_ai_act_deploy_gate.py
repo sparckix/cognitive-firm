@@ -195,8 +195,8 @@ def test_mandate_hash_changes_when_authorization_changes():
 
 def test_mandate_hash_stable_against_description_edits():
     """Edits to non-authorization fields (description, etc.) do NOT
-    invalidate the compliance mapping. This is the load-bearing
-    UX property — adopters edit description text often."""
+    invalidate the compliance mapping. This is the core UX property:
+    adopters edit description text often."""
     role1 = _typical_role_yaml()
     role2 = _typical_role_yaml()
     role1["description"] = "first description"

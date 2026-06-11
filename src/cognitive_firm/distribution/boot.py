@@ -16,6 +16,12 @@ from pathlib import Path
 
 import yaml
 
+from cognitive_firm.orchestration.authority_domains import (
+    authority_roles_in_domains,
+    load_authority_domains,
+    validate_authority_domains,
+)
+
 # Top-level keys every role.yaml must carry (role.v1 schema).
 ROLE_REQUIRED_KEYS = (
     "schema_version",
@@ -92,14 +98,19 @@ def boot_check(org_root: Path) -> list[str]:
     if not roles:
         return issues
 
-    issues.extend(_check_governance_graph(roles))
+    issues.extend(_check_governance_graph(roles, org_root=org_root))
     return issues
 
 
-def _check_governance_graph(roles: dict[str, dict]) -> list[str]:
+def _check_governance_graph(
+    roles: dict[str, dict],
+    *,
+    org_root: Path | None = None,
+) -> list[str]:
     """Check the escalation/delegation graph is governable.
 
-    - exactly one ``authority`` role;
+    - exactly one ``authority`` role, unless authority domains are declared;
+    - if domains are declared, every authority role is scoped by a domain;
     - every ``escalates_to`` / ``delegates_to`` role reference resolves;
     - every non-authority role's escalation chain reaches an authority role
       (no dead end, no cycle that never terminates at authority).
@@ -113,14 +124,29 @@ def _check_governance_graph(roles: dict[str, dict]) -> list[str]:
     authorities = sorted(
         rid for rid, r in roles.items() if r.get("role_class") == "authority"
     )
+    domains = []
+    if org_root is not None:
+        try:
+            domains = load_authority_domains(org_root)
+        except (OSError, ValueError, TypeError) as exc:
+            issues.append(f"authority domains do not parse: {exc}")
+    if domains:
+        issues.extend(validate_authority_domains(domains, roles=roles))
+        scoped_authorities = authority_roles_in_domains(domains)
+        unscoped = sorted(set(authorities) - scoped_authorities)
+        if unscoped:
+            issues.append(
+                "authority roles are missing authority-domain records: "
+                + ", ".join(unscoped)
+            )
     if not authorities:
         issues.append(
             "no role has role_class 'authority' - escalation cannot terminate"
         )
-    elif len(authorities) > 1:
+    elif len(authorities) > 1 and not domains:
         issues.append(
             f"multiple authority roles ({', '.join(authorities)}) - "
-            "exactly one is required"
+            "exactly one is required unless authority domains are declared"
         )
 
     escalation: dict[str, list[str]] = {}

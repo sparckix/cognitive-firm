@@ -9,6 +9,7 @@ bad install back.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -24,6 +25,9 @@ from cognitive_firm.distribution.manifest import (
     PackageManifest,
     load_manifest,
     validate_manifest,
+)
+from cognitive_firm.distribution.policy_validation import (
+    validate_extension_policy_tree,
 )
 from cognitive_firm.distribution.registry import (
     MANIFEST_FILENAME,
@@ -181,6 +185,12 @@ def _cmd_lint(args: argparse.Namespace) -> int:
             issues.append(
                 f"optional patch component has no source: {component.source}"
             )
+    issues.extend(
+        validate_extension_policy_tree(
+            package_root / "files",
+            report_root=package_root,
+        )
+    )
 
     if issues:
         print(f"LINT FAILED: {manifest.name or package_root} "
@@ -395,6 +405,68 @@ def _cmd_install_overlay(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_preview_overlay(args: argparse.Namespace) -> int:
+    """No-write overlay preview for package authors and reviewers."""
+    from cognitive_firm.distribution.governed_install import (
+        GovernedInstallError,
+        preview_overlay_install,
+    )
+
+    target = Path(args.into)
+    overlay_path = Path(args.package)
+    if (overlay_path / "package.yaml").is_file():
+        overlay_root = overlay_path
+        try:
+            manifest = load_manifest(overlay_root / "package.yaml")
+        except ManifestError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
+    else:
+        entry = _index(args).get(args.package)
+        if entry is None:
+            print(
+                f"ERROR: overlay not found: {args.package}", file=sys.stderr
+            )
+            return 2
+        overlay_root, manifest = entry.root, entry.manifest
+
+    try:
+        preview = preview_overlay_install(
+            overlay_manifest=manifest,
+            overlay_root=overlay_root,
+            target_root=target,
+        )
+    except GovernedInstallError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    if args.json:
+        print(json.dumps(preview.as_dict(), indent=2, sort_keys=True))
+    else:
+        print(
+            f"overlay preview: {manifest.name} {manifest.version} "
+            f"({manifest.kind}) -> {target}"
+        )
+        if preview.files:
+            print("file plan:")
+            for file in preview.files:
+                marker = "CONFLICT" if file.conflict else "new"
+                print(f"  [{file.op:<7}] {file.dest} ({marker})")
+        else:
+            print("file plan: no files")
+        print()
+        print(preview.diff.render())
+        print()
+        print(f"status: {preview.status}")
+        if not preview.can_proceed:
+            print(
+                "blocked: this overlay widens or ambiguously changes "
+                "authority; do not install it as a package.",
+                file=sys.stderr,
+            )
+    return 0 if preview.can_proceed else 1
+
+
 def _cmd_upgrade(args: argparse.Namespace) -> int:
     index = _index(args)
     entry = index.get(args.package)
@@ -513,6 +585,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Approve and apply, after reviewing the authority-diff.",
     )
     p_install_overlay.set_defaults(func=_cmd_install_overlay)
+
+    p_preview_overlay = sub.add_parser(
+        "preview-overlay",
+        help="Preview an overlay without writing a proposal or installing.",
+    )
+    p_preview_overlay.add_argument("package")
+    p_preview_overlay.add_argument(
+        "--into", required=True, help="The organization directory to preview against."
+    )
+    p_preview_overlay.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the preview as JSON for automation.",
+    )
+    p_preview_overlay.set_defaults(func=_cmd_preview_overlay)
 
     p_lint = sub.add_parser(
         "lint",

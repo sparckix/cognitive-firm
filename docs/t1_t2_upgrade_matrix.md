@@ -3,19 +3,19 @@
 **Status:** deployment boundary guide.
 
 cognitive-firm is designed to be useful as a filesystem-backed kernel for a
-single principal before it becomes an enterprise control plane. This matrix
-names the boundary so adopters can avoid both premature platform work and
-overstated deployment claims.
+single authority domain before it becomes an enterprise control plane. This
+matrix names the boundary so adopters can avoid both premature platform work
+and overstated deployment claims.
 
 ## Deployment Classes
 
 | Class | Description | Default stance |
 |---|---|---|
-| T1 Solo | One principal, trusted hardware, private repo, filesystem system of record | Supported target. |
+| T1 Solo | One accountable authority, trusted hardware, private repo, filesystem system of record | Supported target. |
 | T1 Small Team | A few trusted operators with shared repo access | Supported with explicit process discipline and optional actor membership. |
 | T2 Controlled | Multiple users, role-separated approvals, audit expectations | Lean MVP supported for audit integrity, actor identity, actor membership, adapter authentication, and leases; policy hardening still required. |
 | T2 Regulated | External audit, compliance controls, identity management | Requires hardened backend and signed audit. |
-| T2 Multi-Principal | Multiple principals or tenants with separate authority | Lean single-deployment role membership is supported; full tenant isolation and enterprise IAM remain deployment work. |
+| T2 Multi-Authority | Multiple authority roles, departments, operating units, projects, or tenants with separate decision rights | Actor membership and scoped records are partially supported; domain-aware authority routing, boot checks, tenant isolation, and enterprise IAM remain deployment work. |
 
 ## Runtime Shape
 
@@ -23,10 +23,10 @@ The T1 runtime is filesystem-backed on one trusted host. Git is audit,
 rollback, and synchronization, not the live message bus. Orbit, CLI, and
 notification providers are app surfaces over the same kernel state.
 
-For a startup, this is viable when the operating model is one principal or a
-small trusted operator set running one deployment. It is the right shape for
-local pilots, research firms, founder-led operations, and early adopter
-teams that value inspectability over multi-user platform polish.
+For a startup, this is viable when the operating model is one accountable
+authority or a small trusted operator set running one deployment. It is the
+right shape for local pilots, research firms, founder-led operations, and early
+adopter teams that value inspectability over multi-user platform polish.
 
 Move toward a service API and stronger backend when more than one active
 operator needs concurrent writes, enforceable identity boundaries, reliable
@@ -45,7 +45,8 @@ The primitives should stay stable across that path.
 
 | Axis | T1 behavior | T2 trigger | T2 requirement |
 |---|---|---|---|
-| Identity | Principal or small trusted set; actor context accepted from payloads | A second operator needs enforceable authority boundaries | Third-party authentication plus first-party actor identity, actor membership, trusted-header gateway adapter, subject-scope checks, role mapping, and per-action attribution. |
+| Identity | One accountable authority or small trusted set; actor context accepted from payloads | A second operator needs enforceable authority boundaries | Third-party authentication plus first-party actor identity, actor membership, trusted-header gateway adapter, subject-scope checks, role mapping, and per-action attribution. |
+| Authority domains | Exactly one boot authority role; userland resolves one default authority for governance interrupts | More than one authority role can approve different classes of work | Domain-aware authority records, scoped escalation chains, and per-domain attention routing. |
 | Audit | Git and append-only files by convention | External proof of non-tampering is needed | Chained log manifests ship as a lean T2-local seam; external timestamp/transparency-log references bind local roots to tenant-selected proof systems. |
 | Leases | Filesystem atomicity on one host; leases optional | Multiple hosts or unreliable shared volume | First-party leases with fencing tokens and expiry; contested mutations should use the transactional backend path. |
 | Outbox | Local filesystem polling | Network side effects or external webhooks | Retryable outbox with delivered, failed, and dead-letter states. |
@@ -122,8 +123,8 @@ The public kernel now ships the smallest useful T2-local seams:
   visibility is not enough.
 - Actor identity records for first-party actor context over external identity
   providers.
-- Actor membership records for scoped role authority across multiple humans,
-  agents, or services in one deployment.
+- Actor membership records for scoped role authority across multiple human,
+  agent, or service actors in one deployment.
 - Identity provider adapter interface, local bearer-token adapter, and
   trusted-header adapter for gateway-verified OIDC/SAML/mTLS deployments.
 - Subject-scope enforcement for authenticated role/tenant claims.

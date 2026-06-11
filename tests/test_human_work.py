@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -9,17 +10,21 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from cognitive_firm.orchestration.human_work import (  # noqa: E402
+    append_human_work_receipt,
     append_human_work_interaction,
     append_human_work_note,
     create_agent_requested_human_work_session,
     create_human_work_session,
+    human_work_resource,
     list_a2h_waiting_on_human_sessions,
     list_human_work_sessions,
     list_agent_followup_human_work_sessions,
     list_missing_receipt_human_work_sessions,
+    main as human_work_main,
     summarize_a2h_work_pressure,
     update_human_work_state,
 )
+from cognitive_firm.orchestration.resource_envelope import validate_resource  # noqa: E402
 from cognitive_firm.orchestration.agent_channels import send_agent_message  # noqa: E402
 from cognitive_firm.orchestration.execution_routing import infer_execution_route  # noqa: E402
 
@@ -47,6 +52,50 @@ def test_create_and_list_human_work_session(tmp_path: Path):
     assert session.state == "requested"
     assert session.observability == "human_attested"
     assert session.receipt_required is True
+
+
+def test_human_work_projects_to_resource_envelope(tmp_path: Path):
+    log = tmp_path / "human_work.jsonl"
+    session = create_agent_requested_human_work_session(
+        requested_by_role="role.researcher",
+        human_actor="principal",
+        objective="Inspect private partner note and report whether it changes the recommendation.",
+        work_mode="judgment",
+        bottleneck_class="access",
+        human_deliverable="bounded yes/no plus short rationale",
+        tenant_id="tenant-a",
+        project_id="project-a",
+        collaborating_roles=["role.reviewer"],
+        artifact_refs=["artifact://partner-note-redacted"],
+        obligation_id="msg_partner_check",
+        interaction_surface="offline",
+        agent_followup_ref="work:followup",
+        metadata={"risk_tier": "medium"},
+        log_path=log,
+    )
+
+    payload = human_work_resource(session).as_dict()
+
+    assert validate_resource(payload) == []
+    assert payload["kind"] == "HumanWorkSession"
+    assert payload["metadata"]["name"] == session.session_id
+    assert payload["metadata"]["tenant_id"] == "tenant-a"
+    assert payload["metadata"]["project_id"] == "project-a"
+    assert payload["metadata"]["labels"]["state"] == "requested"
+    assert payload["metadata"]["labels"]["work_mode"] == "judgment"
+    assert payload["metadata"]["labels"]["bottleneck_class"] == "access"
+    assert payload["metadata"]["labels"]["agent_counterparty_role"] == "role.researcher"
+    assert payload["metadata"]["labels"]["receipt_required"] == "true"
+    assert payload["metadata"]["annotations"]["risk_tier"] == "medium"
+    assert payload["spec"]["human_deliverable"] == "bounded yes/no plus short rationale"
+    assert payload["spec"]["obligation_id"] == "msg_partner_check"
+    assert payload["status"]["receipt_present"] is False
+    assert payload["status"]["interaction_event_count"] == 1
+    assert {"rel": "requested_by", "href": "role.researcher"} in payload["links"]
+    assert {"rel": "human_actor", "href": "principal"} in payload["links"]
+    assert {"rel": "collaborating_role", "href": "role.reviewer"} in payload["links"]
+    assert {"rel": "artifact", "href": "artifact://partner-note-redacted"} in payload["links"]
+    assert {"rel": "obligation", "href": "msg_partner_check"} in payload["links"]
 
 
 def test_filter_human_work_sessions(tmp_path: Path):
@@ -112,6 +161,45 @@ def test_human_work_state_lifecycle(tmp_path: Path):
     )
     assert integrated.state == "integrated"
     assert integrated.integration_ref == "org/tasks/done/customer_call.md"
+
+
+def test_human_work_resource_reflects_receipt_and_integration(tmp_path: Path):
+    log = tmp_path / "human_work.jsonl"
+    session = create_human_work_session(
+        requested_by="role.manager",
+        human_actor="principal",
+        objective="call customer",
+        work_mode="relationship",
+        bottleneck_class="relationship",
+        receipt_required=True,
+        receipt_type="note",
+        log_path=log,
+    )
+    update_human_work_state(session.session_id, "claimed", log_path=log)
+    update_human_work_state(session.session_id, "in_progress", log_path=log)
+    update_human_work_state(
+        session.session_id,
+        "completed",
+        completion_summary="Customer confirmed requirement.",
+        receipt="Call completed; notes in CRM.",
+        confidence="high",
+        log_path=log,
+    )
+    integrated = update_human_work_state(
+        session.session_id,
+        "integrated",
+        integration_ref="org/tasks/done/customer_call.md",
+        log_path=log,
+    )
+
+    payload = human_work_resource(integrated).as_dict()
+
+    assert payload["metadata"]["labels"]["state"] == "integrated"
+    assert payload["status"]["state"] == "integrated"
+    assert payload["status"]["receipt_present"] is True
+    assert payload["status"]["completion_summary"] == "Customer confirmed requirement."
+    assert payload["status"]["integration_ref"] == "org/tasks/done/customer_call.md"
+    assert {"rel": "integration", "href": "org/tasks/done/customer_call.md"} in payload["links"]
 
 
 def test_human_work_rejects_illegal_transition(tmp_path: Path):
@@ -411,6 +499,153 @@ def test_receipt_required_human_work_cannot_integrate_without_receipt(tmp_path: 
     )
     assert integrated.state == "integrated"
     assert integrated.receipt == "checked source note"
+
+
+def test_human_work_receipt_records_non_digitized_work_and_unblocks_integration(tmp_path: Path):
+    log = tmp_path / "human_work.jsonl"
+    session = create_agent_requested_human_work_session(
+        requested_by_role="role.researcher",
+        human_actor="principal",
+        objective="Check restricted source and report whether it supports the claim.",
+        work_mode="source_check",
+        bottleneck_class="access",
+        human_deliverable="bounded source-support claim plus evidence refs",
+        receipt_required=True,
+        receipt_type="note",
+        interaction_surface="offline",
+        sample_for_review=True,
+        log_path=log,
+    )
+
+    update_human_work_state(session.session_id, "claimed", log_path=log)
+    update_human_work_state(session.session_id, "in_progress", log_path=log)
+    updated = append_human_work_receipt(
+        session.session_id,
+        actor="principal",
+        summary="Restricted source supports the claim within the requested scope.",
+        receipt_type="artifact_ref",
+        subject_refs=["source://restricted/source-a"],
+        artifact_refs=["artifact://redacted-source-note"],
+        confidence="high",
+        log_path=log,
+    )
+    completed = update_human_work_state(
+        session.session_id,
+        "completed",
+        completion_summary="Restricted source supports the claim.",
+        log_path=log,
+    )
+    integrated = update_human_work_state(
+        session.session_id,
+        "integrated",
+        integration_ref="workspace/recommendation.md",
+        log_path=log,
+    )
+
+    assert updated.receipt_required is True
+    assert updated.receipt_type == "artifact_ref"
+    assert updated.receipt is not None
+    assert updated.confidence == "high"
+    assert updated.work_receipts[0]["subject_refs"] == ["source://restricted/source-a"]
+    assert updated.artifact_refs == ["artifact://redacted-source-note"]
+    assert updated.interaction_events[-1]["event_type"] == "human_work_receipt_attested"
+    assert completed.receipt is not None
+    assert integrated.state == "integrated"
+
+
+def test_human_work_resource_links_structured_receipt_refs(tmp_path: Path):
+    log = tmp_path / "human_work.jsonl"
+    session = create_human_work_session(
+        requested_by="role.manager",
+        human_actor="principal",
+        objective="Confirm external system status.",
+        work_mode="external_action",
+        bottleneck_class="access",
+        receipt_required=True,
+        receipt_type="none",
+        interaction_surface="external_system",
+        log_path=log,
+    )
+    updated = append_human_work_receipt(
+        session.session_id,
+        actor="principal",
+        summary="External system status is complete.",
+        receipt_type="external_ref",
+        receipt_ref="external://system/record-44",
+        subject_refs=["customer://account-44"],
+        metadata={"world_contact_kind": "external_system"},
+        log_path=log,
+    )
+
+    payload = human_work_resource(updated).as_dict()
+
+    assert validate_resource(payload) == []
+    assert payload["metadata"]["labels"]["work_receipt_present"] == "true"
+    assert payload["metadata"]["labels"]["receipt_type"] == "external_ref"
+    assert payload["status"]["work_receipt_count"] == 1
+    assert payload["status"]["work_receipts"][0]["receipt_ref"] == "external://system/record-44"
+    assert {"rel": "receipt_ref", "href": "external://system/record-44"} in payload["links"]
+    assert {"rel": "subject", "href": "customer://account-44"} in payload["links"]
+
+
+def test_human_work_cli_can_append_structured_receipt(tmp_path: Path, capsys):
+    log = tmp_path / "human_work.jsonl"
+    session = create_human_work_session(
+        requested_by="role.reviewer",
+        human_actor="principal",
+        objective="Check private note.",
+        work_mode="source_check",
+        bottleneck_class="access",
+        receipt_required=True,
+        receipt_type="note",
+        interaction_surface="offline",
+        log_path=log,
+    )
+
+    rc = human_work_main(
+        [
+            "receipt",
+            session.session_id,
+            "--actor",
+            "principal",
+            "--summary",
+            "Private note supports the claim.",
+            "--receipt-type",
+            "witness",
+            "--receipt-ref",
+            "principal",
+            "--subject-ref",
+            "source://private-note",
+            "--log-path",
+            str(log),
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["work_receipts"][0]["subject_refs"] == ["source://private-note"]
+    assert payload["receipt_type"] == "witness"
+    assert payload["receipt"]
+
+
+def test_human_work_cli_can_render_resource_envelopes(tmp_path: Path, capsys):
+    log = tmp_path / "human_work.jsonl"
+    session = create_human_work_session(
+        requested_by="role.manager",
+        human_actor="principal",
+        objective="verify source",
+        work_mode="source_check",
+        bottleneck_class="access",
+        log_path=log,
+    )
+
+    rc = human_work_main(["list", "--log-path", str(log), "--resource"])
+
+    assert rc == 0
+    payloads = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [payload["kind"] for payload in payloads] == ["HumanWorkSession"]
+    assert payloads[0]["metadata"]["name"] == session.session_id
+    assert payloads[0]["spec"]["objective"] == "verify source"
 
 
 def test_invalid_human_work_fields_fail(tmp_path: Path):

@@ -10,9 +10,12 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from cognitive_firm.orchestration.evidence_gaps import (  # noqa: E402
     create_evidence_gap,
+    evidence_gap_resource,
     list_evidence_gaps,
+    main as evidence_gaps_main,
     update_evidence_gap_status,
 )
+from cognitive_firm.orchestration.resource_envelope import validate_resource  # noqa: E402
 
 
 def test_create_and_list_evidence_gap(tmp_path: Path):
@@ -112,3 +115,65 @@ def test_invalid_status_or_severity_fails(tmp_path: Path):
 def test_update_missing_gap_fails(tmp_path: Path):
     with pytest.raises(KeyError):
         update_evidence_gap_status("gap_missing", "closed", log_path=tmp_path / "gaps.jsonl")
+
+
+def test_evidence_gap_projects_to_resource_envelope(tmp_path: Path):
+    log = tmp_path / "evidence_gaps.jsonl"
+    gap = create_evidence_gap(
+        gap_type="missing_external_comparator",
+        target="launch claim: teardown time under 90 seconds",
+        description="Need a competitor or field baseline before approving claim.",
+        severity="blocking",
+        producer="role.reviewer",
+        adversarial_direction=True,
+        fetch_query="field teardown time comparison",
+        owner_role="role.research_director",
+        tenant_id="tenant.example",
+        project_id="project.alpha",
+        source_ref="claim_brief:artifact_1",
+        metadata={"queue": "evidence"},
+        log_path=log,
+    )
+
+    payload = evidence_gap_resource(gap).as_dict()
+
+    assert validate_resource(payload) == []
+    assert payload["kind"] == "EvidenceGap"
+    assert payload["metadata"]["name"] == gap.gap_id
+    assert payload["metadata"]["tenant_id"] == "tenant.example"
+    assert payload["metadata"]["project_id"] == "project.alpha"
+    assert payload["metadata"]["labels"]["severity"] == "blocking"
+    assert payload["metadata"]["labels"]["status"] == "open"
+    assert payload["metadata"]["labels"]["adversarial_direction"] == "true"
+    assert payload["metadata"]["annotations"]["queue"] == "evidence"
+    assert payload["spec"]["target"] == "launch claim: teardown time under 90 seconds"
+    assert payload["spec"]["source_ref"] == "claim_brief:artifact_1"
+    assert payload["status"]["status"] == "open"
+    assert {
+        "rel": "target",
+        "href": "launch claim: teardown time under 90 seconds",
+    } in payload["links"]
+    assert {"rel": "owner_role", "href": "role.research_director"} in payload["links"]
+    assert {"rel": "source", "href": "claim_brief:artifact_1"} in payload["links"]
+
+
+def test_evidence_gap_cli_can_render_resource_envelopes(
+    tmp_path: Path,
+    capsys,
+):
+    log = tmp_path / "evidence_gaps.jsonl"
+    gap = create_evidence_gap(
+        gap_type="missing_source",
+        target="pricing claim",
+        description="Need primary source before external use.",
+        severity="useful",
+        producer="role.analyst",
+        log_path=log,
+    )
+
+    rc = evidence_gaps_main(["list", "--log-path", str(log), "--resource"])
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert '"kind": "EvidenceGap"' in output
+    assert gap.gap_id in output

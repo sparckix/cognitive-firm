@@ -8,13 +8,13 @@
 
 ## 1. Identity
 
-`cognitive-firm` lets one principal coordinate persistent AI agents under
-typed mandates, budget caps, human approval and work surfaces, and a tenant
-overlay pattern.
+`cognitive-firm` lets an accountable authority role coordinate persistent AI
+agents and human contributors under typed mandates, budget caps, human work
+surfaces, and a tenant overlay pattern.
 
-It is not an agent framework, an LLM SDK, or a chat client. It is the layer
-above those: persistent **role offices** with mandates, inboxes, sessions,
-signals, and audit trails.
+It is not an LLM SDK or a chat client. It is a governed work runtime above
+those layers: persistent **role offices** with mandates, inboxes, sessions,
+signals, execution routing, and audit trails.
 
 The operating model is concrete: agents take actions with provenance, humans do
 bounded work with receipts, role offices exchange obligations, and only typed
@@ -43,9 +43,64 @@ when they model execution graphs, tool calls, memory, and agent interaction.
 This kernel focuses on a different layer: durable roles, authority,
 accountability, human work, leases, and audit surfaces around those runtimes.
 
+### Why adopt this
+
+Adopt cognitive-firm only when the unit of value is no longer a single agent
+run. The repo is for work that repeats across days or weeks, crosses humans
+and agents, touches external systems, and needs a durable record of authority,
+evidence, outcome, and closure.
+
+Use the simpler stack when the job is simpler:
+
+| If you need... | Use... |
+|---|---|
+| Model calls, tools, prompts, middleware, and a configurable agent loop | LangChain or another agent SDK |
+| Stateful graph execution, persistence, interrupts, replay, and runtime observability | LangGraph or another workflow runtime |
+| Traces, evals, debugging, and deployment monitoring | LangSmith or another observability/eval platform |
+| SaaS triggers and API glue | n8n, Zapier, or a workflow automation tool |
+| Role authority, claimable production work, bounded human work, action provenance, formal-verification records, outcome links, accountability cases, and approved learning records around those systems | cognitive-firm |
+
+The adoption test is concrete:
+
+1. Will a role be allowed to act repeatedly, not just answer one prompt?
+2. Could a bad action require knowing who had authority, what evidence existed,
+   which human was asked to do work, and what recourse path existed?
+3. Do you need state that survives a model swap, runtime swap, or agent-session
+   reset?
+4. Would a reviewer need one packet showing run state, attestations,
+   authority evidence, production work-item state, temporary write claims,
+   governance approvals, human receipts, outcome evidence, unresolved caveats,
+   and accountable closure?
+
+If the answer is mostly no, use LangChain/LangGraph directly. If the answer is
+yes, use cognitive-firm as the organization layer around those runtimes.
+
+This also covers the useful part of "loop engineering": not the inner graph
+loop itself, but the repeated organizational loop around it. The existing
+primitives already cover the composition a governed loop needs: mandate,
+work item or goal, runtime checkpoints, action attestations, formal
+verification records, human-work receipts, outcome links, accountability cases,
+and approved learning records.
+
+To inspect that boundary locally:
+
+```bash
+make adoption-demo
+```
+
+The demo runs two no-cost paths: first a fictional Kettle & Compass native
+kernel workflow, then governance failure fixtures, then a LangGraph-style
+adapter workflow. Together they show role authority, claimable work, run
+checkpoints, human work, action attestation, outcome linkage, accountable
+closure, a governed-run attestation summary with work-item and observability
+refs plus derived evidence hashes, and the failures the kernel blocks or
+flags. See
+[`docs/examples/governance-failure-benchmark.md`](docs/examples/governance-failure-benchmark.md)
+for the fixture list.
+
 ### Who should adopt this
 
-- **Single principals** running a research lab, fund, or solo company who need persistent agents with bounded authority.
+- **Solo operators** running a research lab, fund, or solo company who need persistent agents with bounded authority.
 - **Small teams (1-5 people)** wanting one place where role mandates, budgets, audit trails, and approvals all live as files in git.
 - **Researchers** building on top of a system that can be inspected, replayed, and forked rather than reverse-engineered from logs.
 
@@ -54,10 +109,10 @@ accountability, human work, leases, and audit surfaces around those runtimes.
 | Out of scope | Why |
 |---|---|
 | Enterprise RBAC / SSO | Lean multi-actor role membership is supported. Full enterprise IAM administration, SSO provisioning, and tenant isolation remain deployment work. |
-| A graph/model runtime | The daemon is a governance runtime that dispatches existing CLIs (Claude Code, `codex`); it does not implement model inference, graph replay, or node scheduling. |
+| A model/graph engine | The daemon executes governed role-office work by discovering tasks, dispatching configured CLIs and MCP tools, recording checkpoints, and routing interrupts. It deliberately leaves model inference, graph replay, and node scheduling to the runtime best suited for that job. |
 | A chat UI | The system of record is the filesystem + git. UIs (Orbit, Telegram) are projections, not the truth. |
 | Agentic prompt engineering | Mandates and roles are typed contracts, not prompt templates. |
-| Cross-org federation | A single repo / single principal is the unit of governance. |
+| Cross-org federation | A single repo / single authority domain is the current unit of governance. |
 
 ### Alternatives, briefly
 
@@ -82,6 +137,7 @@ spec; this section is the map.
 | Role ↔ role | **A2A** (Agent-to-Agent) | Typed `AgentMessage` envelopes, obligation lifecycle, content-addressed artifact dependencies, saga compensation | [`docs/protocols/a2a.md`](docs/protocols/a2a.md) |
 | Role ↔ external | **MCP** (Model Context Protocol) | Capability-gated outbox-relay dispatch to enterprise systems (Linear, Salesforce, ERPs) | [`docs/protocols/mcp.md`](docs/protocols/mcp.md) |
 | Cross-cutting | **Mandate** | Typed authority contracts for what each role may do autonomously vs. by escalation | [`docs/protocols/mandate.md`](docs/protocols/mandate.md) |
+| Cross-cutting | **Worker Taxonomy** | Capability, fungibility, state, and transport vocabulary for worker roles | [`docs/protocols/worker-taxonomy.md`](docs/protocols/worker-taxonomy.md) |
 | Project / tenant | **Project Charter** | Scope fidelity: core question, out-of-scope boundaries, end states, forecast type, inheritance, and anchor proxies | [`docs/protocols/project-charter.md`](docs/protocols/project-charter.md) |
 
 ### The invariants
@@ -149,34 +205,37 @@ Read in this order if you are new:
 | 2 | `docs/first-30-minutes.md` | The fastest verified path through setup, smoke, and overlay boundaries |
 | 3 | `docs/abstraction-map.md` | Kernel vs app vs runtime vs tenant boundaries |
 | 4 | `docs/resource-event-catalog.md` | The adopter-facing object model |
-| 5 | `docs/blueprints/README.md` | Standard compositions: runtime interrupt, app write, learning loop, small-team membership |
-| 6 | `docs/kernel-invariants.md` | The small invariant set that generates the primitive design |
-| 7 | `docs/theory.md` | Claim map: prior literature, invariants, surfaces, falsifying pressure |
-| 8 | `docs/recursive-organization.md` | How the kernel supports organizational learning over time |
-| 9 | `docs/human-agent-work.md` | Human-agent work: speed, receipts, follow-up, accountability |
-| 10 | `docs/PROTOCOLS.md` | The protocol decomposition with shipped/queued status per primitive |
-| 11 | `docs/adopting-cognitive-firm.md` | How to fork the kernel and keep tenant content separate |
-| 12 | `docs/field-validation-pilot.md` | How to test the kernel in one real decision pipeline |
-| 13 | `docs/field-pilot-selector.md` | How to choose the first recurring decision pipeline |
-| 14 | `docs/accountability-speed-envelope.md` | How to choose agent-speed, sampled, gated, or accountable closure paths |
-| 15 | `docs/templates/field-pilot/README.md` | Copyable pilot scope, baseline, metrics, and learning-event templates |
-| 16 | `docs/reader-checklist.md` | Short understanding, change-review, and adoption checks |
-| 17 | `docs/agent-prompts.md` | Paste-ready prompts for using Codex or Claude to inspect the repo |
-| 18 | `docs/examples/end-to-end-governance-walkthrough.md` | End-to-end kernel learning loop |
-| 19 | `docs/examples/source-coverage-walkthrough.md` | Source-health and source-repair walkthrough |
-| 20 | `docs/examples/action-intelligence-source-health.md` | How to repair forecast/action-impact sources before routing work |
-| 21 | `docs/examples/learning-event-replay.md` | How approved learning is encountered by later work |
-| 22 | `docs/examples/learning-loop-demo.md` | Learning loop narrative and executable check |
-| 23 | `docs/examples/a2h-workflow-demo.md` | Agent-requested human-work workflow |
-| 24 | `docs/examples/app-service-integration-example.md` | How apps submit intents without becoming the system of record |
-| 25 | `docs/protocols/` | Per-protocol and interface specs with threat-model tables where applicable |
-| 26 | `docs/organizational_learning_loop.md` | How findings become durable state transitions |
-| 27 | `docs/ROADMAP.md` | Public-kernel roadmap |
-| 28 | `docs/t1_t2_upgrade_matrix.md` | Deployment-class boundary for T1/T2 adopters |
-| 29 | `tenants/example/` | Minimal overlay shape for adopters |
-| 30 | `org/README.md` | The system-of-record skeleton: roles, mandates, sessions, signals |
-| 31 | `src/cognitive_firm/` | The kernel implementation |
-| 32 | `tests/` | The validation surface — shipped behavior is backed here |
+| 5 | `docs/capability-map.md` | The problem-oriented map of implemented kernel surfaces |
+| 6 | `docs/blueprints/README.md` | Standard compositions: runtime interrupt, app write, learning loop, small-team membership |
+| 7 | `docs/kernel-invariants.md` | The small invariant set that generates the primitive design |
+| 8 | `docs/system-positioning.md` | What cognitive-firm owns versus agent runtimes, memory platforms, and automation tools |
+| 9 | `docs/theory.md` | Claim map: prior literature, invariants, surfaces, falsifying pressure |
+| 10 | `docs/recursive-organization.md` | How the kernel supports organizational learning over time |
+| 11 | `docs/human-agent-work.md` | Human-agent work: speed, receipts, follow-up, accountability |
+| 12 | `docs/PROTOCOLS.md` | The protocol decomposition with shipped/queued status per primitive |
+| 13 | `docs/adopting-cognitive-firm.md` | How to fork the kernel and keep tenant content separate |
+| 14 | `docs/field-validation-pilot.md` | How to test the kernel in one real decision pipeline |
+| 15 | `docs/field-pilot-selector.md` | How to choose the first recurring decision pipeline |
+| 16 | `docs/accountability-speed-envelope.md` | How to choose agent-speed, sampled, gated, or accountable closure paths |
+| 17 | `docs/templates/field-pilot/README.md` | Copyable pilot scope, baseline, metrics, and learning-event templates |
+| 18 | `docs/reader-checklist.md` | Short understanding, change-review, and adoption checks |
+| 19 | `docs/agent-prompts.md` | Paste-ready prompts for using Codex or Claude to inspect the repo |
+| 20 | `docs/examples/end-to-end-governance-walkthrough.md` | End-to-end kernel learning loop |
+| 21 | `docs/examples/source-coverage-walkthrough.md` | Source-health and source-repair walkthrough |
+| 22 | `docs/examples/action-intelligence-source-health.md` | How to repair forecast/action-impact sources before routing work |
+| 23 | `docs/examples/learning-event-replay.md` | How approved learning is encountered by later work |
+| 24 | `docs/examples/learning-loop-demo.md` | Learning loop narrative and executable check |
+| 25 | `docs/examples/a2h-workflow-demo.md` | Agent-requested human-work workflow |
+| 26 | `docs/examples/app-service-integration-example.md` | How apps submit intents without becoming the system of record |
+| 27 | `docs/protocols/` | Per-protocol and interface specs with threat-model tables where applicable |
+| 28 | `docs/organizational_learning_loop.md` | How findings become durable state transitions |
+| 29 | `docs/ROADMAP.md` | Public-kernel roadmap |
+| 30 | `docs/t1_t2_upgrade_matrix.md` | Deployment-class boundary for T1/T2 adopters |
+| 31 | `CHANGELOG.md` | Release history and shipped capability summary |
+| 32 | `tenants/example/` | Minimal overlay shape for adopters |
+| 33 | `org/README.md` | The system-of-record skeleton: roles, mandates, sessions, signals |
+| 33 | `src/cognitive_firm/` | The kernel implementation |
+| 34 | `tests/` | The validation surface — shipped behavior is backed here |
 
 | Directory | Role |
 |---|---|
@@ -227,7 +286,7 @@ pip install -e .
 make smoke-public
 make smoke-docker
 
-# Configure principal preferences
+# Configure default authority preferences
 cp org/preferences/templates/principal.yaml org/preferences/principal.yaml
 $EDITOR org/preferences/principal.yaml
 
@@ -284,17 +343,17 @@ widen a role's authority. See
 **Building and publishing your own package** — distro or overlay — is covered
 in [`docs/community-packages.md`](docs/community-packages.md): the publication
 rule (authorship is open, adoption is governed), the step-by-step authoring
-loop (`lint` → `--dry-run` → `boot_check` → publish as a git repo, no central
-registry), and a roadmap of suggested packages the ecosystem could use. Start
+loop (`lint` → `--dry-run` → verify install → publish as a git repo, no
+central registry), and a roadmap of suggested packages the ecosystem could use. Start
 from the template at
 [`docs/templates/package/`](docs/templates/package/README.md).
 
-The userland sits above the kernel as the operator-facing layer. The
+The userland sits above the kernel as the human-facing layer. The
 `cognitive-firm-userland` CLI shows what needs a human and the shared
 vocabulary:
 
 ```bash
-cognitive-firm-userland needs-me <actor_id>   # the operator's attention queue
+cognitive-firm-userland needs-me <actor_id>   # the accountable actor's attention queue
 cognitive-firm-userland inbox <actor_id>      # a member-human's bounded work
 cognitive-firm-userland vocabulary            # the shared userland glossary
 cognitive-firm-userland status                # plain-language org health
@@ -305,7 +364,7 @@ cognitive-firm-userland decline <proposal_id> # decline a governance change
 ```
 
 `proposals` / `approve` / `decline` are the governed-install human-review
-loop: a governance-change proposal awaits an operator decision, and
+loop: a governance-change proposal awaits an accountable actor decision, and
 `approve` / `decline` each record an attested kernel event.
 
 The same attention queue is also rendered by the Orbit `NeedsMePane`.
@@ -314,7 +373,8 @@ The same attention queue is also rendered by the Orbit `NeedsMePane`.
 
 ## 6. Production deployment
 
-VPS deployment uses systemd + bidirectional sync (mutagen) so the principal can edit mandates from a laptop while the daemon ticks 24/7.
+VPS deployment uses systemd + bidirectional sync (mutagen) so the accountable
+administrator can edit mandates from a laptop while the daemon ticks 24/7.
 
 | Step | Path |
 |---|---|
@@ -324,7 +384,11 @@ VPS deployment uses systemd + bidirectional sync (mutagen) so the principal can 
 | 4. (Optional) Bidirectional sync laptop ↔ VPS for mandate edits | `deploy/orbit-sync.service` |
 | 5. Tail with the operator console | `scripts/operator_console.sh` |
 
-Multi-tenant deployment: keep tenant content in a sibling private repo (`<tenant>-research-co/tenants/<tenant>/`) with `mandates/`, `roles/`, `preferences/` overrides. Symlink overlays into `cognitive-firm/org/` via a tenant setup script when running locally. The public git history and public Docker image should not contain tenant files.
+Multi-tenant deployment: keep tenant content in a sibling private repo
+(`<tenant>-research-co/tenants/<tenant>/`) with `mandates/`, `roles/`,
+`preferences/` overrides. Symlink overlays into `cognitive-firm/org/` via a
+tenant setup script when running locally. The public git history and public
+Docker image should not contain tenant files.
 
 ---
 
@@ -332,8 +396,10 @@ Multi-tenant deployment: keep tenant content in a sibling private repo (`<tenant
 
 cognitive-firm has a tested T1 kernel surface and a lean multi-actor authority
 path through actor identity, actor membership, subject-scope checks, and
-leases. Adopters who read the protocol specs can rely on every "shipped" claim
-being backed by tests in `tests/` and by the public verification commands:
+leases. The default boot path still assumes one authority role; the enterprise
+multi-authority path is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Adopters who read the protocol specs can rely on every "shipped" claim being
+backed by tests in `tests/` and by the public verification commands:
 
 ```bash
 make smoke-public
@@ -354,6 +420,7 @@ make smoke-docker
 | Evidence gap state | `src/cognitive_firm/orchestration/evidence_gaps.py` | `tests/test_evidence_gaps.py` |
 | Human work sessions + A2H helper | `src/cognitive_firm/orchestration/human_work.py` | `tests/test_human_work.py` |
 | Action attestations | `src/cognitive_firm/orchestration/action_attestation.py` | `tests/test_action_attestation.py` |
+| Governed-run attestation bundle | `src/cognitive_firm/orchestration/artifact_bundle.py` | `tests/test_governed_run_attestation_bundle.py`, `schemas/governed-run-attestation.v1.schema.json` |
 | Audit integrity manifests | `src/cognitive_firm/orchestration/audit_integrity.py` | `tests/test_audit_integrity.py` |
 | Accountability cases | `src/cognitive_firm/orchestration/accountability_cases.py` | `tests/test_accountability_cases.py` |
 | Forecast market interface | `src/cognitive_firm/orchestration/forecast_market.py` | `tests/test_forecast_market_interface.py` |
@@ -363,6 +430,7 @@ make smoke-docker
 | Organization surface read model | `src/cognitive_firm/orchestration/org_surface.py` | `tests/test_org_surface.py` |
 | Run checkpoint interface | `src/cognitive_firm/orchestration/run_checkpoints.py` | `tests/test_run_checkpoints.py` |
 | Runtime adapter interface | `src/cognitive_firm/orchestration/runtime_adapters.py` | `tests/test_runtime_adapters.py` |
+| Adapter conformance reports and manifests | `src/cognitive_firm/orchestration/adapter_conformance.py` | `tests/test_adapter_conformance.py` |
 | OpenTelemetry projection | `src/cognitive_firm/orchestration/otel_export.py` | `tests/test_otel_export.py` |
 | State backend connectors | `src/cognitive_firm/orchestration/state_backends.py` | `tests/test_state_backends.py` |
 | Kernel service boundary | `src/cognitive_firm/kernel_service.py` | `tests/test_kernel_service.py` |
@@ -391,7 +459,7 @@ make smoke-docker
 | Governed resource allocation | `src/cognitive_firm/orchestration/resource_allocation.py` | `tests/test_resource_allocation.py` |
 | Residual decision rights | `src/cognitive_firm/orchestration/decision_rights.py` | `tests/test_decision_rights.py` |
 | Distribution layer (install / verify / rollback / upgrade / lint, `op` composition, `extends`) | `src/cognitive_firm/distribution/` | `tests/test_distribution.py`, `tests/test_rollback.py`, `tests/test_distro_content.py`, `tests/test_overlay_composition.py` |
-| Governed overlay install (authority-diff proposal, `package.install_approved`) | `src/cognitive_firm/distribution/governed_install.py` | `tests/test_governed_install.py` |
+| Governed overlay install and no-write overlay preview (authority diff, file plan, `package.install_approved`) | `src/cognitive_firm/distribution/governed_install.py` | `tests/test_governed_install.py` |
 | Remote packages (git-URL fetch, SHA pin, content-hashed lockfile) | `src/cognitive_firm/distribution/remote_registry.py`, `lockfile.py` | `tests/test_remote_registry.py` |
 | Userland — enrollment, attention router, needs-me, work inbox, vocabulary, surface policy | `src/cognitive_firm/userland/` | `tests/test_attention_router.py`, `tests/test_needs_me.py`, `tests/test_work_inbox.py`, `tests/test_vocabulary.py`, `tests/test_enrollment.py`, `tests/test_surface_policy.py` |
 | Userland CLI + kernel routes (`needs-me` / `inbox` / `vocabulary` / `status` / `resolve` / `proposals` / `approve` / `decline`; `GET /kernel/attention`, `GET /kernel/vocabulary`, `GET /kernel/governance-changes`, `POST /kernel/governance-changes/{id}/decision`) | `src/cognitive_firm/userland/cli.py`, `src/cognitive_firm/kernel_service.py` | `tests/test_userland_cli.py`, `tests/test_kernel_service_userland.py` |

@@ -1,4 +1,4 @@
-"""Role membership records for multi-principal cognitive-firm deployments."""
+"""Role membership records for multi-authority cognitive-firm deployments."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
+from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
 
 
 MembershipStatus = Literal["active", "suspended", "revoked", "expired"]
@@ -108,6 +109,31 @@ def list_actor_memberships(
     return out
 
 
+def list_active_actor_memberships(
+    *,
+    actor_id: str | None = None,
+    role_id: str | None = None,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    log_path: Path | None = None,
+    now: datetime | None = None,
+) -> list[ActorMembership]:
+    """List active memberships, including start/expiry checks."""
+    now = now or datetime.now(timezone.utc)
+    return [
+        membership
+        for membership in list_actor_memberships(
+            actor_id=actor_id,
+            role_id=role_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            status="active",
+            log_path=log_path,
+        )
+        if _is_temporally_active(membership, now=now)
+    ]
+
+
 def actor_has_membership(
     *,
     actor_id: str,
@@ -119,17 +145,62 @@ def actor_has_membership(
 ) -> bool:
     """Return whether actor has an active scoped membership for this request."""
     now = now or datetime.now(timezone.utc)
-    for membership in list_actor_memberships(
+    for membership in list_active_actor_memberships(
         actor_id=actor_id,
         role_id=role_id,
         tenant_id=tenant_id,
         project_id=project_id,
-        status="active",
         log_path=log_path,
+        now=now,
     ):
-        if _is_temporally_active(membership, now=now):
-            return True
+        return True
     return False
+
+
+def actor_membership_resource(membership: ActorMembership) -> KernelResource:
+    """Project a role membership into the common kernel resource envelope."""
+    labels = {
+        "actor_id": membership.actor_id,
+        "role_id": membership.role_id,
+        "status": membership.status,
+    }
+    if membership.tenant_id:
+        labels["tenant_id"] = membership.tenant_id
+    if membership.project_id:
+        labels["project_id"] = membership.project_id
+    links = [
+        {"rel": "actor", "href": membership.actor_id},
+        {"rel": "role", "href": membership.role_id},
+        {"rel": "granted_by", "href": membership.granted_by},
+    ]
+    return make_resource(
+        kind="ActorMembership",
+        name=membership.assignment_id,
+        resource_id=membership.assignment_id,
+        tenant_id=membership.tenant_id,
+        project_id=membership.project_id,
+        stability="alpha",
+        labels=labels,
+        annotations={
+            key: str(value)
+            for key, value in membership.metadata.items()
+            if isinstance(key, str) and value is not None
+        },
+        spec={
+            "actor_id": membership.actor_id,
+            "role_id": membership.role_id,
+            "granted_by": membership.granted_by,
+            "decision_right_basis": membership.decision_right_basis,
+            "starts_at_utc": membership.starts_at_utc,
+            "expires_at_utc": membership.expires_at_utc,
+        },
+        status={
+            "status": membership.status,
+            "created_at_utc": membership.created_at_utc,
+            "updated_at_utc": membership.updated_at_utc,
+        },
+        links=links,
+    )
 
 
 def revoke_actor_membership(
@@ -240,6 +311,7 @@ def main(argv: list[str] | None = None) -> int:
     list_parser.add_argument("--project-id")
     list_parser.add_argument("--status")
     list_parser.add_argument("--log-path", type=Path)
+    list_parser.add_argument("--resource", action="store_true", help="render resource envelopes")
     revoke = sub.add_parser("revoke")
     revoke.add_argument("assignment_id")
     revoke.add_argument("--revoked-by", required=True)
@@ -268,7 +340,12 @@ def main(argv: list[str] | None = None) -> int:
             status=args.status,
             log_path=args.log_path,
         ):
-            print(json.dumps(membership.as_dict(), sort_keys=True))
+            payload = (
+                actor_membership_resource(membership).as_dict()
+                if args.resource
+                else membership.as_dict()
+            )
+            print(json.dumps(payload, sort_keys=True))
         return 0
     if args.cmd == "revoke":
         membership = revoke_actor_membership(

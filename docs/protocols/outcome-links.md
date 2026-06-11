@@ -85,14 +85,15 @@ POST /kernel/outcome-links                       { "change_ref": "...", "change_
 POST /kernel/outcome-links/<id>/snapshots        { "kind": "baseline", "value": 0.40, "captured_by": "..." }
 POST /kernel/outcome-links/<id>/verdict          { "verdict": "improved", "recorded_by": "...", "rationale": "..." }
 POST /kernel/outcome-links/<id>/void             { "reason": "..." }
-GET  /kernel/outcome-links                       ?status=&verdict=&learning_event_id=
+GET  /kernel/outcome-links                       ?status=&verdict=&learning_event_id=&resource=true
 GET  /kernel/outcome-links/summary               ?tenant_id=&project_id=
 ```
 
 Public functions: `create_outcome_link`, `record_metric_snapshot`,
 `record_verdict`, `void_outcome_link`, `list_outcome_links`, `get_outcome_link`,
-`summarize_outcome_links`. Every public function takes `log_path` and
-`kernel_events_log` so deployments and tests can redirect storage.
+`summarize_outcome_links`, and `outcome_link_resource`. Every public write
+function takes `log_path` and `kernel_events_log` so deployments and tests can
+redirect storage.
 
 ## Outcome-Link Summary
 
@@ -102,6 +103,21 @@ showed no change, are inconclusive, are still measuring, or are voided.
 `verdict_coverage` is the share of non-voided links that reached a verdict — the
 kernel's own measure of whether its learning loop is being closed. The summary
 owns no facts and can be rebuilt from outcome-link rows at any time.
+
+## Resource Projection
+
+`outcome_link_resource(...)` projects an outcome link into the common
+[`Resource Envelope`](resource-envelope.md). The JSONL row remains canonical;
+the projection is for adapters, dashboards, migrations, and conformance
+fixtures:
+
+```bash
+python -m cognitive_firm.orchestration.outcome_links list --resource
+```
+
+The resource links the governed change, typed learning event when present, and
+tenant measurement refs when snapshots carry them. It does not interpret the
+metric or verdict.
 
 ## Outcome-Link Events
 

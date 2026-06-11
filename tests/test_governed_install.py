@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from cognitive_firm.distribution import install, load_manifest
 from cognitive_firm.distribution.governed_install import (
     GovernedInstallError,
     apply_approved_install,
+    preview_overlay_install,
     propose_overlay_install,
 )
 
@@ -180,6 +182,70 @@ def test_cli_install_overlay_previews_then_approves(tmp_path):
         ["install-overlay", str(overlay), "--into", str(target), "--approve"]
     ) == 0
     assert "via_cli" in prefs.read_text()
+
+
+def test_preview_overlay_is_no_write_and_reports_file_plan(tmp_path):
+    target = _installed_org(tmp_path)
+    overlay = _overlay(
+        tmp_path, "preview-overlay", dest="preferences/principal.yaml",
+        op="replace", source_name="prefs.yaml",
+        body="principal_id: preview\nreview_cadence: weekly\n",
+    )
+    prefs = target / "preferences" / "principal.yaml"
+    before = prefs.read_text()
+
+    preview = preview_overlay_install(
+        overlay_manifest=load_manifest(overlay / "package.yaml"),
+        overlay_root=overlay,
+        target_root=target,
+    )
+
+    assert preview.status == "review_ready"
+    assert preview.can_proceed
+    assert not preview.diff.expands_authority
+    assert preview.files[0].dest == "preferences/principal.yaml"
+    assert preview.files[0].op == "replace"
+    assert prefs.read_text() == before
+    assert not (target / "governance_changes" / "governance_changes.jsonl").exists()
+
+
+def test_preview_overlay_blocks_authority_expansion_without_proposal(tmp_path):
+    target = _installed_org(tmp_path)
+    overlay = _overlay(
+        tmp_path, "preview-widen", dest="roles/analyst.yaml", op="replace",
+        source_name="analyst.yaml", body=_WIDENED_ANALYST,
+    )
+
+    preview = preview_overlay_install(
+        overlay_manifest=load_manifest(overlay / "package.yaml"),
+        overlay_root=overlay,
+        target_root=target,
+    )
+
+    assert preview.status == "blocked"
+    assert not preview.can_proceed
+    assert preview.diff.expands_authority
+    assert "roles/analyst.yaml" == preview.files[0].dest
+    assert not (target / "governance_changes" / "governance_changes.jsonl").exists()
+
+
+def test_cli_preview_overlay_json_returns_nonzero_for_blocked(tmp_path, capsys):
+    from cognitive_firm.distribution.cli import main as distro_main
+
+    target = _installed_org(tmp_path)
+    overlay = _overlay(
+        tmp_path, "cli-preview-widen", dest="roles/analyst.yaml", op="replace",
+        source_name="analyst.yaml", body=_WIDENED_ANALYST,
+    )
+
+    assert distro_main(
+        ["preview-overlay", str(overlay), "--into", str(target), "--json"]
+    ) == 1
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["status"] == "blocked"
+    assert payload["expands_authority"] is True
+    assert payload["files"][0]["dest"] == "roles/analyst.yaml"
 
 
 def test_apply_approved_install_materializes_and_attests(tmp_path):

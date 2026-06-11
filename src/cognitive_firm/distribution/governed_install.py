@@ -37,6 +37,7 @@ from cognitive_firm.distribution.installer import (
     InstallError,
     InstallReceipt,
     install,
+    plan_install,
     record_distribution_event,
 )
 from cognitive_firm.distribution.manifest import PackageManifest
@@ -68,6 +69,56 @@ class GovernedInstallProposal:
         return self.proposal.status != "blocked"
 
 
+@dataclass(frozen=True)
+class OverlayPreviewFile:
+    """One file a no-write overlay preview would touch."""
+
+    dest: str
+    op: str
+    conflict: bool
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "dest": self.dest,
+            "op": self.op,
+            "conflict": self.conflict,
+        }
+
+
+@dataclass(frozen=True)
+class OverlayInstallPreview:
+    """No-write preview for package authors and reviewers.
+
+    Unlike ``propose_overlay_install``, this does not write a governance
+    proposal. It stages the overlay against a copy, verifies it would boot,
+    computes the authority diff, and returns the install file plan.
+    """
+
+    overlay_manifest: PackageManifest
+    diff: AuthorityDiff
+    files: tuple[OverlayPreviewFile, ...]
+
+    @property
+    def status(self) -> str:
+        return "blocked" if self.diff.expands_authority else "review_ready"
+
+    @property
+    def can_proceed(self) -> bool:
+        return self.status == "review_ready"
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "package": self.overlay_manifest.name,
+            "version": self.overlay_manifest.version,
+            "kind": self.overlay_manifest.kind,
+            "status": self.status,
+            "can_proceed": self.can_proceed,
+            "expands_authority": self.diff.expands_authority,
+            "files": [file.as_dict() for file in self.files],
+            "authority_diff": self.diff.as_dict(),
+        }
+
+
 def _invariant_checks_from_diff(diff: AuthorityDiff) -> list[InvariantCheck]:
     """Derive the five required governance invariants from the authority-diff.
 
@@ -91,6 +142,7 @@ def _invariant_checks_from_diff(diff: AuthorityDiff) -> list[InvariantCheck]:
             "widen authority; make it a direct config change instead"
             if has_expands
             else "the authority-diff detected no expansion of write scope",
+            evidence_refs=["authority_diff:computed"],
         ),
         InvariantCheck(
             "principal_independence",
@@ -99,24 +151,83 @@ def _invariant_checks_from_diff(diff: AuthorityDiff) -> list[InvariantCheck]:
             "interpret — review the files directly"
             if has_unknown
             else "the install changes no escalation graph or role class",
+            evidence_refs=["authority_diff:computed"],
         ),
         InvariantCheck(
             "deterministic_enforcement_floor",
             "pass",
             "the kernel's runtime enforcement is unchanged by an overlay "
             "install",
+            evidence_refs=["governed_install:boot_check"],
         ),
         InvariantCheck(
             "fail_closed_behavior",
             "pass",
             "the kernel still fails closed against the installed files",
+            evidence_refs=["governed_install:boot_check"],
         ),
         InvariantCheck(
             "tenant_boundary_preserved",
             "pass",
             "the authority-diff detected no tenant-scoped change",
+            evidence_refs=["authority_diff:computed"],
         ),
     ]
+
+
+def _op_for_dest(manifest: PackageManifest, dest_rel: str) -> str:
+    for component in manifest.components:
+        dest = component.dest
+        if dest_rel == dest or dest_rel.startswith(dest + "/"):
+            return component.op
+    return "add"
+
+
+def preview_overlay_install(
+    *,
+    overlay_manifest: PackageManifest,
+    overlay_root: Path,
+    target_root: Path,
+) -> OverlayInstallPreview:
+    """No-write overlay preview.
+
+    Raises ``GovernedInstallError`` if the target does not exist, the overlay
+    has missing files, or staging the overlay would produce an unbootable org.
+    """
+    target_root = Path(target_root)
+    if not target_root.is_dir():
+        raise GovernedInstallError(f"target org does not exist: {target_root}")
+
+    try:
+        raw_plan = plan_install(overlay_manifest, overlay_root, target_root)
+    except FileNotFoundError as exc:
+        raise GovernedInstallError(str(exc)) from exc
+    files = tuple(
+        OverlayPreviewFile(
+            dest=dest_rel,
+            op=_op_for_dest(overlay_manifest, dest_rel),
+            conflict=conflict,
+        )
+        for _src, dest_rel, conflict in raw_plan
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        staging = Path(tmp) / "staging"
+        shutil.copytree(target_root, staging)
+        try:
+            install(overlay_manifest, overlay_root, staging, force=True)
+        except InstallError as exc:
+            raise GovernedInstallError(
+                f"the overlay '{overlay_manifest.name}' would produce an org "
+                f"that does not boot: {exc}"
+            ) from exc
+        diff = compute_authority_diff(target_root, staging)
+
+    return OverlayInstallPreview(
+        overlay_manifest=overlay_manifest,
+        diff=diff,
+        files=files,
+    )
 
 
 def propose_overlay_install(
@@ -161,7 +272,16 @@ def propose_overlay_install(
             overlay_manifest.description
             or f"install overlay {overlay_manifest.name}"
         ),
+        source_refs=[
+            f"package:{overlay_manifest.name}@{overlay_manifest.version}",
+            "authority_diff:computed",
+            "governed_install:staged_boot_check",
+        ],
         expected_behavior_change=diff.render(),
+        risk_summary=(
+            "overlay install preview; expands_authority="
+            f"{diff.expands_authority}; changed_files={len(diff.lines)}"
+        ),
         rollback_plan=(
             "clean rollback to the pre-install git ref "
             "(cognitive-firm-distro rollback)"

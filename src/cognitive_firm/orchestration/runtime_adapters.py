@@ -1,9 +1,10 @@
 """Framework-runtime adapter boundary.
 
-External agent frameworks own execution semantics. cognitive-firm owns
-organizational visibility. This module accepts framework-neutral runtime events
-and records them through run_checkpoints, which in turn writes to the canonical
-transition log.
+The first-party daemon executes governed role-office work. External agent
+frameworks may own framework-native execution semantics. cognitive-firm owns
+the organizational runtime view. This module accepts framework-neutral runtime
+events and records them through run_checkpoints, which in turn writes to the
+canonical transition log.
 """
 
 from __future__ import annotations

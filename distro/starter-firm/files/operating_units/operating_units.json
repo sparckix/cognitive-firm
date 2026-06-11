@@ -8,6 +8,12 @@
     "allowed_work_kinds": ["review_artifact", "return_for_rework"],
     "allowed_exits": ["accepted", "returned_for_rework"],
     "worker_roles": ["role.reviewer"],
+    "worker_role_classes": {
+      "role.reviewer": "governance"
+    },
+    "worker_role_archetypes": {
+      "role.reviewer": "independent_reviewer"
+    },
     "sla": {"p95_seconds": 120},
     "operator_required_when": ["ambiguous_value", "policy_change"],
     "governance_required_for": ["accepted"]

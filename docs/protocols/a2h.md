@@ -12,7 +12,7 @@ obligations, and accountability cases.
 The protocol exists because humans in a cognitive firm are not only decision
 gates. They may need to call a partner, inspect a private system, apply taste,
 read a physical document, or make a legitimacy judgment. Those actions can be
-real work even when the kernel cannot observe the work directly.
+substantive work even when the kernel cannot observe the work directly.
 
 ## Boundary
 
@@ -76,6 +76,21 @@ Receipt-required work cannot move to `integrated` until a receipt is present.
 The receipt can be a note, artifact reference, external reference, or witness
 claim, depending on the session's `receipt_type`.
 
+For non-digitized or externally mediated human work, use
+`append_human_work_receipt(...)` or the `receipt` CLI command. A structured
+receipt records a bounded human claim:
+
+- who is making the claim;
+- the bounded summary needed for integration;
+- receipt type and optional receipt reference;
+- subject refs for the domain objects involved;
+- artifact refs where durable evidence exists;
+- observability, confidence, and review requirement.
+
+This does not turn human work into machine-observed work. It makes the claim
+explicit enough to review, sample, link to tenant-owned systems, or block
+integration when the receipt is missing.
+
 The key difference from a gate is that the human is producing or changing an
 artifact, source claim, external-world fact, or judgment. The key difference
 from ordinary delegation is that the agent remains the integration
@@ -101,6 +116,38 @@ and Orbit. The default pressure threshold is deliberately small: three active
 sessions for the same `(agent_counterparty_role, bottleneck_class)` group, any
 stale session, or any missing required receipt. Tenants can make the threshold
 stricter without changing the protocol.
+
+## Resource Projection
+
+The human-work JSONL row remains canonical state. `human_work_resource(...)`
+projects a session into the common [Resource Envelope](resource-envelope.md) so
+adapters, dashboards, migration checks, and conformance fixtures can read A2H
+state with the same object shape as other kernel resources.
+
+The projection carries:
+
+- `spec`: requested actor, human actor, objective, work mode, bottleneck,
+  receipt policy, obligation, interaction surface, deliverable, and follow-up
+  routing;
+- `status`: lifecycle state, receipt presence, completion summary,
+  integration ref, note count, interaction-event count, work receipts, and
+  timestamps;
+- `links`: requested role, human actor, collaborating roles, artifacts,
+  obligation, integration ref, follow-up refs, and receipt refs where
+  present.
+
+CLI readers can emit either canonical rows or resource envelopes:
+
+```bash
+python -m cognitive_firm.orchestration.human_work list --resource
+```
+
+The command-path conformance fixture exercises the same CLI path and the
+receipt-before-integration invariant:
+
+```bash
+make a2h-command-conformance
+```
 
 ## Routing and Pre-Work Surfacing
 
@@ -191,6 +238,17 @@ create_agent_requested_human_work_session(
 )
 ```
 
+Structured receipt:
+
+```bash
+python -m cognitive_firm.orchestration.human_work receipt hws_123 \
+  --actor principal \
+  --summary "The restricted source supports the claim within the requested scope." \
+  --receipt-type artifact_ref \
+  --subject-ref source://restricted/source-a \
+  --artifact-ref artifact://redacted-source-note
+```
+
 Taste or legitimacy call:
 
 ```python
@@ -220,7 +278,7 @@ create_agent_requested_human_work_session(
 | Risk | T1 behavior | T2 path |
 |---|---|---|
 | Invisible human bottleneck | Human work session records objective, bottleneck class, state, and follow-up | Add SLA dashboards and sampling policy |
-| Non-digitized work | Bounded observability and receipt fields | Add stronger receipt policy by domain |
+| Non-digitized work | Bounded observability plus optional structured receipt with subject, artifact, witness, or external refs | Add stronger receipt policy by domain |
 | Agent over-requesting humans | Bottleneck classes surface repeated labor/access requests | Add allocation policy and rate limits |
 | Accountability laundering | Pair with accountability cases at residual-risk boundaries | Add role-specific recourse and review SLAs |
 | Privacy overcapture | Store bounded claims and artifact refs, not transcripts by default | Add retention policy and redaction workflow |

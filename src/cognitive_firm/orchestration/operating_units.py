@@ -32,21 +32,15 @@ from typing import Any, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
 from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
+from cognitive_firm.orchestration.worker_taxonomy import (
+    WORKER_CLASSES,
+    WorkerClass,
+    get_worker_archetype,
+)
 
 
 OperatingUnitStatus = Literal["active", "paused", "retired"]
 VALID_OPERATING_UNIT_STATUSES = {"active", "paused", "retired"}
-
-# Worker classes are an open, documented vocabulary. The kernel enforces actor
-# *identity* and *role* (via ``worker_roles``); the class is the design-time
-# label that explains why a role is allowed to touch this unit.
-WORKER_CLASSES = (
-    "deterministic",  # gates, filters, schema checks, replay, registry refresh
-    "llm",            # bounded proposal output only
-    "agent",          # stateful edit/debug/repair within a budget
-    "governance",     # independent verification and classification
-    "operator",       # human policy, budget, hard interpretation, ambiguous promotion
-)
 
 DEFAULT_OPERATING_UNITS_LOG = ORG_ROOT_DIR / "operating_units" / "operating_units.jsonl"
 _UNIT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
@@ -71,6 +65,8 @@ class OperatingUnit:
     allowed_work_kinds: list[str] = field(default_factory=list)
     allowed_exits: list[str] = field(default_factory=list)
     worker_roles: list[str] = field(default_factory=list)
+    worker_role_classes: dict[str, WorkerClass] = field(default_factory=dict)
+    worker_role_archetypes: dict[str, str] = field(default_factory=dict)
     sla: dict[str, Any] = field(default_factory=dict)
     operator_required_when: list[str] = field(default_factory=list)
     governance_required_for: list[str] = field(default_factory=list)
@@ -92,7 +88,7 @@ class OperatingUnit:
         """Return whether a role may claim work in this unit.
 
         An empty ``worker_roles`` list means the unit does not restrict
-        claimants. This keeps single-principal T1 deployments lightweight; a
+        claimants. This keeps single-authority T1 deployments lightweight; a
         tenant that wants the separation guarantee names its worker roles.
         """
         if not self.worker_roles:
@@ -137,6 +133,61 @@ def _clean_list(values: list[str] | None, *, label: str) -> list[str]:
     return out
 
 
+def _clean_worker_role_classes(
+    values: dict[str, str] | None,
+    *,
+    worker_roles: list[str],
+) -> dict[str, WorkerClass]:
+    out: dict[str, WorkerClass] = {}
+    for role_id, worker_class in (values or {}).items():
+        role = str(role_id).strip()
+        klass = str(worker_class).strip()
+        if not role:
+            raise ValueError("worker_role_classes keys must be non-empty role ids")
+        if klass not in WORKER_CLASSES:
+            raise ValueError(
+                f"worker_role_classes[{role!r}] must be one of {sorted(WORKER_CLASSES)}"
+            )
+        if worker_roles and role not in worker_roles:
+            raise ValueError(
+                f"worker_role_classes[{role!r}] must name a role in worker_roles"
+            )
+        out[role] = klass  # type: ignore[assignment]
+    return out
+
+
+def _clean_worker_role_archetypes(
+    values: dict[str, str] | None,
+    *,
+    worker_roles: list[str],
+    worker_role_classes: dict[str, WorkerClass],
+) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for role_id, archetype_id in (values or {}).items():
+        role = str(role_id).strip()
+        archetype_key = str(archetype_id).strip()
+        if not role:
+            raise ValueError("worker_role_archetypes keys must be non-empty role ids")
+        if not archetype_key:
+            raise ValueError("worker_role_archetypes values must be non-empty archetype ids")
+        if worker_roles and role not in worker_roles:
+            raise ValueError(
+                f"worker_role_archetypes[{role!r}] must name a role in worker_roles"
+            )
+        try:
+            archetype = get_worker_archetype(archetype_key)
+        except KeyError as exc:
+            raise ValueError(f"unknown worker archetype: {archetype_key}") from exc
+        declared_class = worker_role_classes.get(role)
+        if declared_class is not None and declared_class != archetype.worker_class:
+            raise ValueError(
+                f"worker_role_archetypes[{role!r}] class {archetype.worker_class!r} "
+                f"does not match worker_role_classes[{role!r}] {declared_class!r}"
+            )
+        out[role] = archetype_key
+    return out
+
+
 def validate_operating_unit_payload(payload: dict[str, Any]) -> list[str]:
     """Return human-readable errors for a candidate operating-unit payload."""
     errors: list[str] = []
@@ -164,6 +215,40 @@ def validate_operating_unit_payload(payload: dict[str, Any]) -> list[str]:
             errors.append(
                 f"governance_required_for exit {exit_kind!r} is not in allowed_exits"
             )
+    worker_roles = set(payload.get("worker_roles") or [])
+    worker_role_classes = payload.get("worker_role_classes") or {}
+    if not isinstance(worker_role_classes, dict):
+        errors.append("worker_role_classes must be an object mapping role id to worker class")
+    else:
+        for role_id, worker_class in worker_role_classes.items():
+            if worker_class not in WORKER_CLASSES:
+                errors.append(
+                    f"worker_role_classes[{role_id!r}] must be one of {sorted(WORKER_CLASSES)}"
+                )
+            if worker_roles and role_id not in worker_roles:
+                errors.append(
+                    f"worker_role_classes[{role_id!r}] must name a role in worker_roles"
+                )
+    worker_role_archetypes = payload.get("worker_role_archetypes") or {}
+    if not isinstance(worker_role_archetypes, dict):
+        errors.append("worker_role_archetypes must be an object mapping role id to worker archetype")
+    else:
+        for role_id, archetype_id in worker_role_archetypes.items():
+            try:
+                archetype = get_worker_archetype(str(archetype_id))
+            except KeyError:
+                errors.append(f"unknown worker archetype: {archetype_id}")
+                continue
+            if worker_roles and role_id not in worker_roles:
+                errors.append(
+                    f"worker_role_archetypes[{role_id!r}] must name a role in worker_roles"
+                )
+            declared_class = worker_role_classes.get(role_id)
+            if declared_class is not None and declared_class != archetype.worker_class:
+                errors.append(
+                    f"worker_role_archetypes[{role_id!r}] class {archetype.worker_class!r} "
+                    f"does not match worker_role_classes[{role_id!r}] {declared_class!r}"
+                )
     return errors
 
 
@@ -177,6 +262,8 @@ def define_operating_unit(
     allowed_work_kinds: list[str] | None = None,
     allowed_exits: list[str] | None = None,
     worker_roles: list[str] | None = None,
+    worker_role_classes: dict[str, WorkerClass | str] | None = None,
+    worker_role_archetypes: dict[str, str] | None = None,
     sla: dict[str, Any] | None = None,
     operator_required_when: list[str] | None = None,
     governance_required_for: list[str] | None = None,
@@ -191,6 +278,16 @@ def define_operating_unit(
     Definition is idempotent on ``unit_id``: redefining a unit replaces the
     contract and preserves the original ``created_at_utc``.
     """
+    clean_worker_roles = _clean_list(worker_roles, label="worker_roles")
+    clean_worker_role_classes = _clean_worker_role_classes(
+        worker_role_classes,
+        worker_roles=clean_worker_roles,
+    )
+    clean_worker_role_archetypes = _clean_worker_role_archetypes(
+        worker_role_archetypes,
+        worker_roles=clean_worker_roles,
+        worker_role_classes=clean_worker_role_classes,
+    )
     candidate = {
         "unit_id": unit_id,
         "unit_kind": unit_kind,
@@ -198,6 +295,9 @@ def define_operating_unit(
         "owner_role": owner_role,
         "allowed_work_kinds": _clean_list(allowed_work_kinds, label="allowed_work_kinds"),
         "allowed_exits": _clean_list(allowed_exits, label="allowed_exits"),
+        "worker_roles": clean_worker_roles,
+        "worker_role_classes": clean_worker_role_classes,
+        "worker_role_archetypes": clean_worker_role_archetypes,
         "governance_required_for": _clean_list(
             governance_required_for, label="governance_required_for"
         ),
@@ -228,7 +328,9 @@ def define_operating_unit(
         input_kinds=_clean_list(input_kinds, label="input_kinds"),
         allowed_work_kinds=candidate["allowed_work_kinds"],
         allowed_exits=candidate["allowed_exits"],
-        worker_roles=_clean_list(worker_roles, label="worker_roles"),
+        worker_roles=clean_worker_roles,
+        worker_role_classes=clean_worker_role_classes,
+        worker_role_archetypes=clean_worker_role_archetypes,
         sla=dict(sla or {}),
         operator_required_when=_clean_list(
             operator_required_when, label="operator_required_when"
@@ -328,6 +430,8 @@ def operating_unit_resource(unit: OperatingUnit) -> KernelResource:
             "allowed_work_kinds": unit.allowed_work_kinds,
             "allowed_exits": unit.allowed_exits,
             "worker_roles": unit.worker_roles,
+            "worker_role_classes": unit.worker_role_classes,
+            "worker_role_archetypes": unit.worker_role_archetypes,
             "sla": unit.sla,
             "operator_required_when": unit.operator_required_when,
             "governance_required_for": unit.governance_required_for,
@@ -349,6 +453,18 @@ def main(argv: list[str] | None = None) -> int:
     define.add_argument("--allowed-work-kind", action="append", default=[])
     define.add_argument("--allowed-exit", action="append", default=[])
     define.add_argument("--worker-role", action="append", default=[])
+    define.add_argument(
+        "--worker-role-class",
+        action="append",
+        default=[],
+        help="role=class annotation; class must be deterministic, llm, agent, governance, or operator",
+    )
+    define.add_argument(
+        "--worker-role-archetype",
+        action="append",
+        default=[],
+        help="role=archetype annotation; archetype must be from worker_taxonomy.WORKER_ARCHETYPES",
+    )
     define.add_argument("--operator-required-when", action="append", default=[])
     define.add_argument("--governance-required-for", action="append", default=[])
     define.add_argument("--p95-seconds", type=int)
@@ -370,6 +486,18 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.cmd == "define":
+        role_classes: dict[str, str] = {}
+        for item in args.worker_role_class:
+            if "=" not in item:
+                raise SystemExit("--worker-role-class must be ROLE=CLASS")
+            role, klass = item.split("=", 1)
+            role_classes[role.strip()] = klass.strip()
+        role_archetypes: dict[str, str] = {}
+        for item in args.worker_role_archetype:
+            if "=" not in item:
+                raise SystemExit("--worker-role-archetype must be ROLE=ARCHETYPE")
+            role, archetype = item.split("=", 1)
+            role_archetypes[role.strip()] = archetype.strip()
         unit = define_operating_unit(
             unit_id=args.unit_id,
             unit_kind=args.unit_kind,
@@ -379,6 +507,8 @@ def main(argv: list[str] | None = None) -> int:
             allowed_work_kinds=args.allowed_work_kind,
             allowed_exits=args.allowed_exit,
             worker_roles=args.worker_role,
+            worker_role_classes=role_classes,
+            worker_role_archetypes=role_archetypes,
             sla={"p95_seconds": args.p95_seconds} if args.p95_seconds else None,
             operator_required_when=args.operator_required_when,
             governance_required_for=args.governance_required_for,

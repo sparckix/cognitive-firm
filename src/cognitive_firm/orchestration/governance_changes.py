@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
+from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
 
 
 GovernanceChangeKind = Literal[
@@ -52,6 +53,13 @@ REQUIRED_INVARIANTS = {
     "write_scope_preserved",
     "tenant_boundary_preserved",
 }
+REQUIRED_EVIDENCE_FIELDS = {
+    "source_refs",
+    "expected_behavior_change",
+    "risk_summary",
+    "rollback_plan",
+    "invariant_evidence_refs",
+}
 
 
 @dataclass(frozen=True)
@@ -59,6 +67,17 @@ class InvariantCheck:
     invariant: str
     status: InvariantStatus
     rationale: str
+    evidence_refs: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class EvidenceSufficiencyCheck:
+    status: InvariantStatus
+    rationale: str
+    missing: list[str] = field(default_factory=list)
     evidence_refs: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -83,13 +102,21 @@ class GovernanceChangeProposal:
     tenant_id: str | None = None
     project_id: str | None = None
     invariant_checks: list[InvariantCheck] = field(default_factory=list)
+    evidence_sufficiency: EvidenceSufficiencyCheck | None = None
     approval_ref: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def review_ready(self) -> bool:
         statuses = {check.invariant: check.status for check in self.invariant_checks}
-        return all(statuses.get(invariant) == "pass" for invariant in REQUIRED_INVARIANTS)
+        invariants_ready = all(
+            statuses.get(invariant) == "pass" for invariant in REQUIRED_INVARIANTS
+        )
+        evidence_ready = (
+            self.evidence_sufficiency is not None
+            and self.evidence_sufficiency.status == "pass"
+        )
+        return invariants_ready and evidence_ready
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -127,6 +154,13 @@ def propose_governance_change(
         raise ValueError("rationale is required")
 
     checks = normalize_invariant_checks(invariant_checks or [])
+    evidence_sufficiency = assess_evidence_sufficiency(
+        source_refs=source_refs or [],
+        expected_behavior_change=expected_behavior_change,
+        risk_summary=risk_summary,
+        rollback_plan=rollback_plan,
+        invariant_checks=checks,
+    )
     proposal = GovernanceChangeProposal(
         proposal_id=proposal_id or f"gcp_{uuid.uuid4().hex[:12]}",
         created_at_utc=_now_iso(),
@@ -135,7 +169,11 @@ def propose_governance_change(
         proposed_by=proposed_by,
         target_ref=target_ref,
         rationale=rationale,
-        status="review_ready" if _checks_review_ready(checks) else "blocked",
+        status=(
+            "review_ready"
+            if _checks_review_ready(checks) and evidence_sufficiency.status == "pass"
+            else "blocked"
+        ),
         source_refs=source_refs or [],
         expected_behavior_change=expected_behavior_change,
         risk_summary=risk_summary,
@@ -144,6 +182,7 @@ def propose_governance_change(
         tenant_id=tenant_id,
         project_id=project_id,
         invariant_checks=checks,
+        evidence_sufficiency=evidence_sufficiency,
         metadata=metadata or {},
     )
     _append_jsonl(log_path or DEFAULT_GOVERNANCE_CHANGES_LOG, proposal.as_dict())
@@ -169,6 +208,14 @@ def list_governance_changes(
         row = dict(row)
         row.pop("review_ready", None)
         row["invariant_checks"] = normalize_invariant_checks(row.get("invariant_checks") or [])
+        row["evidence_sufficiency"] = normalize_evidence_sufficiency(
+            row.get("evidence_sufficiency"),
+            source_refs=row.get("source_refs") or [],
+            expected_behavior_change=row.get("expected_behavior_change"),
+            risk_summary=row.get("risk_summary"),
+            rollback_plan=row.get("rollback_plan"),
+            invariant_checks=row["invariant_checks"],
+        )
         proposal = GovernanceChangeProposal(**row)
         if status is not None and proposal.status != status:
             continue
@@ -201,6 +248,87 @@ def normalize_invariant_checks(rows: list[InvariantCheck | dict[str, Any]]) -> l
     return checks
 
 
+def assess_evidence_sufficiency(
+    *,
+    source_refs: list[str],
+    expected_behavior_change: str | None,
+    risk_summary: str | None,
+    rollback_plan: str | None,
+    invariant_checks: list[InvariantCheck],
+) -> EvidenceSufficiencyCheck:
+    """Check whether a governance proposal cites enough evidence for review.
+
+    This is a structural sufficiency check, not a domain judgment. It prevents a
+    recursive system from moving a self-modification proposal to review with
+    only prose and self-asserted invariant results.
+    """
+    missing: list[str] = []
+    clean_sources = _string_list(source_refs)
+    if not clean_sources:
+        missing.append("source_refs")
+    if not (expected_behavior_change or "").strip():
+        missing.append("expected_behavior_change")
+    if not (risk_summary or "").strip():
+        missing.append("risk_summary")
+    if not (rollback_plan or "").strip():
+        missing.append("rollback_plan")
+
+    for check in invariant_checks:
+        if check.status == "pass" and not check.evidence_refs:
+            missing.append(f"invariant_evidence_refs:{check.invariant}")
+
+    evidence_refs = list(dict.fromkeys(
+        [
+            *clean_sources,
+            *[
+                ref
+                for check in invariant_checks
+                for ref in check.evidence_refs
+            ],
+        ]
+    ))
+    if missing:
+        return EvidenceSufficiencyCheck(
+            status="fail",
+            rationale="governance change is missing required review evidence",
+            missing=sorted(missing),
+            evidence_refs=evidence_refs,
+        )
+    return EvidenceSufficiencyCheck(
+        status="pass",
+        rationale="governance change carries structural evidence for review",
+        missing=[],
+        evidence_refs=evidence_refs,
+    )
+
+
+def normalize_evidence_sufficiency(
+    payload: EvidenceSufficiencyCheck | dict[str, Any] | None,
+    *,
+    source_refs: list[str],
+    expected_behavior_change: str | None,
+    risk_summary: str | None,
+    rollback_plan: str | None,
+    invariant_checks: list[InvariantCheck],
+) -> EvidenceSufficiencyCheck:
+    if isinstance(payload, EvidenceSufficiencyCheck):
+        return payload
+    if isinstance(payload, dict):
+        return EvidenceSufficiencyCheck(
+            status=_validate_invariant_status(str(payload.get("status") or "unknown")),
+            rationale=str(payload.get("rationale") or ""),
+            missing=sorted(_string_list(payload.get("missing") or [])),
+            evidence_refs=_string_list(payload.get("evidence_refs") or []),
+        )
+    return assess_evidence_sufficiency(
+        source_refs=source_refs,
+        expected_behavior_change=expected_behavior_change,
+        risk_summary=risk_summary,
+        rollback_plan=rollback_plan,
+        invariant_checks=invariant_checks,
+    )
+
+
 def missing_required_invariants(checks: list[InvariantCheck]) -> list[str]:
     present = {check.invariant for check in checks if check.status == "pass"}
     return sorted(REQUIRED_INVARIANTS - present)
@@ -208,6 +336,81 @@ def missing_required_invariants(checks: list[InvariantCheck]) -> list[str]:
 
 def failed_invariants(checks: list[InvariantCheck]) -> list[str]:
     return sorted(check.invariant for check in checks if check.status == "fail")
+
+
+def governance_change_resource(proposal: GovernanceChangeProposal) -> KernelResource:
+    """Project a governance-change proposal into the common resource envelope.
+
+    The proposal JSONL row remains canonical. The resource view is for adapters,
+    dashboards, migration checks, and conformance fixtures that need a stable
+    object shape for governed self-modification state.
+    """
+    labels = {
+        "change_kind": proposal.change_kind,
+        "status": proposal.status,
+        "proposed_by": proposal.proposed_by,
+        "target_ref": proposal.target_ref,
+        "review_ready": str(proposal.review_ready).lower(),
+    }
+    if proposal.owner_role:
+        labels["owner_role"] = proposal.owner_role
+
+    links = [
+        {"rel": "target", "href": proposal.target_ref},
+        {"rel": "proposed_by", "href": proposal.proposed_by},
+    ]
+    if proposal.owner_role:
+        links.append({"rel": "owner_role", "href": proposal.owner_role})
+    if proposal.approval_ref:
+        links.append({"rel": "approval", "href": proposal.approval_ref})
+    for ref in proposal.source_refs:
+        links.append({"rel": "source", "href": ref})
+    if proposal.evidence_sufficiency:
+        for ref in proposal.evidence_sufficiency.evidence_refs:
+            links.append({"rel": "evidence", "href": ref})
+    for check in proposal.invariant_checks:
+        for ref in check.evidence_refs:
+            links.append({"rel": f"invariant_evidence:{check.invariant}", "href": ref})
+
+    return make_resource(
+        kind="GovernanceChangeProposal",
+        name=proposal.proposal_id,
+        resource_id=proposal.proposal_id,
+        tenant_id=proposal.tenant_id,
+        project_id=proposal.project_id,
+        stability="alpha",
+        labels=labels,
+        annotations={
+            key: str(value)
+            for key, value in proposal.metadata.items()
+            if isinstance(key, str) and value is not None
+        },
+        spec={
+            "change_kind": proposal.change_kind,
+            "title": proposal.title,
+            "target_ref": proposal.target_ref,
+            "rationale": proposal.rationale,
+            "proposed_by": proposal.proposed_by,
+            "source_refs": proposal.source_refs,
+            "expected_behavior_change": proposal.expected_behavior_change,
+            "risk_summary": proposal.risk_summary,
+            "rollback_plan": proposal.rollback_plan,
+            "owner_role": proposal.owner_role,
+        },
+        status={
+            "status": proposal.status,
+            "review_ready": proposal.review_ready,
+            "invariant_checks": [check.as_dict() for check in proposal.invariant_checks],
+            "evidence_sufficiency": (
+                proposal.evidence_sufficiency.as_dict()
+                if proposal.evidence_sufficiency
+                else None
+            ),
+            "approval_ref": proposal.approval_ref,
+            "created_at_utc": proposal.created_at_utc,
+        },
+        links=links,
+    )
 
 
 def _checks_review_ready(checks: list[InvariantCheck]) -> bool:
@@ -274,6 +477,7 @@ def main(argv: list[str] | None = None) -> int:
     list_parser.add_argument("--tenant-id")
     list_parser.add_argument("--project-id")
     list_parser.add_argument("--log-path", type=Path)
+    list_parser.add_argument("--resource", action="store_true", help="render resource envelopes")
 
     propose_parser = sub.add_parser("propose")
     propose_parser.add_argument("--change-kind", required=True)
@@ -305,7 +509,13 @@ def main(argv: list[str] | None = None) -> int:
             project_id=args.project_id,
             log_path=args.log_path,
         )
-        print(json.dumps([proposal.as_dict() for proposal in proposals], indent=2, sort_keys=True))
+        payload = [
+            governance_change_resource(proposal).as_dict()
+            if args.resource
+            else proposal.as_dict()
+            for proposal in proposals
+        ]
+        print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
     checks = [json.loads(row) for row in args.invariant_check_json]

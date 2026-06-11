@@ -170,6 +170,31 @@ Copy them into a tenant workspace with:
 python scripts/field_pilot_scaffold.py tenants/<tenant>/field-pilots/<pilot-name>
 ```
 
+For pilots that use action-impact evidence, place a machine-readable summary in
+the pilot folder as `action-impact-summary.json` and validate it with:
+
+```bash
+python scripts/field_pilot_action_impact_compile.py tenants/<tenant>/field-pilots/<pilot-name> \
+  pilot-rows.csv \
+  --validate \
+  --min-records 30
+```
+
+```bash
+python scripts/field_pilot_validate.py tenants/<tenant>/field-pilots/<pilot-name> \
+  --require-action-impact \
+  --min-action-impact-records 30
+```
+
+The no-cost executable example is:
+
+```bash
+make field-pilot-action-impact-demo
+```
+
+That demo turns measured pilot rows into a candidate route, conservative
+offline evaluation, and policy-promotion packet for governance review.
+
 ## Open Research Questions
 
 - Which workflows benefit most from governance kernels: high-volume analytical

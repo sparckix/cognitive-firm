@@ -3,9 +3,10 @@
 **Status:** shipped as a transition-log-backed T1 interface.
 
 This interface is the cognitive-firm parity point with durable execution
-runtimes. It does not implement graph replay. It records long-running
-role-office work as canonical transition events, then derives current run state
-by replaying the transition log.
+runtimes. The first-party daemon executes governed role-office work; external
+frameworks may own graph replay. In both cases, cognitive-firm records
+long-running role-office work as canonical transition events, then derives
+current run state by replaying the transition log.
 
 ## Prior Decision
 
@@ -60,6 +61,24 @@ python -m cognitive_firm.orchestration.run_checkpoints state run_... \
   --state completed
 ```
 
+## Service Flow
+
+The kernel service exposes the same transition-log-backed interface for app
+and runtime adapters:
+
+```text
+POST /kernel/runs
+GET  /kernel/runs?state=running&tenant_id=...
+GET  /kernel/runs/<run_id>
+GET  /kernel/runs/<run_id>/resume
+POST /kernel/runs/<run_id>/checkpoints
+POST /kernel/runs/<run_id>/state
+```
+
+The write routes append `run.*` transition rows; they do not create a second
+run store. The read routes rebuild projections from the configured transition
+log, so an external runtime, Orbit surface, or CLI sees the same run state.
+
 ## Semantics
 
 - Active runs with the same idempotency key project to the existing run.
@@ -70,9 +89,9 @@ python -m cognitive_firm.orchestration.run_checkpoints state run_... \
 
 ## LangGraph Boundary
 
-LangGraph is stronger as a graph runtime: it owns node execution, persistence,
-interrupts, streaming, and replay. cognitive-firm should remain the governance
-kernel above runtimes.
+LangGraph owns graph-runtime concerns: node execution, persistence, interrupts,
+streaming, and replay. cognitive-firm should remain the governance kernel above
+runtimes.
 
 | Concern | Runtime layer | cognitive-firm layer |
 |---|---|---|

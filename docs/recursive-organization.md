@@ -58,6 +58,14 @@ therefore separates:
 This separation keeps learning useful without letting every local optimizer
 edit the rules of the organization.
 
+For self-modification, separation is not enough. A proposal to change
+governance must also carry enough structural evidence for review: source refs,
+expected behavior change, risk summary, rollback plan, and evidence refs for
+the invariant checks it claims passed. Otherwise the loop can become circular:
+the same system that wants to relax a constraint can declare the relaxation
+safe. The governance-change primitive therefore blocks weakly evidenced
+proposals before they reach approval.
+
 ## The Six Invariants
 
 The kernel's primitives serve six invariants:
@@ -119,7 +127,7 @@ A useful prior test for human-agent work is: if "AI" were replaced by a very
 capable junior employee, would the claim still hold? If yes, the claim may be
 ordinary delegation, workflow, or principal-agent economics rather than a new
 human-AI primitive. A second version replaces the human with another agent and
-asks what about the human side remains load-bearing.
+asks what about the human side remains structurally necessary.
 
 That test is still useful here, but it answers a different question. It helps
 decide whether a work mode is structurally special. The recursive organization

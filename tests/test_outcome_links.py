@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -13,11 +14,14 @@ from cognitive_firm.orchestration.outcome_links import (  # noqa: E402
     create_outcome_link,
     get_outcome_link,
     list_outcome_links,
+    main as outcome_links_main,
+    outcome_link_resource,
     record_metric_snapshot,
     record_verdict,
     summarize_outcome_links,
     void_outcome_link,
 )
+from cognitive_firm.orchestration.resource_envelope import validate_resource  # noqa: E402
 
 
 class _Logs:
@@ -338,3 +342,38 @@ def test_void_emits_a_kernel_event(logs: _Logs):
         )
     ]
     assert verbs == ["outcome_link.created", "outcome_link.voided"]
+
+
+def test_outcome_link_resource_envelope(logs: _Logs):
+    link = _create(logs, owner_role="role.quality_office", metadata={"source": "pilot"})
+    _baseline(logs, link)
+    _post(logs, link)
+    final = record_verdict(
+        link.outcome_link_id,
+        verdict="improved",
+        recorded_by="role.quality_office",
+        rationale="tenant metric improved",
+        log_path=logs.links,
+        kernel_events_log=logs.events,
+    )
+
+    resource = outcome_link_resource(final).as_dict()
+    assert validate_resource(resource) == []
+    assert resource["kind"] == "OutcomeLink"
+    assert resource["metadata"]["resource_id"] == final.outcome_link_id
+    assert resource["metadata"]["labels"]["status"] == "verdict_recorded"
+    assert resource["metadata"]["labels"]["verdict"] == "improved"
+    assert resource["spec"]["change_ref"] == "learning_event:learn_abc"
+    assert resource["status"]["post_snapshot_count"] == 1
+    assert {"rel": "learning_event", "href": "learning_event:learn_abc"} in resource["links"]
+
+
+def test_outcome_links_cli_can_render_resources(logs: _Logs, capsys):
+    link = _create(logs)
+
+    rc = outcome_links_main(["list", "--log-path", str(logs.links), "--resource"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "OutcomeLink"
+    assert payload["metadata"]["name"] == link.outcome_link_id

@@ -1,0 +1,31 @@
+schema_version: cognitive-firm-adapter-manifest/v1
+adapter_id: langgraph-runtime-adapter
+family: runtime
+protocol: runtime_event
+description: >
+  LangGraph runtime adapter that projects graph lifecycle callbacks into
+  cognitive-firm RuntimeEvent rows. Graph execution, checkpoints, and resume
+  tokens remain owned by LangGraph; cognitive-firm records the organizational
+  projection.
+executable:
+  kind: python_package
+  ref: cognitive_firm_langgraph_adapter
+  version: 0.1.0
+  install_hint: >
+    Install the adapter package in the same Python environment as LangGraph,
+    then configure lifecycle hooks to call record_runtime_event.
+trust_requirements:
+  executable_installation: external
+  conformance_fixture: required
+  stable_external_run_id: required
+  opaque_resume_ref: required
+conformance_checks:
+  - started_event_idempotent
+  - checkpoint_preserves_side_effect_key
+  - interrupt_creates_human_work
+  - state_changed_completes_projected_run
+  - governed_run_bundle_has_no_caveats
+evidence_refs:
+  - tests/test_runtime_adapters.py
+  - tests/test_runtime_proof_pack.py
+  - scripts/langgraph_governance_demo.py

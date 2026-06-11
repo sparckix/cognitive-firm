@@ -12,7 +12,7 @@ Verbs:
 - ``vocabulary``           — the shared L4 glossary every surface speaks.
 - ``status``               — a plain-language read of overall org health.
 - ``resolve <gate_id>``    — act on a pending gate the operator saw in ``needs-me``.
-- ``proposals``            — governance changes awaiting a human decision.
+- ``proposals``            — governance changes awaiting an accountable actor decision.
 - ``approve <id>``         — approve a governance change (an attested event).
 - ``decline <id>``         — decline a governance change (an attested event).
 """
@@ -176,7 +176,7 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
 
 
 def _cmd_proposals(_args: argparse.Namespace) -> int:
-    """List governance changes awaiting a human decision."""
+    """List governance changes awaiting an accountable actor decision."""
     response = dispatch_kernel_request(
         "GET", "/kernel/governance-changes?status=review_ready"
     )
@@ -303,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_proposals = sub.add_parser(
         "proposals",
-        help="List governance changes awaiting a human decision.",
+        help="List governance changes awaiting an accountable actor decision.",
     )
     p_proposals.set_defaults(func=_cmd_proposals)
 

@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from cognitive_firm.kernel_service import KernelServiceConfig, dispatch_kernel_request  # noqa: E402
+from cognitive_firm.orchestration.governance_changes import REQUIRED_INVARIANTS  # noqa: E402
 from cognitive_firm.orchestration.state_backends import SqliteMutationBackend  # noqa: E402
 
 
@@ -85,6 +86,61 @@ def main() -> int:
         if len(events) != 1 or events[0]["event"] != "smoke.mutation.accepted":
             raise AssertionError(f"unexpected events: {events}")
 
+        governance_proposal = dispatch_kernel_request(
+            "POST",
+            "/kernel/governance-changes",
+            {
+                "change_kind": "mandate_change",
+                "title": "Clarify smoke-test mandate",
+                "target_ref": "org/mandates/smoke.md",
+                "rationale": "Smoke verifies the governed proposal path.",
+                "source_refs": ["smoke:mutation.accepted"],
+                "expected_behavior_change": "Future smoke work uses the clarified mandate.",
+                "risk_summary": "No authority expansion; test-only workspace.",
+                "rollback_plan": "Delete the temp workspace.",
+                "invariant_checks": [
+                    {
+                        "invariant": invariant,
+                        "status": "pass",
+                        "rationale": f"{invariant} preserved by test fixture.",
+                        "evidence_refs": [f"smoke:{invariant}"],
+                    }
+                    for invariant in sorted(REQUIRED_INVARIANTS)
+                ],
+                "actor_context": actor_context,
+            },
+            config=config,
+        )
+        _assert_status(governance_proposal.status, 201, "governance proposal")
+        proposal_id = governance_proposal.payload["proposal"]["proposal_id"]
+        if governance_proposal.payload["proposal"]["status"] != "review_ready":
+            raise AssertionError(
+                f"proposal not review-ready: {governance_proposal.payload}"
+            )
+
+        governance_resource = dispatch_kernel_request(
+            "GET",
+            f"/kernel/governance-changes/{proposal_id}?resource=true",
+            config=config,
+        )
+        _assert_status(governance_resource.status, 200, "governance resource")
+        if governance_resource.payload["proposal"]["kind"] != "GovernanceChangeProposal":
+            raise AssertionError(
+                f"unexpected governance resource: {governance_resource.payload}"
+            )
+
+        governance_decision = dispatch_kernel_request(
+            "POST",
+            f"/kernel/governance-changes/{proposal_id}/decision",
+            {
+                "decision": "approve",
+                "reason": "smoke test approval",
+                "actor_context": actor_context,
+            },
+            config=config,
+        )
+        _assert_status(governance_decision.status, 200, "governance decision")
+
         print(
             json.dumps(
                 {
@@ -92,6 +148,12 @@ def main() -> int:
                     "service": health.payload["service"],
                     "backend": backend.connector_id,
                     "accepted_events": len(events),
+                    "governance_proposal_status": governance_proposal.payload[
+                        "proposal"
+                    ]["status"],
+                    "governance_decision": governance_decision.payload["result"][
+                        "decision"
+                    ],
                     "stale_rejected": True,
                 },
                 sort_keys=True,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,6 +16,7 @@ from cognitive_firm.orchestration.operating_units import (  # noqa: E402
     define_operating_unit,
     set_operating_unit_status,
 )
+from cognitive_firm.orchestration.resource_envelope import validate_resource  # noqa: E402
 from cognitive_firm.orchestration.work_items import (  # noqa: E402
     claim_next_work_item,
     claim_work_item,
@@ -24,8 +26,10 @@ from cognitive_firm.orchestration.work_items import (  # noqa: E402
     heartbeat_work_item,
     list_dead_letters,
     list_work_items,
+    main as work_items_main,
     requeue_dead_letter,
     retire_work_item,
+    work_item_resource,
 )
 
 
@@ -372,3 +376,69 @@ def test_every_transition_emits_a_kernel_event(logs: _Logs):
         )
     ]
     assert verbs == ["work_item.enqueued", "work_item.claimed", "work_item.completed"]
+
+
+def test_work_item_projects_to_resource_envelope(logs: _Logs):
+    item = _enqueue(
+        logs,
+        payload={"claim": "bounded"},
+        metadata={"cognitive_run_id": "run_123"},
+        tenant_id="tenant-a",
+        project_id="project-a",
+    )
+    claimed = _claim(logs)
+    assert claimed is not None
+    done = complete_work_item(
+        claimed.work_id,
+        actor="actor.worker_1",
+        claim_token=claimed.claim_token,
+        exit_kind="tested_hold",
+        producer="role.proof_execution_worker",
+        verifier="role.reviewer",
+        artifact_refs=[{"kind": "run", "path": "run_123"}],
+        log_path=logs.work,
+        operating_units_log=logs.units,
+        kernel_events_log=logs.events,
+    )
+
+    resource = work_item_resource(done).as_dict()
+
+    assert validate_resource(resource) == []
+    assert resource["kind"] == "WorkItem"
+    assert resource["metadata"]["name"] == item.work_id
+    assert resource["metadata"]["tenant_id"] == "tenant-a"
+    assert resource["metadata"]["project_id"] == "project-a"
+    assert resource["metadata"]["annotations"]["cognitive_run_id"] == "run_123"
+    assert resource["spec"]["unit_id"] == "residual_compiler"
+    assert resource["spec"]["payload"] == {"claim": "bounded"}
+    assert resource["status"]["status"] == "done"
+    assert resource["status"]["claim_token"] == claimed.claim_token
+    assert resource["status"]["exit_kind"] == "tested_hold"
+    assert resource["status"]["producer"] == "role.proof_execution_worker"
+    assert resource["status"]["verifier"] == "role.reviewer"
+    assert {"rel": "operating_unit", "href": "operating_unit:residual_compiler"} in resource["links"]
+    assert {"rel": "run", "href": "run_123"} in resource["links"]
+
+
+def test_work_item_cli_can_render_resource_envelopes(logs: _Logs, capsys):
+    item = _enqueue(logs, tenant_id="tenant-a")
+
+    rc = work_items_main(
+        [
+            "list",
+            "--log-path",
+            str(logs.work),
+            "--resource",
+        ]
+    )
+    payloads = [
+        json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+        if line.strip()
+    ]
+
+    assert rc == 0
+    assert len(payloads) == 1
+    assert payloads[0]["kind"] == "WorkItem"
+    assert payloads[0]["metadata"]["name"] == item.work_id
+    assert validate_resource(payloads[0]) == []

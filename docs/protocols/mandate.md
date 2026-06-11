@@ -127,7 +127,7 @@ This is the same separation that makes legal contracts effective: the boilerplat
 
 ## Threat-model coverage
 
-| Primitive | T1 (single-principal) | T2 (regulated enterprise) |
+| Primitive | T1 (single-authority) | T2 (regulated enterprise) |
 |-----------|----------------------|---------------------------|
 | Two-file mandate (yaml + md) | shipped | shipped |
 | Mandate-hash verification each tick | shipped | shipped |

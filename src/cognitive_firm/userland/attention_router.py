@@ -17,10 +17,12 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
-import yaml
-
+from cognitive_firm.orchestration.authority_domains import (
+    resolve_authority_assignment_from_org,
+    resolve_authority_role_from_org,
+)
 from cognitive_firm.userland import signal_classes as sc
 
 
@@ -41,6 +43,11 @@ class AttentionSignal:
     created_at_utc: str | None = None
     target_role_id: str | None = None
     target_actor_id: str | None = None
+    tenant_id: str | None = None
+    project_id: str | None = None
+    operating_unit_id: str | None = None
+    resource_class: str | None = None
+    decision_class: str | None = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +122,9 @@ def route_signals(
     *,
     authority_actor_id: str | None = None,
     authority_role_id: str | None = None,
+    authority_resolver: Callable[
+        [AttentionSignal], tuple[str | None, str | None]
+    ] | None = None,
     now: datetime | None = None,
 ) -> list[RoutedSignal]:
     """Classify and route normalized signals into ``RoutedSignal``s.
@@ -133,6 +143,11 @@ def route_signals(
         signal_class, urgency, action, pace = _CLASSIFICATION.get(
             signal.kind, _UNKNOWN
         )
+        scoped_authority_role = authority_role_id
+        scoped_authority_actor = authority_actor_id
+        if authority_resolver is not None:
+            scoped_authority_role, scoped_authority_actor = authority_resolver(signal)
+
         if signal_class == sc.WORK_INTERRUPT and signal.target_actor_id:
             target_role = signal.target_role_id
             target_actor = signal.target_actor_id
@@ -142,11 +157,11 @@ def route_signals(
             # matches on target_actor_id, so a None target reaches no one.
             # Fall back to the authority — assigning unclaimed work is
             # exactly the authority's job.
-            target_role = signal.target_role_id or authority_role_id
-            target_actor = authority_actor_id
+            target_role = signal.target_role_id or scoped_authority_role
+            target_actor = scoped_authority_actor
         else:  # governance + informational -> the authority (operator)
-            target_role = authority_role_id
-            target_actor = authority_actor_id
+            target_role = scoped_authority_role
+            target_actor = scoped_authority_actor
         routed.append(
             RoutedSignal(
                 signal_id=signal.signal_id,
@@ -171,27 +186,68 @@ def signals_for_actor(
     return [r for r in routed if r.target_actor_id == actor_id]
 
 
-def resolve_authority_role(org_root: Path) -> str | None:
-    """The org's single authority role_id, read from ``roles/*.yaml``.
+def authority_resolver_from_org(
+    org_root: Path,
+    *,
+    actor_membership_log: Path | None = None,
+    now: datetime | None = None,
+) -> Callable[[AttentionSignal], tuple[str | None, str | None]]:
+    """Build a scoped authority resolver backed by org files.
 
-    Returns None unless exactly one role declares ``role_class: authority`` —
-    the same condition ``boot_check`` requires for a governable org, so a
-    bootable org always has a resolvable authority.
+    The resolver returns ``(role_id, actor_id)`` for a normalized signal. If a
+    role resolves but several active actors hold it, the first sorted actor id
+    is used so routing stays deterministic. If no active actor holds the role,
+    the role is still returned and the actor is ``None``.
     """
-    roles_dir = Path(org_root) / "roles"
-    if not roles_dir.is_dir():
-        return None
-    authorities: list[str] = []
-    for role_file in sorted(roles_dir.glob("*.yaml")):
+
+    def _resolve(signal: AttentionSignal) -> tuple[str | None, str | None]:
         try:
-            data = yaml.safe_load(role_file.read_text())
-        except yaml.YAMLError:
-            continue
-        if isinstance(data, dict) and data.get("role_class") == "authority":
-            role_id = data.get("role_id")
-            if role_id:
-                authorities.append(str(role_id))
-    return authorities[0] if len(authorities) == 1 else None
+            resolution = resolve_authority_assignment_from_org(
+                org_root,
+                actor_membership_log=actor_membership_log,
+                tenant_id=signal.tenant_id,
+                project_id=signal.project_id,
+                operating_unit_id=signal.operating_unit_id,
+                resource_class=signal.resource_class,
+                decision_class=signal.decision_class,
+                now=now,
+            )
+        except (OSError, ValueError, TypeError):
+            return None, None
+        actor_id = resolution.actor_ids[0] if resolution.actor_ids else None
+        return resolution.authority_role_id, actor_id
+
+    return _resolve
+
+
+def resolve_authority_role(
+    org_root: Path,
+    *,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    operating_unit_id: str | None = None,
+    resource_class: str | None = None,
+    decision_class: str | None = None,
+) -> str | None:
+    """Resolve the authority role_id from roles and optional authority domains.
+
+    Without ``authority_domains/authority_domains.json``, returns a role only
+    when exactly one role declares ``role_class: authority``. With authority
+    domains, resolves by tenant/project/operating-unit/resource/decision scope
+    and falls back to a declared global domain. Ambiguity returns ``None`` so
+    governance interrupts are surfaced as unroutable rather than misrouted.
+    """
+    try:
+        return resolve_authority_role_from_org(
+            org_root,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            operating_unit_id=operating_unit_id,
+            resource_class=resource_class,
+            decision_class=decision_class,
+        )
+    except (OSError, ValueError, TypeError):
+        return None
 
 
 def pending_gate_signals(gates_dir: Path) -> list[AttentionSignal]:
@@ -221,6 +277,18 @@ def pending_gate_signals(gates_dir: Path) -> list[AttentionSignal]:
                 headline=f"Gate: {goal} — {description}",
                 source_ref=str(gate_file),
                 created_at_utc=data.get("timestamp_utc"),
+                tenant_id=_string_or_none(data.get("tenant_id")),
+                project_id=_string_or_none(data.get("project_id")),
+                operating_unit_id=_string_or_none(data.get("operating_unit_id")),
+                resource_class=_string_or_none(data.get("resource_class")),
+                decision_class=_string_or_none(data.get("decision_class")),
             )
         )
     return signals
+
+
+def _string_or_none(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

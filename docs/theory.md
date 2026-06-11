@@ -42,6 +42,23 @@ execution substrates. `cognitive-firm` is a governance substrate. A graph run,
 chat agent, crew, or custom runtime can project lifecycle events into the
 kernel, but it should not become the durable organization record.
 
+## Worker Taxonomy
+
+The kernel separates four questions that are easy to collapse:
+
+- capability: deterministic system, bare LLM, tool-using agent, or human;
+- fungibility: interchangeable worker or singular identity;
+- state: stateless or stateful;
+- transport: API, subscription CLI, local process, human surface, or external
+  service.
+
+This distinction matters because a firm needs both fungible labor and singular
+roles. Fungible workers are appropriate when context can be externalized into
+artifacts, prompts, receipts, and run state. Singular roles are appropriate
+when continuity, review identity, or residual-risk ownership is part of the
+work. Transport is a sourcing decision; it should not decide the governance
+category.
+
 ## Relationship To Human Organizations
 
 The kernel borrows from ordinary organizations because many problems are not

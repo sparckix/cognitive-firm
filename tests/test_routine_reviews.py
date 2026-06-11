@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -17,10 +18,13 @@ from cognitive_firm.orchestration.routine_reviews import (  # noqa: E402
     list_routine_reviews,
     record_review_outcome,
     retire_routine,
+    routine_review_resource,
     schedule_routine_review,
     start_routine_review,
     summarize_routine_reviews,
+    main as routine_reviews_main,
 )
+from cognitive_firm.orchestration.resource_envelope import validate_resource  # noqa: E402
 
 
 class _Logs:
@@ -297,3 +301,29 @@ def test_retire_emits_a_kernel_event(logs: _Logs):
         )
     ]
     assert verbs == ["routine_review.scheduled", "routine_review.retired"]
+
+
+def test_routine_review_resource_envelope(logs: _Logs):
+    review = _schedule(logs, review_due_utc=_past(), metadata={"source": "learning-health"})
+
+    resource = routine_review_resource(review).as_dict()
+
+    assert validate_resource(resource) == []
+    assert resource["kind"] == "RoutineReview"
+    assert resource["metadata"]["resource_id"] == review.review_id
+    assert resource["metadata"]["labels"]["routine_kind"] == "learning_event"
+    assert resource["metadata"]["labels"]["status"] == "scheduled"
+    assert resource["spec"]["routine_ref"] == "routine.evidence_standard_v3"
+    assert resource["status"]["overdue"] is True
+    assert {"rel": "learning_event", "href": "learning_event:learn_abc123"} in resource["links"]
+
+
+def test_routine_reviews_cli_can_render_resources(logs: _Logs, capsys):
+    review = _schedule(logs)
+
+    rc = routine_reviews_main(["list", "--log-path", str(logs.reviews), "--resource"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload[0]["kind"] == "RoutineReview"
+    assert payload[0]["metadata"]["name"] == review.review_id

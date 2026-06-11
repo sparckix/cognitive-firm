@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
+from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
 
 
 SubjectKind = Literal["artifact", "action", "runtime_event", "tool_call", "dataset", "prompt"]
@@ -198,6 +199,78 @@ def action_attestation_summary(attestation: ActionAttestation) -> dict[str, Any]
     return asdict(attestation)
 
 
+def action_attestation_resource(attestation: ActionAttestation) -> KernelResource:
+    """Project an action attestation into the common resource envelope.
+
+    The attestation JSONL row remains canonical. The resource view is for
+    adapters, dashboards, migration checks, and conformance fixtures that need a
+    stable object shape for machine-side provenance.
+    """
+    labels = {
+        "subject_kind": attestation.subject_kind,
+        "producer": attestation.producer,
+        "action_type": attestation.action_type,
+        "verification_status": attestation.verification_status,
+    }
+    if attestation.run_id:
+        labels["run_id"] = attestation.run_id
+
+    links = [
+        {"rel": "subject", "href": attestation.subject_ref},
+        {"rel": "producer", "href": attestation.producer},
+    ]
+    if attestation.runtime_ref:
+        links.append({"rel": "runtime", "href": attestation.runtime_ref})
+    if attestation.tool_ref:
+        links.append({"rel": "tool", "href": attestation.tool_ref})
+    if attestation.policy_ref:
+        links.append({"rel": "policy", "href": attestation.policy_ref})
+    if attestation.signature_ref:
+        links.append({"rel": "signature", "href": attestation.signature_ref})
+    if attestation.transparency_ref:
+        links.append({"rel": "transparency", "href": attestation.transparency_ref})
+    for ref in attestation.input_refs:
+        links.append({"rel": "input", "href": ref})
+    for ref in attestation.output_refs:
+        links.append({"rel": "output", "href": ref})
+
+    return make_resource(
+        kind="ActionAttestation",
+        name=attestation.attestation_id,
+        resource_id=attestation.attestation_id,
+        tenant_id=attestation.tenant_id,
+        project_id=attestation.project_id,
+        stability="alpha",
+        labels=labels,
+        annotations={
+            key: str(value)
+            for key, value in attestation.metadata.items()
+            if isinstance(key, str) and value is not None
+        },
+        spec={
+            "subject_kind": attestation.subject_kind,
+            "subject_ref": attestation.subject_ref,
+            "subject_digest": attestation.subject_digest,
+            "producer": attestation.producer,
+            "action_type": attestation.action_type,
+            "runtime_ref": attestation.runtime_ref,
+            "tool_ref": attestation.tool_ref,
+            "policy_ref": attestation.policy_ref,
+            "input_refs": attestation.input_refs,
+            "output_refs": attestation.output_refs,
+            "run_id": attestation.run_id,
+        },
+        status={
+            "verification_status": attestation.verification_status,
+            "verification_summary": attestation.verification_summary,
+            "signature_ref": attestation.signature_ref,
+            "transparency_ref": attestation.transparency_ref,
+            "created_at_utc": attestation.created_at_utc,
+        },
+        links=links,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Manage cognitive-firm action attestations.")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -210,6 +283,7 @@ def main(argv: list[str] | None = None) -> int:
     list_parser.add_argument("--run-id")
     list_parser.add_argument("--verification-status")
     list_parser.add_argument("--log-path", type=Path)
+    list_parser.add_argument("--resource", action="store_true", help="render resource envelopes")
 
     digest_text_parser = sub.add_parser("digest-text")
     digest_text_parser.add_argument("value")
@@ -249,7 +323,12 @@ def main(argv: list[str] | None = None) -> int:
             log_path=args.log_path,
         )
         for row in rows:
-            print(json.dumps(action_attestation_summary(row), sort_keys=True))
+            payload = (
+                action_attestation_resource(row).as_dict()
+                if args.resource
+                else action_attestation_summary(row)
+            )
+            print(json.dumps(payload, sort_keys=True))
         return 0
 
     if args.cmd == "digest-text":

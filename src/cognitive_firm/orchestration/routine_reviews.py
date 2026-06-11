@@ -46,6 +46,7 @@ from typing import Any, Callable, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
 from cognitive_firm.orchestration.kernel_events import record_kernel_event
+from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
 
 
 RoutineReviewStatus = Literal["scheduled", "in_review", "reviewed", "retired"]
@@ -628,6 +629,75 @@ def summarize_routine_reviews(
     )
 
 
+def routine_review_resource(review: RoutineReview) -> KernelResource:
+    """Project a routine review into the common resource envelope.
+
+    The JSONL row remains canonical. This projection is for adapters,
+    dashboards, migrations, and conformance fixtures that need a portable view
+    of routine re-justification and retirement state.
+    """
+    labels = {
+        "routine_kind": review.routine_kind,
+        "status": review.status,
+        "scheduled_by": review.scheduled_by,
+    }
+    if review.outcome:
+        labels["outcome"] = review.outcome
+    if review.reviewer:
+        labels["reviewer"] = review.reviewer
+    if review.retired_by:
+        labels["retired_by"] = review.retired_by
+
+    links: list[dict[str, str]] = [{"rel": "routine", "href": review.routine_ref}]
+    if review.learning_event_id:
+        links.append({"rel": "learning_event", "href": f"learning_event:{review.learning_event_id}"})
+    if review.next_review_id:
+        links.append({"rel": "next_review", "href": f"routine_review:{review.next_review_id}"})
+    for ref in review.outcome_evidence_refs:
+        links.append({"rel": "outcome_evidence", "href": ref})
+
+    return make_resource(
+        kind="RoutineReview",
+        name=review.review_id,
+        resource_id=review.review_id,
+        tenant_id=review.tenant_id,
+        project_id=review.project_id,
+        stability="alpha",
+        labels=labels,
+        annotations={
+            key: str(value)
+            for key, value in review.metadata.items()
+            if isinstance(key, str) and value is not None
+        },
+        spec={
+            "routine_ref": review.routine_ref,
+            "routine_kind": review.routine_kind,
+            "learning_event_id": review.learning_event_id,
+            "review_due_utc": review.review_due_utc,
+            "scheduled_by": review.scheduled_by,
+            "reason": review.reason,
+            "review_cadence": review.review_cadence,
+        },
+        status={
+            "status": review.status,
+            "reviewer": review.reviewer,
+            "review_started_at_utc": review.review_started_at_utc,
+            "reviewed_at_utc": review.reviewed_at_utc,
+            "outcome": review.outcome,
+            "outcome_rationale": review.outcome_rationale,
+            "outcome_evidence_refs": review.outcome_evidence_refs,
+            "next_review_id": review.next_review_id,
+            "retired_at_utc": review.retired_at_utc,
+            "retired_by": review.retired_by,
+            "retirement_reason": review.retirement_reason,
+            "overdue": review.is_overdue(),
+            "created_at_utc": review.created_at_utc,
+            "updated_at_utc": review.updated_at_utc,
+        },
+        links=links,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Manage routine review-and-retirement lifecycle records."
@@ -676,6 +746,7 @@ def main(argv: list[str] | None = None) -> int:
     list_parser.add_argument("--tenant-id")
     list_parser.add_argument("--project-id")
     list_parser.add_argument("--log-path", type=Path)
+    list_parser.add_argument("--resource", action="store_true", help="render resource envelopes")
 
     due = sub.add_parser("list-due")
     due.add_argument("--routine-kind")
@@ -741,7 +812,11 @@ def main(argv: list[str] | None = None) -> int:
             project_id=args.project_id,
             log_path=args.log_path,
         )
-        print(json.dumps([review.as_dict() for review in reviews], indent=2, sort_keys=True))
+        payload = [
+            routine_review_resource(review).as_dict() if args.resource else review.as_dict()
+            for review in reviews
+        ]
+        print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
     if args.cmd == "list-due":
         reviews = list_due_reviews(

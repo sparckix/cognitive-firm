@@ -3,7 +3,7 @@
   "terms": {
     "role": {
       "label": "role",
-      "definition": "A standing job in the firm with a defined scope of authority, held by a human or an agent.",
+      "definition": "A standing job in the firm with a defined scope of authority, held by a human, agent, or service actor.",
       "governance_note": "A role is the unit of authority. Who holds a role determines who may do what."
     },
     "mandate": {
@@ -18,7 +18,7 @@
     },
     "gate": {
       "label": "decision point",
-      "definition": "A point where work pauses until a human with authority approves or declines it.",
+      "definition": "A point where work pauses until an actor with authority approves or declines it.",
       "governance_note": "A gate is where the firm stops and asks a person. An unanswered gate blocks the work behind it."
     },
     "escalation": {

@@ -30,6 +30,9 @@ from cognitive_firm.distribution.manifest import (
     PackageManifest,
     check_kernel_compat,
 )
+from cognitive_firm.distribution.policy_validation import (
+    validate_extension_policy_tree,
+)
 from cognitive_firm.distribution.signing import (
     SigningError,
     trust_store_is_populated,
@@ -442,11 +445,14 @@ def install(
             if action == "created":
                 created.append(dest_rel)
 
-        boot_issues = boot_check(target_root)
-        if boot_issues:
+        verification_issues = [
+            *boot_check(target_root),
+            *validate_extension_policy_tree(target_root),
+        ]
+        if verification_issues:
             raise InstallError(
                 f"installed organization for '{manifest.name}' does not boot: "
-                + "; ".join(boot_issues)
+                + "; ".join(verification_issues)
             )
     except Exception:
         _undo_failed_install(
@@ -553,4 +559,5 @@ def verify_install(receipt: InstallReceipt, target_root: Path) -> list[str]:
         if not (target_root / f.dest).is_file():
             issues.append(f"installed file is missing: {f.dest}")
     issues.extend(boot_check(target_root))
+    issues.extend(validate_extension_policy_tree(target_root))
     return issues

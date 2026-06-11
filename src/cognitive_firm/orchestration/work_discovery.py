@@ -38,7 +38,7 @@ from cognitive_firm.orchestration.execution_routing import infer_execution_route
 from cognitive_firm.signals import damage
 
 
-SEAMS_ROOT = REPO_ROOT / "research_areas" / "private" / "seams" / "mission"
+SEAMS_ROOT = WORKSPACE_DIR / "seams" / "mission"
 TODO_PATTERN = re.compile(r"^\s*-\s*\[\s*\]\s+(.+)$", re.MULTILINE)
 
 
@@ -906,7 +906,7 @@ def discover_all(
         assigned_to=assigned_to, max_per_source=max_per_source)
     out.extend([c for c in evidence_candidates if c.severity == "critical"])
     # Resolved-but-unexecuted approved gates rank ABOVE most other sources
-    # because the principal already approved them — they're load-bearing.
+    # because the principal already approved them.
     out.extend(discover_resolved_pending_execution(
         assigned_to=assigned_to, max_per_source=max_per_source))
     out.extend(discover_principal_goals(

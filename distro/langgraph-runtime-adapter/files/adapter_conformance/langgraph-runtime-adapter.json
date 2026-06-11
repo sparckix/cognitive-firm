@@ -1,0 +1,42 @@
+{
+  "schema_version": "cognitive-firm-adapter-conformance/v1",
+  "adapter_id": "langgraph-runtime-adapter",
+  "protocol": "runtime_event",
+  "fixture_command": "make langgraph-governance-demo",
+  "required_checks": [
+    {
+      "check_id": "started_event_idempotent",
+      "evidence": "tests/test_runtime_adapters.py"
+    },
+    {
+      "check_id": "checkpoint_preserves_side_effect_key",
+      "evidence": "tests/test_runtime_adapters.py"
+    },
+    {
+      "check_id": "interrupt_creates_human_work",
+      "evidence": "tests/test_runtime_adapters.py"
+    },
+    {
+      "check_id": "state_changed_completes_projected_run",
+      "evidence": "tests/test_runtime_adapters.py"
+    },
+    {
+      "check_id": "governed_run_bundle_has_no_caveats",
+      "evidence": "tests/test_runtime_proof_pack.py"
+    }
+  ],
+  "runtime_boundary": {
+    "external_runtime_owns": [
+      "graph execution",
+      "graph checkpoint replay",
+      "native resume token",
+      "streaming and tool semantics"
+    ],
+    "cognitive_firm_owns": [
+      "role-owned run projection",
+      "human-work receipt state",
+      "side-effect checkpoint keys",
+      "governed-run attestation bundle"
+    ]
+  }
+}

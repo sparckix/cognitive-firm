@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
+from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
 
 
 RiskTier = Literal["low", "medium", "high", "irreversible"]
@@ -232,6 +233,75 @@ def accountability_case_summary(case: AccountabilityCase) -> dict[str, Any]:
     return asdict(case)
 
 
+def accountability_case_resource(case: AccountabilityCase) -> KernelResource:
+    """Project an accountability case into the common resource envelope.
+
+    The case JSONL row remains canonical. The resource view is for adapters,
+    dashboards, migration checks, and conformance fixtures that need a stable
+    object shape for residual-risk and recourse state.
+    """
+    labels = {
+        "accountable_role": case.accountable_role,
+        "responsible_actor": case.responsible_actor,
+        "risk_tier": case.risk_tier,
+        "recourse_path": case.recourse_path,
+        "status": case.status,
+    }
+    if case.operator_burden:
+        labels["operator_burden"] = case.operator_burden
+    links = [
+        {"rel": "trigger", "href": case.trigger_ref},
+        {"rel": "accountable_role", "href": case.accountable_role},
+        {"rel": "responsible_actor", "href": case.responsible_actor},
+        {"rel": "authority_envelope", "href": case.authority_envelope_ref},
+    ]
+    for ref in case.closure_evidence_refs:
+        links.append({"rel": "closure_evidence", "href": ref})
+    if case.residual_risk_accepted_by:
+        links.append(
+            {
+                "rel": "residual_risk_accepted_by",
+                "href": case.residual_risk_accepted_by,
+            }
+        )
+    return make_resource(
+        kind="AccountabilityCase",
+        name=case.case_id,
+        resource_id=case.case_id,
+        tenant_id=case.tenant_id,
+        project_id=case.project_id,
+        stability="alpha",
+        labels=labels,
+        annotations={
+            key: str(value)
+            for key, value in case.metadata.items()
+            if isinstance(key, str) and value is not None
+        },
+        spec={
+            "trigger_ref": case.trigger_ref,
+            "accountable_role": case.accountable_role,
+            "responsible_actor": case.responsible_actor,
+            "decision_right_basis": case.decision_right_basis,
+            "authority_envelope_ref": case.authority_envelope_ref,
+            "risk_tier": case.risk_tier,
+            "recourse_path": case.recourse_path,
+            "review_sla": case.review_sla,
+            "due_at_utc": case.due_at_utc,
+            "externality_tags": case.externality_tags,
+            "operator_burden": case.operator_burden,
+            "rationale": case.rationale,
+        },
+        status={
+            "status": case.status,
+            "residual_risk_accepted_by": case.residual_risk_accepted_by,
+            "closure_evidence_refs": case.closure_evidence_refs,
+            "created_at_utc": case.created_at_utc,
+            "updated_at_utc": case.updated_at_utc,
+        },
+        links=links,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Manage accountability cases.")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -243,6 +313,7 @@ def main(argv: list[str] | None = None) -> int:
     list_parser.add_argument("--project-id")
     list_parser.add_argument("--risk-tier")
     list_parser.add_argument("--log-path", type=Path)
+    list_parser.add_argument("--resource", action="store_true", help="render resource envelopes")
 
     create_parser = sub.add_parser("create")
     create_parser.add_argument("--trigger-ref", required=True)
@@ -279,7 +350,12 @@ def main(argv: list[str] | None = None) -> int:
             risk_tier=args.risk_tier,
             log_path=args.log_path,
         ):
-            print(json.dumps(accountability_case_summary(case), sort_keys=True))
+            payload = (
+                accountability_case_resource(case).as_dict()
+                if args.resource
+                else accountability_case_summary(case)
+            )
+            print(json.dumps(payload, sort_keys=True))
         return 0
 
     if args.cmd == "create":

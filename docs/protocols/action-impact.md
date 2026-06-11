@@ -41,6 +41,14 @@ The portable `ActionImpactRecordView` shape includes:
 - `optimization_scope`
 - `attribution_confidence`
 - `forecast_contract_id`
+- `context_features`
+- `action_arm`
+- `logging_policy_id`
+- `logging_policy_probability`
+- `reward`
+- `reward_metric`
+- `delayed_effect_window`
+- `human_review_burden`
 - `guardrail_metrics`
 - `externalities`
 - `externality_tags`
@@ -127,12 +135,98 @@ The public kernel owns:
 The interface is compatible with tenant bandit or mini-RL systems because it
 preserves the fields needed for offline evaluation: baseline action,
 counterfactual action, decision stage, expected effect, observed outcome,
-decision changed flag, costs, evaluator role, and externality tags.
+decision changed flag, costs, evaluator role, and externality tags. It also
+supports contextual-policy fields: context features, chosen action arm, logging
+policy id, logging-policy probability, reward, delayed-effect window, and human
+review burden.
 
 The kernel does not promote those rows into a live optimizer. A tenant should
 only do that after it can show that the logged reward is measurable, delayed
 effects are handled, negative externalities are tracked, and offline replay
 beats the existing routing policy without increasing review debt.
+
+The kernel includes one conservative helper for this path:
+`propose_business_function_policy` in
+`cognitive_firm.orchestration.business_function_bandit`. It aggregates logged
+arms by context and emits a candidate context-to-arm map only when an arm has
+enough support, beats the context baseline, and passes externality and
+human-review thresholds. It is a proposer, not a live policy writer.
+
+## Offline Policy Evaluation Reports
+
+The module includes a conservative report primitive for candidate policies:
+`OfflinePolicyEvaluationReport`. It evaluates a candidate policy by replaying
+logged rows where the candidate policy would have selected the same action arm
+as the logged action.
+
+This is intentionally stricter than a full contextual-bandit estimator. It is a
+safe first report for thin logs and preserves the fields needed for
+tenant-owned IPS, doubly robust, or distributionally robust estimators later.
+
+A report records:
+
+- candidate policy id and optional policy ref;
+- context keys used for the replay;
+- logged, eligible, and matched row counts;
+- support coverage;
+- baseline and candidate mean reward;
+- an approximate 95% confidence interval for matched candidate reward;
+- negative externality rate;
+- human-review rate;
+- whether logging propensities, counterfactuals, and guardrail metrics are
+  present;
+- promotion blockers and guardrail notes.
+
+The report can be `blocked`, `advisory`, or `promotable`. `promotable` does not
+change a policy by itself. It is evidence for a tenant-owned governance-change,
+learning-event, or policy-adapter promotion path.
+
+## Policy Promotion Packets
+
+`PolicyPromotionPacket` is the handoff from offline policy evaluation to
+governance review. It joins:
+
+- the `OfflinePolicyEvaluationReport`;
+- guardrail and externality summary fields;
+- an optional authority-diff reference;
+- optional formal-verification and learning-event references;
+- a draft governance-change payload.
+
+The packet is not an approval and does not mutate a live policy. A report that
+is otherwise promotable is downgraded to `advisory` when required review
+evidence, such as an authority diff, is missing. This keeps learned loops in a
+proposal role while preserving the evidence a reviewer needs.
+
+CLI:
+
+```bash
+cognitive-firm-action-impact evaluate-policy \
+  --summary-json org/action_impact/action_impact_summary.json \
+  --candidate-policy-id policy.support.enterprise-review \
+  --candidate-action-map candidate_actions.json \
+  --context-key segment \
+  --objective-metric resolution_quality \
+  --record
+```
+
+Build a governance review packet from a recorded evaluation:
+
+```bash
+cognitive-firm-action-impact build-promotion-packet \
+  --evaluation-id ope_123 \
+  --proposed-by role.governance_reviewer \
+  --authority-diff-ref authority-diff://support-enterprise-review \
+  --formal-verification-ref formal-verification:fver_policy_boundary \
+  --record
+```
+
+The `candidate_actions.json` file maps stable context signatures to action
+arms. A context signature is JSON with the selected context keys sorted, for
+example:
+
+```json
+{"{\"segment\":\"enterprise\"}": "senior_review"}
+```
 
 ## Tests
 

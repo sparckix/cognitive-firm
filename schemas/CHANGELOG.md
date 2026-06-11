@@ -15,6 +15,16 @@ The contract:
 
 ---
 
+## governed-run-attestation.v1.schema.json
+
+### v1.0 — 2026-06-10
+
+Initial interchange schema for governed-run attestation bundles. It defines
+the portable top-level bundle shape, required evidence arrays, verdict enum,
+observability-ref shape, authority-snapshot minimum fields, and digest field
+format. Digest recomputation remains a Python validator responsibility because
+JSON Schema cannot compute content hashes.
+
 ## role.v1.schema.json
 
 ### v1.3 — 2026-05-02 (gp168 v3 run-2 findings)

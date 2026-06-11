@@ -1,6 +1,8 @@
 # Contributing to cognitive-firm
 
-Thanks for considering a contribution. This kernel runs in production for a single-principal research org, so the bar for changes is "does it preserve the invariants" rather than "is it clever." Read this before opening a PR.
+Thanks for considering a contribution. This kernel runs in production for a
+single-authority research org, so the bar for changes is "does it preserve the
+invariants" rather than "is it clever." Read this before opening a PR.
 
 ## TL;DR
 
@@ -48,7 +50,12 @@ The `project_response` step in MCP transport, the predicate-eval check in artifa
 
 ### Threat model is honest
 
-Each primitive's threat-model table in `docs/protocols/<protocol>.md` says T1 (single-principal trusted hardware) and T2 (regulated enterprise) status separately. A PR that claims T2 coverage for a primitive must add the corresponding test (e.g. for saga compensation: a test where a fulfilled ancestor refuses compensation and the chain surfaces `saga_compensation_unfulfilled`).
+Each primitive's threat-model table in `docs/protocols/<protocol>.md` says T1
+(single-authority trusted hardware) and T2 (regulated enterprise) status
+separately. A PR that claims T2 coverage for a primitive must add the
+corresponding test (e.g. for saga compensation: a test where a fulfilled
+ancestor refuses compensation and the chain surfaces
+`saga_compensation_unfulfilled`).
 
 ## Workflow
 
@@ -100,8 +107,8 @@ Vulnerability reports go to the email in `MAINTAINERS` (when published) — not 
 
 ## Scope
 
-- The kernel scope is **single-principal governance** (T1). PRs that add multi-principal RBAC, SSO, or signed audit need a paired adopter-signal issue showing concrete demand.
-- The kernel scope does **not** include implementing model inference, building an agent runtime, or chat UIs. Those layers live elsewhere; cognitive-firm orchestrates them.
+- The kernel scope is **single-authority-domain governance** (T1). PRs that add enterprise RBAC, SSO, or signed audit need a paired adopter-signal issue showing concrete demand.
+- The kernel includes first-party governed work execution: work discovery, mandate/gate checks, execution routing, CLI/tool dispatch, checkpoints, and human interrupts. It should not absorb model inference, framework-native graph replay, or chat UI product logic.
 - Tenant-specific content (mandates, real role authorities, principal preferences) does not belong in this repo — see `tenants/README.md` for the overlay pattern.
 
 ## License agreement

@@ -96,6 +96,30 @@ Closure evidence may point to:
 - approved learning events;
 - external review refs.
 
+## Resource Projection
+
+`accountability_case_resource(...)` projects a case into the common
+[`Resource Envelope`](resource-envelope.md). The accountability JSONL row
+remains canonical; the resource view is for review dashboards, admin adapters,
+migration checks, and conformance fixtures:
+
+```text
+kind: AccountabilityCase
+metadata: case id, tenant/project, labels, annotations
+spec: trigger, accountable role, responsible actor, decision-right basis,
+      authority envelope, risk tier, recourse path, review SLA, due time,
+      externality tags, operator burden, rationale
+status: lifecycle status, residual-risk acceptor, closure evidence, timestamps
+links: trigger, accountable role, responsible actor, authority envelope,
+       closure evidence, residual-risk acceptor
+```
+
+The CLI can render the same compatibility shape:
+
+```bash
+python -m cognitive_firm.orchestration.accountability_cases list --resource
+```
+
 ## Boundary
 
 Use the accountability summary for visibility. Use accountability cases for

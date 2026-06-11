@@ -75,10 +75,11 @@ having to ship and `replace` the whole file.
   (`cognitive_firm.__version__`) is outside the manifest's declared
   `kernel.min/max_version` range.
 - **Transactional + git-backed.** The installer ensures the target is its own
-  git repo, applies the package, runs `boot_check`, and only then commits and
-  tags the result `install/<package>/<version>`. A failed or unbootable
-  install leaves the target exactly as it was — the install commit is the
-  **rollback boundary** (the receipt records the pre-install ref).
+  git repo, applies the package, verifies the role graph and installed
+  extension policy, and only then commits and tags the result
+  `install/<package>/<version>`. A failed or unbootable install leaves the
+  target exactly as it was — the install commit is the **rollback boundary**
+  (the receipt records the pre-install ref).
 - **Conflict handling.** For an `add` component, files that already exist are
   **skipped**, never silently overwritten, unless `--force` is passed. A
   `replace` component overwrites; a `patch` component merges. The receipt
@@ -89,6 +90,10 @@ having to ship and `replace` the whole file.
   exactly one `authority` role, every `escalates_to`/`delegates_to` reference
   resolves, and every role's escalation chain reaches an authority (no
   ungoverned decision path). An org that fails `boot_check` is never committed.
+- **Extension-policy validation.** Install and `verify` also validate adapter
+  manifests, adapter conformance configs, and formal-verification trusted
+  provider policy already present in the organization. An org with malformed
+  adapter/provider policy is not treated as a verified install.
 - **Events.** Each install/upgrade/rollback appends a typed kernel event
   (`package.installed`, `package.rolled_back`, and — for a governed overlay
   install — `package.install_approved`) to
@@ -178,11 +183,19 @@ a live org:
 - `cognitive-firm-distro lint <package>` parses the manifest and reports every
   authoring problem at once — missing component sources, an unknown `op`, a
   path that escapes its root, a too-short description, a missing `files/`
-  directory. The argument may be a package directory, a `package.yaml` path,
-  or a registry package name.
+  directory, malformed adapter manifests, and adapter conformance configs that
+  drift from their installed manifest. It also validates
+  `files/formal_verification/trusted_providers.json` when a package ships
+  formal-provider trust policy. The argument may be a package directory, a
+  `package.yaml` path, or a registry package name.
 - `cognitive-firm-distro install <package> --into <dir> --dry-run` resolves
   and prints the full install plan — each file, its composition `op`, and
   whether it would conflict — without creating a git repo or writing anything.
+- `cognitive-firm-distro preview-overlay <package> --into <org>` stages an
+  overlay against a copy of an existing org, reports the file plan and
+  authority diff, and writes nothing: no package files, no install receipt, no
+  governance proposal. Use it in CI or review before filing a governed overlay
+  install proposal.
 - `docs/templates/package/` is a copyable package skeleton with a heavily
   commented manifest.
 
@@ -195,6 +208,8 @@ cognitive-firm-distro lint       ./path/to/package
 cognitive-firm-distro install    starter-firm --into ./my-firm
 cognitive-firm-distro install    starter-firm --into ./my-firm --dry-run
 cognitive-firm-distro install    https://example.com/repo.git --into ./my-firm --ref v1.2.0
+cognitive-firm-distro preview-overlay ./path/to/overlay --into ./my-firm
+cognitive-firm-distro preview-overlay ./path/to/overlay --into ./my-firm --json
 cognitive-firm-distro verify     starter-firm --into ./my-firm
 cognitive-firm-distro upgrade    starter-firm --into ./my-firm
 cognitive-firm-distro rollback   starter-firm --into ./my-firm --reason "..."
@@ -215,6 +230,47 @@ A distro is policy: roles, mandates, preferences, operating units, and project
 charters an adopter then edits to match their firm. The kernel defines the
 mechanisms a distro composes. Adding a distro or overlay must never require a
 kernel change.
+
+Packages install org-owned files, not arbitrary executables. If a capability
+depends on an external binary or service, the package should install the policy,
+schemas, trust settings, roles, and instructions that govern that adapter. The
+adapter binary itself comes from its normal distribution path or a separate
+integration package. This is how the `leanmill-formal-verification` overlay
+works: it installs trusted-provider policy; LeanMill emits provider payloads
+outside the kernel.
+
+## Adapter Modules And Executables
+
+There are two separable artifacts in an integration:
+
+| Artifact | Distribution path | Kernel relationship |
+|---|---|---|
+| **Adapter module** | Python package, repository, container image, or local executable supplied by the integration author | Translates native runtime/provider events into a kernel protocol such as `RuntimeEvent`, MCP outbox rows, inbound events, or formal-verification payloads. |
+| **Governance package** | `cognitive-firm-distro` distro or overlay | Installs adopter-owned config: roles, mandates, capability grants, schemas, trusted-provider keys, conformance fixtures, and instructions. |
+
+First-party integrations can ship both, but the installer still only writes the
+governance package into an organization. For example, a first-party LangGraph
+adapter can live as importable Python code and a `langgraph-runtime-adapter`
+overlay can install the role policy, example project charter, and conformance
+fixture config that make that adapter governed. The same split applies to
+LeanMill: the LeanMill checker/adapter runs outside the kernel, while the
+overlay installs the trusted-provider policy that decides whether its payloads
+count as clean evidence.
+
+Non-Python executables use the same boundary. The kernel records a declared
+command, version or digest reference, trust policy, and conformance result; it
+does not need to import the executable. MCP stdio servers already follow this
+shape: a local command is spawned by the transport, but role authorization,
+capability checks, idempotency, deterministic projection, and audit rows remain
+kernel-owned.
+
+This keeps the package layer closer to an operating-system distribution
+contract than to a language package manager. The kernel exposes stable
+interfaces; userland packages compose policy around those interfaces; drivers
+and services can be installed by the platform that normally owns executable
+software. When executable supply-chain controls are needed, add them as adapter
+trust policy: digest pinning, signed manifests, revocation feeds, and
+conformance smoke tests.
 
 ## See also
 

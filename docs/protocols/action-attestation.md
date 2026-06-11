@@ -31,6 +31,11 @@ This is intentionally narrower than a full supply-chain system. T1 records are
 local filesystem rows. T2 tenants can attach signatures, transparency-log
 references, and stricter verification policy.
 
+For proof or certificate-backed checks, use
+[`formal-verification.md`](formal-verification.md). Formal verification creates
+its own typed certificate record and can also emit an action attestation that
+points `signature_ref` to the certificate.
+
 ## Record Shape
 
 ```json
@@ -88,6 +93,30 @@ List attestations needing verification:
 python -m cognitive_firm.orchestration.action_attestation list \
   --verification-status unverified
 ```
+
+Render attestations as common resource envelopes:
+
+```bash
+python -m cognitive_firm.orchestration.action_attestation list --resource
+```
+
+## Resource Projection
+
+`action_attestation_resource(...)` projects an attestation into the common
+[Resource Envelope](resource-envelope.md). The JSONL row remains canonical; the
+resource shape is for adapters, dashboards, migration checks, and conformance
+fixtures that need one object model for machine-side provenance.
+
+The projection includes:
+
+- `metadata`: attestation id, tenant/project scope, labels for subject kind,
+  producer, action type, verification status, and run id when present;
+- `spec`: subject ref/digest, producer, action type, runtime/tool/policy refs,
+  input refs, output refs, and run id;
+- `status`: verification status, verification summary, signature ref,
+  transparency ref, and creation time;
+- `links`: subject, producer, runtime, tool, policy, signature, transparency,
+  input, and output refs.
 
 ## Boundary
 

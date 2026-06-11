@@ -50,6 +50,27 @@ the active lease plus fencing token inside the same transaction that appends
 the event. A Postgres backend should preserve the same contract with row locks
 and transaction-local mutation writes.
 
+## Resource Projection
+
+`lease_resource(...)` projects a lease into the common
+[`Resource Envelope`](resource-envelope.md). The lease JSONL row remains
+canonical; the resource view is for adapters, dashboards, migration checks, and
+conformance fixtures:
+
+```text
+kind: Lease
+metadata: lease id, labels, annotations
+spec: leased resource, holder actor/role, purpose
+status: active/released/expired state, fencing token, acquired/expires/released timestamps
+links: leased resource, holder actor, holder role
+```
+
+The CLI can render the same compatibility shape:
+
+```bash
+python -m cognitive_firm.orchestration.leases list --resource
+```
+
 ## Service Flow
 
 Acquire:

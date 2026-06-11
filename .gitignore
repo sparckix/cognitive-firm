@@ -5,6 +5,7 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
+dist/
 
 # Node
 node_modules/

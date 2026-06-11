@@ -32,7 +32,7 @@ The default backend is intentionally boring:
 - append-only JSONL event streams;
 - JSON artifacts under a workspace directory;
 - git and local backup as operational recovery;
-- one principal or a small trusted operator set.
+- one accountable authority or a small trusted operator set.
 
 This is enough for local use, single-host daemons, tenant experiments, and
 public examples. It is not a multi-host transactional system.

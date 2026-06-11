@@ -13,10 +13,12 @@ the same `run.*` checkpoint surface.
 
 ## Why This Exists
 
-The cognitive-firm daemon is intentionally not a graph/node execution engine.
-It should not duplicate LangGraph's graph replay, CrewAI's crews/flows,
-OpenAI Agents SDK tracing/handoffs, Google ADK deployment hooks, Microsoft
-Agent Framework workflows, AutoGen AgentChat, or Letta memory.
+The cognitive-firm daemon executes governed role-office work: it discovers
+tasks, applies mandate and gate policy, dispatches configured agent CLIs and
+capability-gated tools, records checkpoints, and routes human interrupts. Its
+execution surface is organizational rather than framework-native: graph replay,
+crews/flows, provider tracing, deployment hooks, AgentChat semantics, and
+long-term agent memory stay with the runtime selected for that job.
 
 Instead, the kernel accepts a small framework-neutral event stream:
 
@@ -26,11 +28,11 @@ external runtime run -> runtime event -> cognitive-firm run checkpoint
 
 For the first-party daemon, the external runtime name is
 `cognitive_firm_daemon`. For optional framework integrations, the external
-framework remains responsible for replay, node execution, tool calling, memory,
-streaming, and provider-specific semantics. cognitive-firm records the
-organizational view: which role office owns the work, what
-objective it serves, what step was reached, which side effects were already
-attempted, and whether the run is active, failed, or closed.
+framework remains responsible for replay, node execution, native tool calling,
+memory, streaming, and provider-specific semantics. cognitive-firm records and
+can itself execute the organizational view: which role office owns the work,
+what objective it serves, what step was reached, which side effects were
+already attempted, and whether the run is active, failed, or closed.
 
 ## Event Vocabulary
 
@@ -107,6 +109,48 @@ writing a transition row.
 If the framework already has a durable checkpointer, keep using it. The
 cognitive-firm checkpoint is the organizational projection, not the execution
 checkpoint.
+
+## Packaging Runtime Integrations
+
+A framework integration has two parts:
+
+1. **Executable adapter code.** This is ordinary runtime-specific code. For
+   LangGraph, it can be a Python package that calls `record_runtime_event` from
+   graph lifecycle hooks. For a non-Python runtime, it can be a sidecar process
+   or local command that emits the same JSON event shape through the CLI. This
+   code is installed by the host platform, not by the organization package
+   installer.
+2. **Governance package.** This is a `cognitive-firm-distro` overlay. It can
+   install roles, mandates, example project charters, extension schemas,
+   capability policy, conformance-fixture config, and post-install instructions
+   for the adapter.
+
+First-party adapter packs should follow that split. A `langgraph-runtime-adapter`
+overlay would make the integration easy to adopt, while the adapter module
+itself remains testable and replaceable. The kernel contract stays the same for
+LangGraph, LangChain, AutoGen, CrewAI, Letta, a shell script, or a hosted
+workflow engine: emit `started`, `checkpointed`, `interrupted`, and
+`state_changed` events with stable external run ids.
+
+The bundled `langgraph-runtime-adapter` overlay is the reference adapter-policy
+package for this split. It installs an adapter manifest plus
+`adapter_conformance/langgraph-runtime-adapter.json`; it does not install
+LangGraph or executable adapter code. Review it with:
+
+```bash
+cognitive-firm-distro preview-overlay langgraph-runtime-adapter \
+  --into <org> \
+  --json
+```
+
+Then validate the installed manifest/config pair:
+
+```bash
+cognitive-firm-adapter-conformance validate-conformance \
+  adapter_conformance/langgraph-runtime-adapter.json \
+  --manifest adapters/langgraph-runtime-adapter.yaml \
+  --evidence-root .
+```
 
 ## OpenTelemetry Projection
 

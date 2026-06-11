@@ -57,8 +57,9 @@ should start as a typed gap, not as autonomous web retrieval.
 
 The public kernel ships a small filesystem adapter at
 `cognitive_firm.orchestration.evidence_gaps`. It can create, list, filter, and
-update typed evidence gaps. Tenants can replace the adapter or bind sourcing
-workflows to it.
+update typed evidence gaps. It can also render each gap as the common resource
+envelope for adapters and dashboards. Tenants can replace the adapter or bind
+sourcing workflows to it.
 
 A useful evidence gap includes:
 
@@ -71,6 +72,11 @@ A useful evidence gap includes:
 
 Autonomous sourcing becomes appropriate only after repeated gaps show that
 operator sourcing time, not judgment quality, is the bottleneck.
+
+The JSONL row remains canonical. `evidence_gap_resource(...)` is a compatibility
+view with labels for gap type, severity, status, producer, owner role, and
+adversarial direction; spec fields for target, description, source ref, and
+fetch query; and links to the target, producer, owner, source, and fetch query.
 
 ## Charter Feedback
 
@@ -118,6 +124,10 @@ Bandit or mini-RL policies may be useful when actions repeat and rewards are
 measurable. They should remain tenant-owned. The kernel exposes enough fields
 for offline evaluation, but it does not turn local reward rows into autonomous
 routing authority.
+
+The kernel can also record a conservative offline policy-evaluation report over
+action-impact rows. Such a report may support a later governance-change or
+approved-learning event, but it does not mutate routing policy directly.
 
 ## Human Work Feedback
 

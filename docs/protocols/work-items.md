@@ -45,17 +45,25 @@ An operating unit is canonical state. Fields:
 
 ```json
 {
-  "unit_id": "residual_compiler",
-  "unit_kind": "transformation_lane",
-  "display_name": "Residual Compiler",
-  "owner_role": "role.residual_compiler_manager",
-  "input_kinds": ["typed_residual", "family_spec", "source_candidate"],
-  "allowed_work_kinds": ["canary_propose", "exact_gap_compile", "retire_row"],
-  "allowed_exits": ["canary_ready", "exact_gap", "valid_falsifier", "tested_hold", "retired"],
-  "worker_roles": ["role.llm_proposer", "role.proof_execution_worker"],
+  "unit_id": "research_intake",
+  "unit_kind": "analysis_lane",
+  "display_name": "Research Intake",
+  "owner_role": "role.research_lead",
+  "input_kinds": ["question", "source_packet", "decision_request"],
+  "allowed_work_kinds": ["triage", "source_check", "draft_summary"],
+  "allowed_exits": ["summary_ready", "needs_followup", "escalated", "retired"],
+  "worker_roles": ["role.analysis_worker", "role.quality_reviewer"],
+  "worker_role_classes": {
+    "role.analysis_worker": "agent",
+    "role.quality_reviewer": "governance"
+  },
+  "worker_role_archetypes": {
+    "role.analysis_worker": "fungible_agent_worker",
+    "role.quality_reviewer": "independent_reviewer"
+  },
   "sla": {"p95_seconds": 120},
   "operator_required_when": ["policy_change", "ambiguous_target_kind", "budget_escalation"],
-  "governance_required_for": ["exact_gap", "family_promotion"],
+  "governance_required_for": ["escalated"],
   "status": "active"
 }
 ```
@@ -63,12 +71,30 @@ An operating unit is canonical state. Fields:
 `define_operating_unit(...)` is idempotent on `unit_id`: redefining replaces
 the contract and preserves the original `created_at_utc`. `worker_roles` is the
 enforced authority field; an empty list means the unit does not restrict
-claimants, which keeps single-principal T1 deployments lightweight. Every entry
+claimants, which keeps single-authority T1 deployments lightweight. Every entry
 in `governance_required_for` must also appear in `allowed_exits`.
 
-`WORKER_CLASSES` is an open, documented vocabulary — `deterministic`, `llm`,
-`agent`, `governance`, `operator` — that explains *why* a role is allowed to
-touch a unit. The kernel enforces the role, not the class label.
+`worker_role_classes` and `worker_role_archetypes` are optional annotations
+over `worker_roles`.
+`WORKER_CLASSES` is the documented vocabulary — `deterministic`, `llm`,
+`agent`, `governance`, `operator` — that explains what kind of worker a role is
+expected to be. `worker_role_archetypes` points to the richer taxonomy entry
+that also records capability, fungibility, state, and state location. The
+kernel enforces the role, not either label.
+
+The worker-class vocabulary is interpreted through the
+[Worker Taxonomy](worker-taxonomy.md): capability, fungibility, state, and
+transport are separate axes. For example, a tool-using agent may be fungible
+when all relevant context is externalized, or singular when its accumulated
+session context is part of the work.
+
+`operating_unit_resource(...)` projects the contract into the common
+[`Resource Envelope`](resource-envelope.md) for adapters, dashboards,
+migrations, and conformance fixtures. The JSONL row remains canonical:
+
+```bash
+python -m cognitive_firm.orchestration.operating_units list --resource
+```
 
 ## Work Item
 
@@ -132,6 +158,30 @@ producer/verifier provenance. Work events **link to** action attestations
 rather than duplicating them: an attestation proves the machine work, the work
 event records the organizational transition.
 
+### Resource Projection
+
+`work_item_resource(...)` projects a work item into the common
+[`Resource Envelope`](resource-envelope.md). The JSONL row remains canonical;
+the resource shape is for adapters, dashboards, migrations, and conformance
+fixtures that need a stable object view:
+
+```text
+kind: WorkItem
+metadata: name/resource_id, tenant/project, labels, annotations
+spec: unit, work kind, owner role, priority, attempts budget, payload, idempotency key
+status: claim/fencing state, bounded exit, producer/verifier, failure/dead-letter reason
+links: operating unit plus artifact/run refs
+```
+
+The CLI can render the same projection:
+
+```bash
+python -m cognitive_firm.orchestration.work_items list --resource
+```
+
+This is part of the resource/event consolidation path. It does not create a
+second work-item API or make resource envelopes canonical state.
+
 ## Operating Unit Dashboard
 
 `build_operating_unit_dashboard(...)` derives production health per unit:
@@ -144,12 +194,23 @@ time.
 
 ```json
 POST /kernel/operating-units            { "unit_id": "...", "allowed_work_kinds": [...], "allowed_exits": [...] }
+GET  /kernel/operating-units?tenant_id=...&status=active
+GET  /kernel/operating-units/<unit_id>
+GET  /kernel/work-items?unit_id=...&status=queued
+GET  /kernel/work-items/<id>
 POST /kernel/work-items                 { "unit_id": "...", "kind": "...", "payload": {...}, "idempotency_key": "..." }
 POST /kernel/work-items/claim-next      { "unit_id": "...", "actor": "...", "role_id": "..." }
-POST /kernel/work-items/<id>/complete   { "actor": "...", "claim_token": 1, "exit_kind": "exact_gap" }
+POST /kernel/work-items/<id>/complete   { "actor": "...", "claim_token": 1, "exit_kind": "summary_ready" }
 POST /kernel/work-items/<id>/fail       { "actor": "...", "claim_token": 1, "reason": "...", "retryable": true }
 GET  /kernel/operating-unit-dashboard
 ```
+
+The operating-unit read routes accept the same filters as
+`list_operating_units(...)`: `status`, `tenant_id`, and `project_id`. The
+work-item read routes accept the same filters as `list_work_items(...)`:
+`unit_id`, `status`, `kind`, `tenant_id`, and `project_id`. Add `resource=true`
+to render the common resource envelope for dashboards, adapters, and migration
+checks.
 
 Every mutation route runs through the same actor-context, membership, and lease
 checks as the rest of the [Kernel Service](kernel-service.md).

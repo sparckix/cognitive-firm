@@ -73,7 +73,7 @@ cognitive-firm-identity-provisioning provisioning-plan.json
 ## Why This Is Not First-Party IAM
 
 Different organizations already have different identity systems. The kernel
-should not compete with those systems. It should receive authenticated subject
+should integrate with those systems. It should receive authenticated subject
 facts and compile explicit role authority into records it can enforce.
 
 That keeps the durable organizational question local:

@@ -118,6 +118,25 @@ rebuilt at any time. It surfaces scopes with no active assignment, decisions
 flagged `unauthorized`, decisions awaiting review, and `promote_to_mandate_clause`
 candidates.
 
+## Resource Projections
+
+The JSONL rows remain canonical state. Two compatibility projections expose the
+same facts through the common [Resource Envelope](resource-envelope.md):
+
+- `residual_right_assignment_resource(...)` renders a
+  `ResidualRightAssignment` with scope, holder, basis, lifecycle status, and
+  links to the scope and holder.
+- `residual_decision_resource(...)` renders a `ResidualDecision` with scope,
+  deciding actor/role, authorization flag, assignment link, review outcome, and
+  review notes.
+
+CLI readers can emit either canonical rows or resource envelopes:
+
+```bash
+python -m cognitive_firm.orchestration.decision_rights list-assignments --resource
+python -m cognitive_firm.orchestration.decision_rights list-decisions --resource
+```
+
 ## T1 And T2 Modes
 
 T1 stores assignments and decisions in two JSONL logs under

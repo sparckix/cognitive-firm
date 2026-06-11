@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -9,10 +10,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from cognitive_firm.orchestration.accountability_cases import (  # noqa: E402
+    accountability_case_resource,
     create_accountability_case,
     list_accountability_cases,
+    main as accountability_cases_main,
     update_accountability_case_status,
 )
+from cognitive_firm.orchestration.resource_envelope import validate_resource  # noqa: E402
 
 
 def test_create_and_list_accountability_case(tmp_path: Path):
@@ -142,3 +146,104 @@ def test_invalid_accountability_case_fields_fail(tmp_path: Path):
             recourse_path="rollback",
             log_path=log,
         )
+
+
+def test_accountability_case_projects_to_resource_envelope(tmp_path: Path):
+    log = tmp_path / "accountability_cases.jsonl"
+    case = create_accountability_case(
+        trigger_ref="run:run_123",
+        accountable_role="role.manager",
+        responsible_actor="human.alice",
+        decision_right_basis="mandate",
+        authority_envelope_ref="org/mandates/manager_mandate.md",
+        risk_tier="irreversible",
+        recourse_path="external_review",
+        review_sla="PT24H",
+        tenant_id="tenant-a",
+        project_id="project-a",
+        due_at_utc="2026-06-11T00:00:00+00:00",
+        externality_tags=["customer_impact"],
+        operator_burden="high",
+        rationale="Residual customer-facing risk needs closure.",
+        metadata={"cognitive_run_id": "run_123"},
+        log_path=log,
+    )
+
+    resource = accountability_case_resource(case).as_dict()
+
+    assert validate_resource(resource) == []
+    assert resource["kind"] == "AccountabilityCase"
+    assert resource["metadata"]["name"] == case.case_id
+    assert resource["metadata"]["tenant_id"] == "tenant-a"
+    assert resource["metadata"]["project_id"] == "project-a"
+    assert resource["metadata"]["annotations"]["cognitive_run_id"] == "run_123"
+    assert resource["spec"]["trigger_ref"] == "run:run_123"
+    assert resource["spec"]["accountable_role"] == "role.manager"
+    assert resource["spec"]["decision_right_basis"] == "mandate"
+    assert resource["spec"]["risk_tier"] == "irreversible"
+    assert resource["spec"]["recourse_path"] == "external_review"
+    assert resource["spec"]["externality_tags"] == ["customer_impact"]
+    assert resource["status"]["status"] == "open"
+    assert {"rel": "trigger", "href": "run:run_123"} in resource["links"]
+    assert {"rel": "responsible_actor", "href": "human.alice"} in resource["links"]
+    assert {
+        "rel": "authority_envelope",
+        "href": "org/mandates/manager_mandate.md",
+    } in resource["links"]
+
+
+def test_accountability_case_resource_reflects_closure(tmp_path: Path):
+    log = tmp_path / "accountability_cases.jsonl"
+    case = create_accountability_case(
+        trigger_ref="damage_signal:dmg_1",
+        accountable_role="role.manager",
+        responsible_actor="role.engineer",
+        decision_right_basis="tenant_rule",
+        authority_envelope_ref="tenant/policy.md",
+        risk_tier="high",
+        recourse_path="rollback",
+        log_path=log,
+    )
+    closed = update_accountability_case_status(
+        case.case_id,
+        "closed",
+        closure_evidence_refs=["artifact://rollback-report"],
+        log_path=log,
+    )
+
+    resource = accountability_case_resource(closed).as_dict()
+
+    assert validate_resource(resource) == []
+    assert resource["status"]["status"] == "closed"
+    assert resource["status"]["closure_evidence_refs"] == ["artifact://rollback-report"]
+    assert {
+        "rel": "closure_evidence",
+        "href": "artifact://rollback-report",
+    } in resource["links"]
+
+
+def test_accountability_case_cli_can_render_resource_envelopes(tmp_path: Path, capsys):
+    log = tmp_path / "accountability_cases.jsonl"
+    case = create_accountability_case(
+        trigger_ref="action_impact:act_1",
+        accountable_role="role.manager",
+        responsible_actor="role.agent",
+        decision_right_basis="policy",
+        authority_envelope_ref="policy://action-impact",
+        risk_tier="medium",
+        recourse_path="reopen",
+        log_path=log,
+    )
+
+    rc = accountability_cases_main(["list", "--log-path", str(log), "--resource"])
+    payloads = [
+        json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+        if line.strip()
+    ]
+
+    assert rc == 0
+    assert len(payloads) == 1
+    assert payloads[0]["kind"] == "AccountabilityCase"
+    assert payloads[0]["metadata"]["name"] == case.case_id
+    assert validate_resource(payloads[0]) == []

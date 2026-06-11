@@ -36,6 +36,27 @@ Actor membership is the companion authority record. Actor identity names the
 actor; [Actor Membership](actor-membership.md) grants a role in a tenant or
 project scope.
 
+## Resource Projection
+
+`actor_identity_resource(...)` projects an identity into the common
+[`Resource Envelope`](resource-envelope.md). The JSONL identity row remains
+canonical; the resource view is for admin adapters, dashboards, migration
+checks, and conformance fixtures:
+
+```text
+kind: ActorIdentity
+metadata: actor id, labels, annotations
+spec: actor kind, display name, IdP subject/provider, allowed roles, tenants
+status: active/suspended-style state plus timestamps
+links: allowed roles and tenant scopes
+```
+
+The CLI can render the same compatibility shape:
+
+```bash
+python -m cognitive_firm.orchestration.actor_identity list --resource
+```
+
 ## T1 And T2 Modes
 
 T1 permits unregistered actor context. This is suitable for one trusted host or

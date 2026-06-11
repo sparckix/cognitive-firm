@@ -1,4 +1,4 @@
-"""Property-based tests for the M-Form load-bearing invariants.
+"""Property-based tests for the M-Form core invariants.
 
 These tests cover dispatch authorization edge cases where examples alone are
 too narrow: forbidden path precedence, explicit unattended scopes, budget
@@ -287,14 +287,9 @@ def test_I7_idempotency_key_determinism(causality: str, request: dict):
 
 
 def test_meta_invariants_documented():
-    """The verdicts file names which invariants are load-bearing. Confirm
-    that file exists and references the property-based-tests choice."""
-    # Walk up to the cognitive-firm root then find internal/verdicts.
-    p = ROOT / "internal" / "competitive_adoption_verdicts.md"
-    if not p.exists():
-        pytest.skip("internal/ not present in this checkout (it is gitignored)")
+    """The public mandate protocol names the randomized invariant suite."""
+    p = ROOT / "docs" / "protocols" / "mandate.md"
     text = p.read_text(encoding="utf-8")
-    assert "C2" in text
     assert "property-based" in text.lower() or "property tests" in text.lower(), (
-        "verdicts file must name property-based testing as the C2 deliverable"
+        "mandate protocol must name the property-based invariant tests"
     )

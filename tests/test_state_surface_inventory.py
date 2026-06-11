@@ -7,7 +7,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from cognitive_firm.orchestration.state_surface_inventory import (  # noqa: E402
+    CAPABILITY_GROUPS,
+    capability_inventory,
     list_state_surfaces,
+    render_capability_inventory_markdown,
     unregistered_stateful_modules,
 )
 from cognitive_firm.orchestration.connector_families import CONNECTOR_FAMILIES  # noqa: E402
@@ -19,6 +22,7 @@ def test_state_surface_inventory_covers_core_primitives():
 
     expected = {
         "transition_log",
+        "run_checkpoints",
         "state_backends",
         "kernel_events",
         "resource_envelope",
@@ -26,8 +30,10 @@ def test_state_surface_inventory_covers_core_primitives():
         "otel_export",
         "migrations",
         "audit_integrity",
+        "governed_run_attestation",
         "actor_identity",
         "actor_membership",
+        "authority_domains",
         "leases",
         "accountability_cases",
         "evidence_gaps",
@@ -47,6 +53,9 @@ def test_state_surface_inventory_covers_core_primitives():
         "learning_events",
         "learning_event_encounters",
         "accountability",
+        "operating_units",
+        "work_items",
+        "operating_unit_surface",
     }
     assert expected.issubset(primitives)
 
@@ -77,3 +86,26 @@ def test_state_surface_inventory_classifies_source_of_truth_level():
 
 def test_state_surface_inventory_registers_all_default_log_modules():
     assert unregistered_stateful_modules(ROOT / "src") == []
+
+
+def test_capability_groups_reference_registered_surfaces_once():
+    primitives = {surface.primitive for surface in list_state_surfaces()}
+    grouped = [
+        primitive
+        for _group, primitives_in_group in CAPABILITY_GROUPS
+        for primitive in primitives_in_group
+    ]
+
+    assert set(grouped) == primitives
+    assert len(grouped) == len(set(grouped))
+
+
+def test_capability_inventory_renders_markdown_from_registered_surfaces():
+    inventory = capability_inventory()
+    rendered = render_capability_inventory_markdown()
+
+    assert inventory
+    assert "# Capability Map" in rendered
+    assert "## Authority and access" in rendered
+    assert "`run_checkpoints`" in rendered
+    assert "tests/test_run_checkpoints.py" in rendered

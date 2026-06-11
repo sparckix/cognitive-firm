@@ -20,3 +20,19 @@ To copy the pack into a tenant workspace:
 ```bash
 python scripts/field_pilot_scaffold.py tenants/<tenant>/field-pilots/<pilot-name>
 ```
+
+If the pilot uses action-impact evidence, add `action-impact-summary.json` to
+the same folder and validate it:
+
+```bash
+python scripts/field_pilot_action_impact_compile.py tenants/<tenant>/field-pilots/<pilot-name> \
+  pilot-rows.csv \
+  --validate \
+  --min-records 30
+```
+
+```bash
+python scripts/field_pilot_validate.py tenants/<tenant>/field-pilots/<pilot-name> \
+  --require-action-impact \
+  --min-action-impact-records 30
+```

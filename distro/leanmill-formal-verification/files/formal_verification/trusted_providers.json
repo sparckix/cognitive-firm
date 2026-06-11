@@ -1,0 +1,13 @@
+{
+  "schema_version": "formal-verification-trust/v1",
+  "trusted_providers": [
+    {
+      "provider": "leanmill",
+      "trust_basis": "Installed LeanMill formal-verification overlay. Trust applies to provider payloads that carry signed, re-runnable, and faithfulness-backed evidence.",
+      "public_key_ref": "configure://leanmill-ed25519-public-key",
+      "requires_payload_signature": true,
+      "requires_reverification_refs": true,
+      "requires_faithfulness_refs": true
+    }
+  ]
+}

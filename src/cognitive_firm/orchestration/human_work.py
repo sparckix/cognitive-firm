@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
+from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
 
 
 HumanWorkState = Literal[
@@ -137,6 +138,31 @@ class HumanWorkSession:
     agent_followup_ref: str | None = None
     notes: list[dict[str, Any]] = field(default_factory=list)
     interaction_events: list[dict[str, Any]] = field(default_factory=list)
+    work_receipts: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class HumanWorkReceipt:
+    """Structured receipt for bounded human work.
+
+    This records a bounded human claim without making the kernel pretend it
+    observed the work directly. `subject_refs` can point at any domain object:
+    source, customer, asset, location, system, document, conversation, or work
+    order.
+    """
+
+    receipt_id: str
+    recorded_at_utc: str
+    actor: str
+    summary: str
+    receipt_type: ReceiptType = "note"
+    receipt_ref: str | None = None
+    observability: Observability = "human_attested"
+    confidence: Confidence = "medium"
+    subject_refs: list[str] = field(default_factory=list)
+    artifact_refs: list[str] = field(default_factory=list)
+    review_required: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -639,8 +665,207 @@ def append_human_work_interaction(
     return _replace_session(path, session_id, mutate)
 
 
+def _human_work_receipt_text(receipt: HumanWorkReceipt) -> str:
+    parts = [f"human work receipt by {receipt.actor}", receipt.summary]
+    if receipt.receipt_ref:
+        parts.append(f"receipt_ref={receipt.receipt_ref}")
+    if receipt.subject_refs:
+        parts.append(f"subjects={','.join(receipt.subject_refs)}")
+    return "; ".join(parts)
+
+
+def append_human_work_receipt(
+    session_id: str,
+    *,
+    actor: str,
+    summary: str,
+    receipt_type: ReceiptType | str = "note",
+    receipt_ref: str | None = None,
+    subject_refs: list[str] | None = None,
+    artifact_refs: list[str] | None = None,
+    confidence: Confidence | str = "medium",
+    observability: Observability | str = "human_attested",
+    review_required: bool = False,
+    metadata: dict[str, Any] | None = None,
+    log_path: Path | None = None,
+) -> HumanWorkSession:
+    """Append a structured receipt for bounded human work."""
+    if not actor.strip():
+        raise ValueError("actor is required")
+    if not summary.strip():
+        raise ValueError("summary is required")
+    receipt_type = _validate(str(receipt_type), VALID_RECEIPT_TYPES, "receipt_type")
+    confidence = _validate(str(confidence), VALID_CONFIDENCE, "confidence")
+    observability = _validate(str(observability), VALID_OBSERVABILITY, "observability")
+    if receipt_type == "external_ref" and not (receipt_ref or "").strip():
+        raise ValueError("receipt_ref is required when receipt_type is external_ref")
+    if receipt_type == "artifact_ref" and not (artifact_refs or receipt_ref):
+        raise ValueError("artifact_refs or receipt_ref is required when receipt_type is artifact_ref")
+    if receipt_type == "witness" and not (receipt_ref or "").strip():
+        raise ValueError("receipt_ref is required when receipt_type is witness")
+    receipt = HumanWorkReceipt(
+        receipt_id=f"hwr_{uuid.uuid4().hex[:12]}",
+        recorded_at_utc=_now_iso(),
+        actor=actor,
+        summary=summary,
+        receipt_type=receipt_type,  # type: ignore[arg-type]
+        receipt_ref=receipt_ref,
+        observability=observability,  # type: ignore[arg-type]
+        confidence=confidence,  # type: ignore[arg-type]
+        subject_refs=subject_refs or [],
+        artifact_refs=artifact_refs or [],
+        review_required=review_required,
+        metadata=metadata or {},
+    )
+    receipt_text = receipt_ref or _human_work_receipt_text(receipt)
+    path = log_path or DEFAULT_HUMAN_WORK_LOG
+
+    def mutate(row: dict[str, Any]) -> dict[str, Any]:
+        work_receipts = list(row.get("work_receipts") or [])
+        work_receipts.append(asdict(receipt))
+        row["work_receipts"] = work_receipts
+        row["receipt"] = row.get("receipt") or receipt_text
+        if row.get("receipt_type") in {None, "none", "note"}:
+            row["receipt_type"] = receipt_type
+        row["confidence"] = confidence
+        row["observability"] = observability
+        if review_required:
+            row["sample_for_review"] = True
+        row["updated_at_utc"] = _now_iso()
+
+        events = list(row.get("interaction_events") or [])
+        events.append(
+            {
+                "ts": receipt.recorded_at_utc,
+                "actor": actor,
+                "event_type": "human_work_receipt_attested",
+                "surface": row.get("interaction_surface") or "mixed",
+                "summary": summary,
+                "artifact_refs": receipt.artifact_refs,
+                "blocker": None,
+            }
+        )
+        row["interaction_events"] = events
+
+        if receipt.artifact_refs:
+            existing = list(row.get("artifact_refs") or [])
+            row["artifact_refs"] = list(dict.fromkeys(existing + receipt.artifact_refs))
+        if (
+            receipt_type == "note"
+            and not receipt.artifact_refs
+            and not receipt.receipt_ref
+            and observability in {"human_attested", "unobservable"}
+        ):
+            row["sample_for_review"] = True
+        return row
+
+    return _replace_session(path, session_id, mutate)
+
+
 def human_work_summary(session: HumanWorkSession) -> dict[str, Any]:
     return asdict(session)
+
+
+def human_work_resource(session: HumanWorkSession) -> KernelResource:
+    """Project a human-work session into the common resource envelope.
+
+    The human-work JSONL row remains canonical. The resource view gives
+    adapters, dashboards, migration checks, and conformance fixtures a common
+    object shape for A2H coordination, receipt state, and role follow-up.
+    """
+    labels = {
+        "state": session.state,
+        "work_mode": session.work_mode,
+        "bottleneck_class": session.bottleneck_class,
+        "human_actor": session.human_actor,
+        "requested_by": session.requested_by,
+        "receipt_required": str(session.receipt_required).lower(),
+        "agent_followup_required": str(session.agent_followup_required).lower(),
+        "work_receipt_present": str(bool(session.work_receipts)).lower(),
+    }
+    if session.agent_counterparty_role:
+        labels["agent_counterparty_role"] = session.agent_counterparty_role
+    if session.receipt_type:
+        labels["receipt_type"] = session.receipt_type
+
+    links = [
+        {"rel": "requested_by", "href": session.requested_by},
+        {"rel": "human_actor", "href": session.human_actor},
+    ]
+    for role in session.collaborating_roles:
+        links.append({"rel": "collaborating_role", "href": role})
+    for ref in session.artifact_refs:
+        links.append({"rel": "artifact", "href": ref})
+    if session.obligation_id:
+        links.append({"rel": "obligation", "href": session.obligation_id})
+    if session.integration_ref:
+        links.append({"rel": "integration", "href": session.integration_ref})
+    if session.agent_counterparty_role:
+        links.append(
+            {
+                "rel": "agent_counterparty_role",
+                "href": session.agent_counterparty_role,
+            }
+        )
+    if session.agent_followup_ref:
+        links.append({"rel": "agent_followup", "href": session.agent_followup_ref})
+    for receipt in session.work_receipts:
+        if receipt.get("receipt_ref"):
+            links.append({"rel": "receipt_ref", "href": receipt["receipt_ref"]})
+        for ref in receipt.get("subject_refs") or []:
+            links.append({"rel": "subject", "href": ref})
+        for ref in receipt.get("artifact_refs") or []:
+            links.append({"rel": "receipt_artifact", "href": ref})
+
+    return make_resource(
+        kind="HumanWorkSession",
+        name=session.session_id,
+        resource_id=session.session_id,
+        tenant_id=session.tenant_id,
+        project_id=session.project_id,
+        stability="alpha",
+        labels=labels,
+        annotations={
+            key: str(value)
+            for key, value in session.metadata.items()
+            if isinstance(key, str) and value is not None
+        },
+        spec={
+            "requested_by": session.requested_by,
+            "human_actor": session.human_actor,
+            "objective": session.objective,
+            "work_mode": session.work_mode,
+            "bottleneck_class": session.bottleneck_class,
+            "collaborating_roles": session.collaborating_roles,
+            "artifact_refs": session.artifact_refs,
+            "observability": session.observability,
+            "receipt_required": session.receipt_required,
+            "receipt_type": session.receipt_type,
+            "confidence": session.confidence,
+            "sample_for_review": session.sample_for_review,
+            "obligation_id": session.obligation_id,
+            "deadline_utc": session.deadline_utc,
+            "interaction_surface": session.interaction_surface,
+            "agent_counterparty_role": session.agent_counterparty_role,
+            "human_deliverable": session.human_deliverable,
+            "agent_followup_required": session.agent_followup_required,
+            "agent_followup_ref": session.agent_followup_ref,
+        },
+        status={
+            "state": session.state,
+            "receipt_present": bool((session.receipt or "").strip()),
+            "receipt": session.receipt,
+            "completion_summary": session.completion_summary,
+            "integration_ref": session.integration_ref,
+            "notes_count": len(session.notes),
+            "interaction_event_count": len(session.interaction_events),
+            "work_receipt_count": len(session.work_receipts),
+            "work_receipts": session.work_receipts,
+            "created_at_utc": session.created_at_utc,
+            "updated_at_utc": session.updated_at_utc,
+        },
+        links=links,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -656,6 +881,7 @@ def main(argv: list[str] | None = None) -> int:
     list_parser.add_argument("--agent-followup-required", action=argparse.BooleanOptionalAction, default=None)
     list_parser.add_argument("--interaction-surface")
     list_parser.add_argument("--log-path", type=Path)
+    list_parser.add_argument("--resource", action="store_true", help="render resource envelopes")
 
     create_parser = sub.add_parser("create")
     create_parser.add_argument("--requested-by", required=True)
@@ -733,6 +959,19 @@ def main(argv: list[str] | None = None) -> int:
     interaction_parser.add_argument("--agent-followup-required", action=argparse.BooleanOptionalAction, default=None)
     interaction_parser.add_argument("--log-path", type=Path)
 
+    receipt_parser = sub.add_parser("receipt")
+    receipt_parser.add_argument("session_id")
+    receipt_parser.add_argument("--actor", required=True)
+    receipt_parser.add_argument("--summary", required=True)
+    receipt_parser.add_argument("--receipt-type", default="note")
+    receipt_parser.add_argument("--receipt-ref")
+    receipt_parser.add_argument("--subject-ref", action="append", default=[])
+    receipt_parser.add_argument("--artifact-ref", action="append", default=[])
+    receipt_parser.add_argument("--confidence", default="medium")
+    receipt_parser.add_argument("--observability", default="human_attested")
+    receipt_parser.add_argument("--review-required", action="store_true")
+    receipt_parser.add_argument("--log-path", type=Path)
+
     args = parser.parse_args(argv)
     if args.cmd == "list":
         sessions = list_human_work_sessions(
@@ -746,7 +985,15 @@ def main(argv: list[str] | None = None) -> int:
             log_path=args.log_path,
         )
         for session in sessions:
-            print(json.dumps(human_work_summary(session), sort_keys=True))
+            if args.resource:
+                print(
+                    json.dumps(
+                        human_work_resource(session).as_dict(),
+                        sort_keys=True,
+                    )
+                )
+            else:
+                print(json.dumps(human_work_summary(session), sort_keys=True))
         return 0
     if args.cmd == "create":
         session = create_human_work_session(
@@ -825,6 +1072,22 @@ def main(argv: list[str] | None = None) -> int:
             artifact_refs=args.artifact_ref,
             blocker=args.blocker,
             agent_followup_required=args.agent_followup_required,
+            log_path=args.log_path,
+        )
+        print(json.dumps(human_work_summary(session), sort_keys=True))
+        return 0
+    if args.cmd == "receipt":
+        session = append_human_work_receipt(
+            args.session_id,
+            actor=args.actor,
+            summary=args.summary,
+            receipt_type=args.receipt_type,
+            receipt_ref=args.receipt_ref,
+            subject_refs=args.subject_ref,
+            artifact_refs=args.artifact_ref,
+            confidence=args.confidence,
+            observability=args.observability,
+            review_required=args.review_required,
             log_path=args.log_path,
         )
         print(json.dumps(human_work_summary(session), sort_keys=True))

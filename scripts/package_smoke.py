@@ -24,6 +24,12 @@ def main() -> int:
         "cognitive-firm-kernel-service",
         "cognitive-firm-actor-membership",
         "cognitive-firm-identity-provisioning",
+        "cognitive-firm-governed-run-bundle",
+        "cognitive-firm-formal-verification",
+        "cognitive-firm-adapter-conformance",
+        "cognitive-firm-authority-domains",
+        "cognitive-firm-action-impact",
+        "cognitive-firm-distro",
     }
     missing_scripts = sorted(required - set(scripts))
     if missing_scripts:
@@ -150,6 +156,12 @@ def run_installed_wheel_checks(raw: str, wheel: Path) -> list[str]:
         [str(install_root / bin_dir / "cognitive-firm-kernel-service"), "--help"],
         [str(install_root / bin_dir / "cognitive-firm-actor-membership"), "--help"],
         [str(install_root / bin_dir / "cognitive-firm-identity-provisioning"), "--help"],
+        [str(install_root / bin_dir / "cognitive-firm-governed-run-bundle"), "--help"],
+        [str(install_root / bin_dir / "cognitive-firm-formal-verification"), "--help"],
+        [str(install_root / bin_dir / "cognitive-firm-adapter-conformance"), "--help"],
+        [str(install_root / bin_dir / "cognitive-firm-authority-domains"), "--help"],
+        [str(install_root / bin_dir / "cognitive-firm-action-impact"), "--help"],
+        [str(install_root / bin_dir / "cognitive-firm-distro"), "--help"],
     ]
     labels: list[str] = []
     for command in checks:
@@ -164,7 +176,21 @@ def run_installed_wheel_checks(raw: str, wheel: Path) -> list[str]:
 def subprocess_run(command: list[str]) -> None:
     import subprocess
 
-    subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    result = subprocess.run(
+        command,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise SystemExit(
+            "command failed: "
+            + " ".join(command)
+            + f"\nexit_code: {result.returncode}"
+            + f"\nstdout:\n{result.stdout}"
+            + f"\nstderr:\n{result.stderr}"
+        )
 
 
 if __name__ == "__main__":

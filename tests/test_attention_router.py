@@ -7,8 +7,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from cognitive_firm.userland import signal_classes as sc
+from cognitive_firm.orchestration.actor_membership import grant_actor_membership
 from cognitive_firm.userland.attention_router import (
     AttentionSignal,
+    authority_resolver_from_org,
     pending_gate_signals,
     resolve_authority_role,
     route_signals,
@@ -48,6 +50,29 @@ def test_governance_interrupt_routes_to_the_authority():
     assert r.target_actor_id == "principal_actor"
     assert r.target_role_id == "principal"
     assert r.primary_action == "approve"
+
+
+def test_governance_interrupt_can_route_by_signal_scope():
+    tenant_gate = AttentionSignal(
+        signal_id="g_tenant",
+        kind="gate_pending",
+        headline="Gate: tenant work",
+        source_ref="gate",
+        tenant_id="tenant-a",
+    )
+
+    routed = route_signals(
+        [tenant_gate],
+        authority_resolver=lambda signal: (
+            "tenant_authority",
+            "human.tenant_owner",
+        )
+        if signal.tenant_id == "tenant-a"
+        else (None, None),
+    )
+
+    assert routed[0].target_role_id == "tenant_authority"
+    assert routed[0].target_actor_id == "human.tenant_owner"
 
 
 def test_work_interrupt_routes_to_the_named_member_human():
@@ -127,6 +152,8 @@ def test_pending_gate_signals_reads_the_gate_directory(tmp_path):
                 "goal_name": "Ship the report",
                 "gate_description": "approve external publication",
                 "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "tenant_id": "tenant-a",
+                "decision_class": "publication",
             }
         )
     )
@@ -135,6 +162,8 @@ def test_pending_gate_signals_reads_the_gate_directory(tmp_path):
     assert len(signals) == 1  # the malformed file is skipped, not fatal
     assert signals[0].kind == "gate_pending"
     assert "Ship the report" in signals[0].headline
+    assert signals[0].tenant_id == "tenant-a"
+    assert signals[0].decision_class == "publication"
 
 
 def test_pending_gate_signals_empty_when_no_directory(tmp_path):
@@ -157,3 +186,115 @@ def test_resolve_authority_role_none_when_ambiguous(tmp_path):
     (roles / "a.yaml").write_text("role_id: a\nrole_class: authority\n")
     (roles / "b.yaml").write_text("role_id: b\nrole_class: authority\n")
     assert resolve_authority_role(tmp_path) is None
+
+
+def test_resolve_authority_role_uses_authority_domains(tmp_path):
+    roles = tmp_path / "roles"
+    roles.mkdir()
+    (roles / "principal.yaml").write_text(
+        "role_id: principal\nrole_class: authority\n"
+    )
+    (roles / "tenant_authority.yaml").write_text(
+        "role_id: tenant_authority\nrole_class: authority\n"
+    )
+    domains = tmp_path / "authority_domains" / "authority_domains.json"
+    domains.parent.mkdir()
+    domains.write_text(
+        json.dumps(
+            {
+                "authority_domains": [
+                    {
+                        "domain_id": "global",
+                        "authority_role_id": "role.principal",
+                        "scope_kind": "global",
+                        "scope_id": "*",
+                    },
+                    {
+                        "domain_id": "tenant_a",
+                        "authority_role_id": "role.tenant_authority",
+                        "scope_kind": "tenant",
+                        "scope_id": "tenant-a",
+                    },
+                ]
+            }
+        )
+    )
+
+    assert resolve_authority_role(tmp_path, tenant_id="tenant-a") == "tenant_authority"
+    assert resolve_authority_role(tmp_path, tenant_id="tenant-b") == "principal"
+
+
+def test_authority_resolver_from_org_routes_scoped_signal_to_active_actor(tmp_path):
+    roles = tmp_path / "roles"
+    roles.mkdir()
+    (roles / "principal.yaml").write_text("role_id: principal\nrole_class: authority\n")
+    (roles / "tenant_authority.yaml").write_text("role_id: tenant_authority\nrole_class: authority\n")
+    domains = tmp_path / "authority_domains" / "authority_domains.json"
+    domains.parent.mkdir()
+    domains.write_text(
+        json.dumps(
+            {
+                "authority_domains": [
+                    {
+                        "domain_id": "global",
+                        "authority_role_id": "role.principal",
+                        "scope_kind": "global",
+                        "scope_id": "*",
+                    },
+                    {
+                        "domain_id": "tenant_a",
+                        "authority_role_id": "role.tenant_authority",
+                        "scope_kind": "tenant",
+                        "scope_id": "tenant-a",
+                    },
+                ]
+            }
+        )
+    )
+    membership_log = tmp_path / "actor_memberships.jsonl"
+    grant_actor_membership(
+        actor_id="service.tenant_authority_bot",
+        role_id="tenant_authority",
+        granted_by="human.admin",
+        decision_right_basis="tenant-scoped automation authority",
+        tenant_id="tenant-a",
+        log_path=membership_log,
+    )
+    signal = AttentionSignal(
+        signal_id="g_tenant",
+        kind="gate_pending",
+        headline="Tenant gate",
+        source_ref="gate",
+        tenant_id="tenant-a",
+    )
+
+    routed = route_signals(
+        [signal],
+        authority_resolver=authority_resolver_from_org(
+            tmp_path,
+            actor_membership_log=membership_log,
+        ),
+    )
+
+    assert routed[0].target_role_id == "tenant_authority"
+    assert routed[0].target_actor_id == "service.tenant_authority_bot"
+
+
+def test_authority_resolver_from_org_surfaces_role_without_active_actor(tmp_path):
+    roles = tmp_path / "roles"
+    roles.mkdir()
+    (roles / "principal.yaml").write_text("role_id: principal\nrole_class: authority\n")
+    signal = AttentionSignal(
+        signal_id="g",
+        kind="gate_pending",
+        headline="Global gate",
+        source_ref="gate",
+    )
+
+    routed = route_signals(
+        [signal],
+        authority_resolver=authority_resolver_from_org(tmp_path),
+    )
+
+    assert routed[0].target_role_id == "principal"
+    assert routed[0].target_actor_id is None

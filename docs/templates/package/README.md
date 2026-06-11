@@ -24,7 +24,9 @@ This template is built for the third-party authoring loop. You can
 iterate on a package without ever installing it into a live, governed org:
 
 1. **Lint** — parse the manifest and report authoring problems (missing
-   component sources, bad `op`, escaping paths, short description, …):
+   component sources, bad `op`, escaping paths, short description, malformed
+   adapter manifests, or adapter conformance configs that drift from their
+   manifest):
 
    ```sh
    cognitive-firm-distro lint path/to/your-package

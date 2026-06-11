@@ -1,0 +1,44 @@
+{
+  "schema_version": "cognitive-firm-adapter-conformance/v1",
+  "adapter_id": "leanmill-formal-verification",
+  "protocol": "formal_verification_provider_payload",
+  "fixture_command": "make formal-provider-bundle-demo",
+  "required_checks": [
+    {
+      "check_id": "accepts_signed_verified_payload",
+      "evidence": "tests/test_formal_verification.py"
+    },
+    {
+      "check_id": "rejects_forged_payload_signature",
+      "evidence": "tests/test_formal_verification.py"
+    },
+    {
+      "check_id": "preserves_checker_evidence_refs",
+      "evidence": "tests/test_formal_verification.py"
+    },
+    {
+      "check_id": "preserves_faithfulness_refs",
+      "evidence": "tests/test_formal_verification.py"
+    },
+    {
+      "check_id": "governed_bundle_caveats_missing_trust",
+      "evidence": "tests/test_governed_run_attestation_bundle.py"
+    }
+  ],
+  "runtime_boundary": {
+    "external_runtime_owns": [
+      "claim formalization",
+      "faithfulness checks",
+      "checker selection",
+      "certificate generation",
+      "counterexample extraction"
+    ],
+    "cognitive_firm_owns": [
+      "provider payload schema validation",
+      "org-installed provider trust policy",
+      "signature verification against configured provider keys",
+      "formal-verification rows",
+      "governed-run bundle caveats"
+    ]
+  }
+}

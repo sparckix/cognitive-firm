@@ -58,6 +58,27 @@ to apply idempotent actor and membership plans.
 request supplies a tenant or project, a membership with no tenant/project is
 treated as broader scope.
 
+## Resource Projection
+
+`actor_membership_resource(...)` projects a grant into the common
+[`Resource Envelope`](resource-envelope.md). The membership JSONL row remains
+the canonical authority record; the resource view is for admin adapters,
+dashboards, migration checks, and conformance fixtures:
+
+```text
+kind: ActorMembership
+metadata: assignment id, tenant/project, labels, annotations
+spec: actor, role, grantor, decision-right basis, start/expiry bounds
+status: active/revoked/suspended/expired plus timestamps
+links: actor, role, grantor
+```
+
+The CLI can render the same compatibility shape:
+
+```bash
+python -m cognitive_firm.orchestration.actor_membership list --resource
+```
+
 ## Service Boundary
 
 The kernel service exposes:

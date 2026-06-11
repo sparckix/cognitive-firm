@@ -194,7 +194,7 @@ network access and a tenant-owned credential. It should return
 
 ## Threat-model coverage
 
-| Primitive | T1 (single-principal) | T2 (regulated enterprise) |
+| Primitive | T1 (single-authority) | T2 (regulated enterprise) |
 |-----------|----------------------|---------------------------|
 | Outbox-relay (Phase 1) | shipped | T2-relevant relay checks shipped |
 | JSON-RPC transport stdio + HTTP (Phase 1.5) | shipped | T2-relevant transport checks shipped |

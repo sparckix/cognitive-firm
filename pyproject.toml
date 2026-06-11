@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cognitive-firm"
-version = "0.1.0"
+version = "0.2.0"
 description = "A governance kernel for organizations that coordinate persistent human and agent roles."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -65,6 +65,11 @@ cognitive-firm-actor-membership = "cognitive_firm.orchestration.actor_membership
 cognitive-firm-identity-provisioning = "cognitive_firm.identity_provisioning:main"
 cognitive-firm-distro = "cognitive_firm.distribution.cli:main"
 cognitive-firm-userland = "cognitive_firm.userland.cli:main"
+cognitive-firm-governed-run-bundle = "cognitive_firm.orchestration.artifact_bundle:main"
+cognitive-firm-formal-verification = "cognitive_firm.orchestration.formal_verification:main"
+cognitive-firm-adapter-conformance = "cognitive_firm.orchestration.adapter_conformance:main"
+cognitive-firm-authority-domains = "cognitive_firm.orchestration.authority_domains:main"
+cognitive-firm-action-impact = "cognitive_firm.orchestration.action_impact:main"
 
 # The kernel package lives under src/; the distro/ tree lives at the repo
 # root. Both ship in the wheel: the kernel as importable code, distro/ as a

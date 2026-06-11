@@ -8,39 +8,44 @@ The implementation source is `src/cognitive_firm/orchestration/state_surface_inv
 
 | Resource | Class | Kind | Writer | Reader | Protocol |
 |---|---|---|---|---|---|
-| `actor_identity` | canonical state | JSONL | `register_actor_identity` | kernel service, audit/accountability | `docs/protocols/actor-identity.md` |
-| `actor_membership` | canonical state | JSONL | `grant_actor_membership`, `revoke_actor_membership` | kernel service, actor context | `docs/protocols/actor-membership.md` |
-| `leases` | canonical state | JSONL | `acquire_lease`, `release_lease` | kernel service mutation boundary | `docs/protocols/leases.md` |
-| `policy_decisions` | canonical state | JSONL | `evaluate_policy`, `append_policy_decision` | audit review | `docs/protocols/policy-decisions.md` |
-| `human_work` | canonical state | JSONL | `create_human_work_session`, `update_human_work_state` | A2H, work discovery, org surface | `docs/protocols/a2h.md` |
-| `evidence_gaps` | canonical state | JSONL | `create_evidence_gap`, status updates | work discovery, org surface | `docs/protocols/project-charter.md` |
-| `action_attestation` | canonical state | JSONL | `create_action_attestation` | review queues, audit surfaces | `docs/protocols/action-attestation.md` |
-| `accountability_cases` | canonical state | JSONL | `create_accountability_case`, status updates | review queues, org surface | `docs/protocols/accountability-cases.md` |
-| `governance_changes` | canonical state | JSONL | `propose_governance_change` | review queues, org surface | `docs/protocols/governance-changes.md` |
-| `learning_events` | canonical state | JSONL | `create_learning_event`, candidate promotion | review queues, org surface | `docs/protocols/learning-events.md` |
+| `actor_identity` | canonical state | JSONL + resource projection | `register_actor_identity` | kernel service, audit/accountability, `actor_identity_resource` | `docs/protocols/actor-identity.md` |
+| `actor_membership` | canonical state | JSONL + resource projection | `grant_actor_membership`, `revoke_actor_membership` | kernel service, actor context, `actor_membership_resource` | `docs/protocols/actor-membership.md` |
+| `authority_domains` | canonical state | JSON + resource projection | authority-domain file authoring, distro overlays | attention routing, kernel service, `authority_domain_resource` | `docs/protocols/authority-domains.md` |
+| `leases` | canonical state | JSONL + resource projection | `acquire_lease`, `release_lease` | kernel service mutation boundary, `lease_resource` | `docs/protocols/leases.md` |
+| `policy_decisions` | canonical state | JSONL + resource projection | `evaluate_policy`, `append_policy_decision` | audit review, `policy_decision_resource` | `docs/protocols/policy-decisions.md` |
+| `human_work` | canonical state | JSONL + resource projection | `create_human_work_session`, `update_human_work_state`, `append_human_work_receipt` | A2H, structured receipts, work discovery, org surface, `human_work_resource` | `docs/protocols/a2h.md` |
+| `evidence_gaps` | canonical state | JSONL + resource projection | `create_evidence_gap`, status updates | work discovery, org surface, `evidence_gap_resource` | `docs/protocols/project-charter.md` |
+| `action_attestation` | canonical state | JSONL + resource projection | `create_action_attestation` | review queues, audit surfaces, governed-run bundle, `action_attestation_resource` | `docs/protocols/action-attestation.md` |
+| `formal_verification` | canonical state | JSONL | `create_formal_verification` | governed-run bundle, audit review | `docs/protocols/formal-verification.md` |
+| `accountability_cases` | canonical state | JSONL + resource projection | `create_accountability_case`, status updates | review queues, org surface, `accountability_case_resource` | `docs/protocols/accountability-cases.md` |
+| `governance_changes` | canonical state | JSONL + resource projection | `propose_governance_change` | invariant/evidence sufficiency gate, review queues, org surface, `governance_change_resource` | `docs/protocols/governance-changes.md` |
+| `learning_events` | canonical state | JSONL + resource projection | `create_learning_event`, `create_compounded_learning_event`, candidate promotion | review queues, org surface, `learning_event_resource`, `summarize_learning_events` | `docs/protocols/learning-events.md` |
 | `learning_event_encounters` | telemetry | JSONL | `record_learning_event_encounter` | work discovery, learning replay audits | `docs/protocols/learning-events.md` |
-| `operating_units` | canonical state | JSONL | `define_operating_unit`, `set_operating_unit_status` | work items, operating-unit dashboard | `docs/protocols/work-items.md` |
-| `work_items` | canonical state | JSONL | `enqueue_work_item`, `claim_work_item`, `complete_work_item`, `fail_work_item` | operating-unit dashboard, kernel event stream | `docs/protocols/work-items.md` |
-| `outcome_links` | canonical state | JSONL | `create_outcome_link`, `record_metric_snapshot`, `record_verdict` | outcome-link summary, routine reviews, org surface | `docs/protocols/outcome-links.md` |
-| `routine_reviews` | canonical state | JSONL | `schedule_routine_review`, `record_review_outcome`, `retire_routine` | due-review surface, review queues, org surface | `docs/protocols/routine-reviews.md` |
+| `operating_units` | canonical state | JSONL + resource projection | `define_operating_unit`, `set_operating_unit_status` | work items, operating-unit dashboard, `operating_unit_resource` | `docs/protocols/work-items.md` |
+| `work_items` | canonical state | JSONL + resource projection | `enqueue_work_item`, `claim_work_item`, `complete_work_item`, `fail_work_item` | operating-unit dashboard, kernel event stream, `work_item_resource` | `docs/protocols/work-items.md` |
+| `outcome_links` | canonical state | JSONL + resource projection | `create_outcome_link`, `record_metric_snapshot`, `record_verdict` | outcome-link summary, routine reviews, org surface, `outcome_link_resource` | `docs/protocols/outcome-links.md` |
+| `routine_reviews` | canonical state | JSONL + resource projection | `schedule_routine_review`, `record_review_outcome`, `retire_routine` | due-review surface, review queues, org surface, `routine_review_resource` | `docs/protocols/routine-reviews.md` |
 | `resource_allocation` | canonical state | JSONL | `record_allocation_decision`, `apply_allocation_decision`, `revert_allocation_decision` | allocation ledger, operating-unit dashboard, audit review | `docs/protocols/resource-allocation.md` |
-| `residual_right_assignments` | canonical state | JSONL | `assign_residual_right` | residual-rights holder lookup, decision-rights summary | `docs/protocols/decision-rights.md` |
-| `residual_decisions` | canonical state | JSONL | `record_residual_decision`, `review_residual_decision` | decision-rights summary, governance review | `docs/protocols/decision-rights.md` |
+| `residual_right_assignments` | canonical state | JSONL + resource projection | `assign_residual_right` | residual-rights holder lookup, decision-rights summary, `residual_right_assignment_resource` | `docs/protocols/decision-rights.md` |
+| `residual_decisions` | canonical state | JSONL + resource projection | `record_residual_decision`, `review_residual_decision` | decision-rights summary, governance review, `residual_decision_resource` | `docs/protocols/decision-rights.md` |
 
 ## Event And Projection Surfaces
 
 | Surface | Class | Kind | Purpose | Protocol |
 |---|---|---|---|---|
 | `transition_log` | canonical state | event stream | legacy local outbox and run-transition stream | `docs/protocols/run-checkpoints.md` |
+| `run_checkpoints` | read model | projection | run lifecycle interface over `run.*` transition rows | `docs/protocols/run-checkpoints.md` |
 | `kernel_events` | canonical state | event stream | canonical envelope embedded in the transition stream | `docs/protocols/kernel-events.md` |
 | `state_backends` | canonical state | event stream interface | filesystem and SQLite event-source adapters | `docs/protocols/state-backends.md` |
 | `runtime_adapters` | projection | projection | external runtime lifecycle into run checkpoints | `docs/protocols/runtime-adapters.md` |
+| `governed_run_attestation` | projection | artifact + schema | portable export over one run's checkpoints, attestations, formal verifications, human work, outcomes, accountability, linked leases, governance approvals, observability refs, and authority snapshot; validated by `schemas/governed-run-attestation.v1.schema.json` | `docs/protocols/governed-run-attestation.md` |
 | `inbound_events` | canonical state | JSONL | verified external observations, quarantine, replay window, dead letters | `docs/protocols/inbound-events.md` |
 | `mcp_outbox` | canonical state | event stream | capability-gated enterprise-system calls | `docs/protocols/mcp.md` |
 | `distribution_events` | canonical state | event stream | typed install/upgrade/rollback events (`package.installed`, `package.rolled_back`, `package.install_approved`) under the target's `.cognitive-firm/distribution-events.jsonl` | `docs/protocols/distribution.md` |
-| `org_surface` | read model | projection | human and role-facing health/read model | `docs/PROTOCOLS.md` |
+| `org_surface` | read model | projection | human and role-facing health/read model, including learning-unit summary counts for compounding, encounters, outcome links, and overdue reviews | `docs/PROTOCOLS.md` |
 | `strategy_office` | read model | projection | observer-only findings from org-surface state | `docs/protocols/strategy-office.md` |
 | `learning_transition_compiler` | read model | projection | proposed learning candidates | `docs/protocols/learning-transition-compiler.md` |
+| `business_function_bandit` | projection | projection | conservative context-to-arm candidate proposer over action-impact rows; writes no live policy | `docs/protocols/action-impact.md` |
 | `accountability` | read model | projection | joined accountability summary | `docs/protocols/accountability.md` |
 | `operating_unit_surface` | read model | projection | production health per operating unit: backlog, claimed, p95, throughput, blockers | `docs/protocols/work-items.md` |
 | `intelligence_sources` | read model | projection | source coverage and repair candidates | `docs/protocols/intelligence-sources.md` |

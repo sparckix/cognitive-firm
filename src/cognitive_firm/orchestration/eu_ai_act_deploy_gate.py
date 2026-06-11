@@ -53,7 +53,7 @@ WHAT THIS PRIMITIVE DOES NOT DO:
   the mandate-hash match. Cryptographic signing is queued for Phase 3.
 - It does NOT distinguish between member-state-specific implementations
   of the AI Act. The mapping is to the Regulation text, not national law.
-- It does NOT block dispatch for T1 (single-principal trusted-hardware)
+- It does NOT block dispatch for T1 (single-authority trusted-hardware)
   deployments where t2_deployment is false. Single-principal owners are
   not AI Act subjects unless deploying a high-risk system commercially.
 """

@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import uuid
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -25,8 +28,12 @@ from cognitive_firm.common.paths import REPO_ROOT
 ImpactStatus = Literal["planned", "measured", "abandoned", "void"]
 OptimizationScope = Literal["local", "project", "system"]
 AttributionConfidence = Literal["low", "medium", "high"]
+PolicyEvaluationStatus = Literal["blocked", "advisory", "promotable"]
+PolicyEvaluationMethod = Literal["replay_match_conservative", "ips_ready", "doubly_robust_ready"]
 
 DEFAULT_ACTION_IMPACT_SUMMARY = REPO_ROOT / "org" / "action_impact" / "action_impact_summary.json"
+DEFAULT_POLICY_EVALUATIONS_LOG = REPO_ROOT / "org" / "action_impact" / "policy_evaluations.jsonl"
+DEFAULT_POLICY_PROMOTION_PACKETS_LOG = REPO_ROOT / "org" / "action_impact" / "policy_promotion_packets.jsonl"
 
 
 @dataclass(frozen=True)
@@ -62,6 +69,14 @@ class ActionImpactRecordView:
     tenant_id: str | None = None
     project_id: str | None = None
     forecast_contract_id: str | None = None
+    context_features: dict[str, Any] = field(default_factory=dict)
+    action_arm: str | None = None
+    logging_policy_id: str | None = None
+    logging_policy_probability: float | None = None
+    reward: float | None = None
+    reward_metric: str | None = None
+    delayed_effect_window: str | None = None
+    human_review_burden: float | None = None
     guardrail_metrics: dict[str, float] = field(default_factory=dict)
     externalities: dict[str, float] = field(default_factory=dict)
     measurement_ref: str | None = None
@@ -86,6 +101,84 @@ class ActionImpactSummary:
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class OfflinePolicyEvaluationReport:
+    """Conservative offline evaluation for a tenant-owned learned policy.
+
+    This is not an optimizer. It is an auditable candidate-policy report over
+    logged action-impact rows. Promotion remains a governance or learning-event
+    decision outside this primitive.
+    """
+
+    evaluation_id: str
+    evaluated_at_utc: str
+    candidate_policy_id: str
+    candidate_policy_ref: str | None
+    method: PolicyEvaluationMethod | str
+    status: PolicyEvaluationStatus | str
+    objective_metric: str | None
+    context_keys: list[str]
+    n_logged: int
+    n_eligible: int
+    n_matched: int
+    support_coverage: float
+    baseline_mean_reward: float | None
+    candidate_mean_reward: float | None
+    delta_mean_reward: float | None
+    candidate_reward_ci95_low: float | None
+    candidate_reward_ci95_high: float | None
+    negative_externality_rate: float
+    human_review_rate: float
+    has_logging_propensities: bool
+    has_counterfactuals: bool
+    has_guardrail_metrics: bool
+    promotion_blockers: list[str] = field(default_factory=list)
+    guardrail_notes: list[str] = field(default_factory=list)
+    matched_action_ids: list[str] = field(default_factory=list)
+    evidence_refs: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def promotion_allowed(self) -> bool:
+        return self.status == "promotable" and not self.promotion_blockers
+
+    def as_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["promotion_allowed"] = self.promotion_allowed
+        return payload
+
+
+@dataclass(frozen=True)
+class PolicyPromotionPacket:
+    """Governance-facing packet for a candidate learned policy.
+
+    The packet is a review artifact. It does not apply a policy, approve a
+    governance change, or promote a learning event.
+    """
+
+    packet_id: str
+    created_at_utc: str
+    status: Literal["blocked", "advisory", "review_ready"] | str
+    candidate_policy_id: str
+    candidate_policy_ref: str | None
+    evaluation_report: OfflinePolicyEvaluationReport
+    proposed_by: str
+    target_ref: str
+    governance_change_candidate: dict[str, Any]
+    guardrail_summary: dict[str, Any]
+    authority_diff_ref: str | None = None
+    formal_verification_refs: list[str] = field(default_factory=list)
+    learning_event_refs: list[str] = field(default_factory=list)
+    review_blockers: list[str] = field(default_factory=list)
+    evidence_refs: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["evaluation_report"] = self.evaluation_report.as_dict()
+        return payload
 
 
 class ActionImpactAdapter(Protocol):
@@ -149,6 +242,7 @@ def summary_from_mapping(payload: dict[str, Any], *, root: str | None = None) ->
 
 
 def record_from_mapping(payload: dict[str, Any]) -> ActionImpactRecordView:
+    reward = _maybe_float(payload["reward"] if "reward" in payload else payload.get("actual_impact"))
     return ActionImpactRecordView(
         action_id=str(payload.get("action_id") or payload.get("id") or ""),
         action_ref=str(payload.get("action_ref") or payload.get("evidence_pointer") or payload.get("ref") or ""),
@@ -190,6 +284,23 @@ def record_from_mapping(payload: dict[str, Any]) -> ActionImpactRecordView:
         tenant_id=payload.get("tenant_id"),
         project_id=payload.get("project_id"),
         forecast_contract_id=payload.get("forecast_contract_id") or payload.get("contract_id"),
+        context_features={
+            str(k): v
+            for k, v in (payload.get("context_features") or payload.get("context") or {}).items()
+        }
+        if isinstance(payload.get("context_features") or payload.get("context") or {}, dict)
+        else {},
+        action_arm=payload.get("action_arm") or payload.get("arm") or payload.get("chosen_arm"),
+        logging_policy_id=payload.get("logging_policy_id") or payload.get("behavior_policy_id"),
+        logging_policy_probability=_maybe_float(
+            payload.get("logging_policy_probability")
+            if "logging_policy_probability" in payload
+            else payload.get("propensity")
+        ),
+        reward=reward,
+        reward_metric=payload.get("reward_metric") or payload.get("objective_metric") or payload.get("metric"),
+        delayed_effect_window=payload.get("delayed_effect_window") or payload.get("outcome_window"),
+        human_review_burden=_maybe_float(payload.get("human_review_burden")),
         guardrail_metrics=_float_dict(payload.get("guardrail_metrics") or {}),
         externalities=_float_dict(payload.get("externalities") or {}),
         measurement_ref=payload.get("measurement_ref"),
@@ -246,6 +357,20 @@ def record_from_mapping(payload: dict[str, Any]) -> ActionImpactRecordView:
                 "project_id",
                 "forecast_contract_id",
                 "contract_id",
+                "context_features",
+                "context",
+                "action_arm",
+                "arm",
+                "chosen_arm",
+                "logging_policy_id",
+                "behavior_policy_id",
+                "logging_policy_probability",
+                "propensity",
+                "reward",
+                "reward_metric",
+                "delayed_effect_window",
+                "outcome_window",
+                "human_review_burden",
                 "guardrail_metrics",
                 "externalities",
                 "measurement_ref",
@@ -255,6 +380,345 @@ def record_from_mapping(payload: dict[str, Any]) -> ActionImpactRecordView:
             }
         },
     )
+
+
+def evaluate_offline_policy_candidate(
+    records: list[ActionImpactRecordView],
+    *,
+    candidate_policy_id: str,
+    candidate_action_by_context: dict[str, str],
+    context_keys: list[str],
+    candidate_policy_ref: str | None = None,
+    objective_metric: str | None = None,
+    min_matched: int = 20,
+    min_support_coverage: float = 0.25,
+    max_negative_externality_rate: float = 0.0,
+    max_human_review_rate: float = 0.25,
+    evidence_refs: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> OfflinePolicyEvaluationReport:
+    """Evaluate a candidate policy by conservative replay over logged rows.
+
+    ``candidate_action_by_context`` maps a stable context signature to the arm
+    the candidate policy would choose. The signature is built from
+    ``context_keys`` using JSON with sorted keys. A row contributes to the
+    candidate estimate only when the candidate arm matches the logged arm.
+
+    This is intentionally stricter than a full off-policy estimator. It gives a
+    safe first report from thin logs while preserving propensity and guardrail
+    fields for tenant-owned IPS/DR implementations.
+    """
+    if not candidate_policy_id.strip():
+        raise ValueError("candidate_policy_id is required")
+    if not context_keys:
+        raise ValueError("context_keys is required")
+    if min_matched < 1:
+        raise ValueError("min_matched must be >= 1")
+    if not 0 <= min_support_coverage <= 1:
+        raise ValueError("min_support_coverage must be between 0 and 1")
+
+    logged = [
+        record
+        for record in records
+        if record.status == "measured"
+        and (objective_metric is None or record.objective_metric == objective_metric)
+        and record.reward is not None
+    ]
+    eligible: list[ActionImpactRecordView] = []
+    matched: list[ActionImpactRecordView] = []
+    for record in logged:
+        if not record.action_arm:
+            continue
+        signature = context_signature(record.context_features, context_keys)
+        if signature is None:
+            continue
+        candidate_arm = candidate_action_by_context.get(signature)
+        if candidate_arm is None:
+            continue
+        eligible.append(record)
+        if candidate_arm == record.action_arm:
+            matched.append(record)
+
+    baseline_rewards = [record.reward for record in eligible if record.reward is not None]
+    candidate_rewards = [record.reward for record in matched if record.reward is not None]
+    baseline_mean = _mean(baseline_rewards)
+    candidate_mean = _mean(candidate_rewards)
+    delta = (
+        None
+        if baseline_mean is None or candidate_mean is None
+        else candidate_mean - baseline_mean
+    )
+    ci_low, ci_high = _ci95(candidate_rewards)
+    support = len(matched) / len(eligible) if eligible else 0.0
+    negative_externality_rate = _negative_externality_rate(matched)
+    human_review_rate = _human_review_rate(matched)
+    blockers: list[str] = []
+    notes: list[str] = []
+
+    if len(eligible) == 0:
+        blockers.append("no eligible measured rows for candidate policy")
+    if len(matched) < min_matched:
+        blockers.append(f"matched rows below threshold: {len(matched)} < {min_matched}")
+    if support < min_support_coverage:
+        blockers.append(
+            f"support coverage below threshold: {support:.3f} < {min_support_coverage:.3f}"
+        )
+    if delta is None:
+        blockers.append("candidate reward delta unavailable")
+    elif delta <= 0:
+        blockers.append(f"candidate does not beat logged baseline: delta={delta:.3f}")
+    if negative_externality_rate > max_negative_externality_rate:
+        blockers.append(
+            "negative externality rate above threshold: "
+            f"{negative_externality_rate:.3f} > {max_negative_externality_rate:.3f}"
+        )
+    if human_review_rate > max_human_review_rate:
+        blockers.append(
+            f"human review rate above threshold: {human_review_rate:.3f} > {max_human_review_rate:.3f}"
+        )
+
+    has_logging_propensities = all(
+        record.logging_policy_probability is not None for record in eligible
+    ) if eligible else False
+    has_counterfactuals = all(record.counterfactual_action for record in eligible) if eligible else False
+    has_guardrails = any(record.guardrail_metrics for record in eligible)
+    if not has_logging_propensities:
+        notes.append("logging propensities missing or incomplete; report uses replay-match only")
+    if not has_counterfactuals:
+        notes.append("counterfactual actions missing or incomplete")
+    if not has_guardrails:
+        notes.append("guardrail metrics missing")
+
+    if blockers:
+        status: PolicyEvaluationStatus = "blocked"
+    elif ci_low is not None and ci_low <= (baseline_mean or 0):
+        status = "advisory"
+        notes.append("candidate mean improved, but lower confidence bound does not clear baseline")
+    else:
+        status = "promotable"
+
+    return OfflinePolicyEvaluationReport(
+        evaluation_id=f"ope_{uuid.uuid4().hex[:12]}",
+        evaluated_at_utc=_now_iso(),
+        candidate_policy_id=candidate_policy_id,
+        candidate_policy_ref=candidate_policy_ref,
+        method="replay_match_conservative",
+        status=status,
+        objective_metric=objective_metric,
+        context_keys=list(context_keys),
+        n_logged=len(logged),
+        n_eligible=len(eligible),
+        n_matched=len(matched),
+        support_coverage=support,
+        baseline_mean_reward=baseline_mean,
+        candidate_mean_reward=candidate_mean,
+        delta_mean_reward=delta,
+        candidate_reward_ci95_low=ci_low,
+        candidate_reward_ci95_high=ci_high,
+        negative_externality_rate=negative_externality_rate,
+        human_review_rate=human_review_rate,
+        has_logging_propensities=has_logging_propensities,
+        has_counterfactuals=has_counterfactuals,
+        has_guardrail_metrics=has_guardrails,
+        promotion_blockers=blockers,
+        guardrail_notes=notes,
+        matched_action_ids=[record.action_id for record in matched],
+        evidence_refs=evidence_refs or [],
+        metadata=metadata or {},
+    )
+
+
+def append_policy_evaluation(
+    report: OfflinePolicyEvaluationReport,
+    *,
+    log_path: Path | None = None,
+) -> OfflinePolicyEvaluationReport:
+    path = log_path or DEFAULT_POLICY_EVALUATIONS_LOG
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(report.as_dict(), sort_keys=True) + "\n")
+    return report
+
+
+def list_policy_evaluations(
+    *,
+    log_path: Path | None = None,
+    candidate_policy_id: str | None = None,
+    status: PolicyEvaluationStatus | str | None = None,
+) -> list[OfflinePolicyEvaluationReport]:
+    out: list[OfflinePolicyEvaluationReport] = []
+    for row in _read_jsonl(log_path or DEFAULT_POLICY_EVALUATIONS_LOG):
+        report = _policy_evaluation_from_mapping(row)
+        if candidate_policy_id is not None and report.candidate_policy_id != candidate_policy_id:
+            continue
+        if status is not None and report.status != status:
+            continue
+        out.append(report)
+    return out
+
+
+def load_policy_evaluation_from_json(path: Path) -> OfflinePolicyEvaluationReport:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("policy evaluation JSON must be an object")
+    return _policy_evaluation_from_mapping(payload)
+
+
+def get_policy_evaluation(
+    evaluation_id: str,
+    *,
+    log_path: Path | None = None,
+) -> OfflinePolicyEvaluationReport:
+    for report in list_policy_evaluations(log_path=log_path):
+        if report.evaluation_id == evaluation_id:
+            return report
+    raise ValueError(f"policy evaluation not found: {evaluation_id}")
+
+
+def build_policy_promotion_packet(
+    report: OfflinePolicyEvaluationReport,
+    *,
+    proposed_by: str,
+    target_ref: str | None = None,
+    title: str | None = None,
+    rationale: str | None = None,
+    expected_behavior_change: str | None = None,
+    rollback_plan: str | None = None,
+    authority_diff_ref: str | None = None,
+    formal_verification_refs: list[str] | None = None,
+    learning_event_refs: list[str] | None = None,
+    evidence_refs: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> PolicyPromotionPacket:
+    """Build a governance-facing packet from an offline policy report."""
+    if not proposed_by.strip():
+        raise ValueError("proposed_by is required")
+    resolved_target = target_ref or report.candidate_policy_ref or f"policy:{report.candidate_policy_id}"
+    review_blockers = list(report.promotion_blockers)
+    if report.status == "blocked":
+        status = "blocked"
+    elif report.status == "advisory":
+        status = "advisory"
+    else:
+        status = "review_ready"
+    if not report.has_guardrail_metrics:
+        review_blockers.append("guardrail metrics missing")
+    if not authority_diff_ref:
+        review_blockers.append("authority diff not attached")
+    if status == "review_ready" and review_blockers:
+        status = "advisory"
+
+    guardrail_summary = {
+        "negative_externality_rate": report.negative_externality_rate,
+        "human_review_rate": report.human_review_rate,
+        "has_guardrail_metrics": report.has_guardrail_metrics,
+        "guardrail_notes": list(report.guardrail_notes),
+        "support_coverage": report.support_coverage,
+        "candidate_reward_ci95_low": report.candidate_reward_ci95_low,
+        "candidate_reward_ci95_high": report.candidate_reward_ci95_high,
+    }
+    source_refs = [
+        f"action_impact_policy_evaluation:{report.evaluation_id}",
+        *report.evidence_refs,
+        *(evidence_refs or []),
+    ]
+    if authority_diff_ref:
+        source_refs.append(authority_diff_ref)
+    source_refs.extend(formal_verification_refs or [])
+    source_refs.extend(learning_event_refs or [])
+
+    governance_change_candidate = {
+        "change_kind": "route_policy_change",
+        "title": title or f"Review candidate policy {report.candidate_policy_id}",
+        "proposed_by": proposed_by,
+        "target_ref": resolved_target,
+        "rationale": rationale
+        or (
+            f"Offline policy evaluation {report.evaluation_id} produced status "
+            f"{report.status!r} with delta_mean_reward={report.delta_mean_reward!r}."
+        ),
+        "source_refs": source_refs,
+        "expected_behavior_change": expected_behavior_change
+        or "Route matching contexts to the candidate action arms after governance review.",
+        "risk_summary": (
+            "support_coverage="
+            f"{report.support_coverage:.3f}; negative_externality_rate="
+            f"{report.negative_externality_rate:.3f}; human_review_rate="
+            f"{report.human_review_rate:.3f}; status={report.status}"
+        ),
+        "rollback_plan": rollback_plan or "Revert to the prior routing policy and keep the evaluation packet as evidence.",
+        "metadata": {
+            "packet_kind": "policy_promotion_packet",
+            "candidate_policy_id": report.candidate_policy_id,
+            "policy_evaluation_id": report.evaluation_id,
+        },
+    }
+
+    return PolicyPromotionPacket(
+        packet_id=f"ppp_{uuid.uuid4().hex[:12]}",
+        created_at_utc=_now_iso(),
+        status=status,
+        candidate_policy_id=report.candidate_policy_id,
+        candidate_policy_ref=report.candidate_policy_ref,
+        evaluation_report=report,
+        proposed_by=proposed_by,
+        target_ref=resolved_target,
+        governance_change_candidate=governance_change_candidate,
+        guardrail_summary=guardrail_summary,
+        authority_diff_ref=authority_diff_ref,
+        formal_verification_refs=formal_verification_refs or [],
+        learning_event_refs=learning_event_refs or [],
+        review_blockers=review_blockers,
+        evidence_refs=source_refs,
+        metadata=metadata or {},
+    )
+
+
+def append_policy_promotion_packet(
+    packet: PolicyPromotionPacket,
+    *,
+    log_path: Path | None = None,
+) -> PolicyPromotionPacket:
+    path = log_path or DEFAULT_POLICY_PROMOTION_PACKETS_LOG
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(packet.as_dict(), sort_keys=True) + "\n")
+    return packet
+
+
+def list_policy_promotion_packets(
+    *,
+    log_path: Path | None = None,
+    candidate_policy_id: str | None = None,
+    status: str | None = None,
+) -> list[PolicyPromotionPacket]:
+    out: list[PolicyPromotionPacket] = []
+    for row in _read_jsonl(log_path or DEFAULT_POLICY_PROMOTION_PACKETS_LOG):
+        report_payload = row.pop("evaluation_report")
+        report_payload.pop("promotion_allowed", None)
+        packet = PolicyPromotionPacket(
+            **row,
+            evaluation_report=OfflinePolicyEvaluationReport(**report_payload),
+        )
+        if candidate_policy_id is not None and packet.candidate_policy_id != candidate_policy_id:
+            continue
+        if status is not None and packet.status != status:
+            continue
+        out.append(packet)
+    return out
+
+
+def _policy_evaluation_from_mapping(payload: dict[str, Any]) -> OfflinePolicyEvaluationReport:
+    row = dict(payload)
+    row.pop("promotion_allowed", None)
+    return OfflinePolicyEvaluationReport(**row)
+
+
+def context_signature(context_features: dict[str, Any], context_keys: list[str]) -> str | None:
+    if any(key not in context_features for key in context_keys):
+        return None
+    payload = {key: context_features[key] for key in context_keys}
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
 def empty_summary(*, root: Path | None = None) -> ActionImpactSummary:
@@ -322,12 +786,158 @@ def _metric_means(records: list[ActionImpactRecordView]) -> dict[str, float]:
     }
 
 
+def _mean(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _ci95(values: list[float]) -> tuple[float | None, float | None]:
+    if not values:
+        return None, None
+    mean = sum(values) / len(values)
+    if len(values) == 1:
+        return mean, mean
+    variance = sum((value - mean) ** 2 for value in values) / (len(values) - 1)
+    margin = 1.96 * math.sqrt(variance / len(values))
+    return mean - margin, mean + margin
+
+
+def _negative_externality_rate(records: list[ActionImpactRecordView]) -> float:
+    if not records:
+        return 0.0
+    count = 0
+    for record in records:
+        if record.negative_externality_tags or any(value < 0 for value in record.externalities.values()):
+            count += 1
+    return count / len(records)
+
+
+def _human_review_rate(records: list[ActionImpactRecordView]) -> float:
+    if not records:
+        return 0.0
+    return sum(1 for record in records if record.requires_human_review) / len(records)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        rows.append(json.loads(line))
+    return rows
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Read a tenant action-impact summary.")
-    parser.add_argument("--summary-json", type=Path, default=DEFAULT_ACTION_IMPACT_SUMMARY)
+    parser = argparse.ArgumentParser(description="Read action-impact state and offline policy reports.")
+    subparsers = parser.add_subparsers(dest="command")
+    summary_parser = subparsers.add_parser("summary", help="Read a tenant action-impact summary.")
+    summary_parser.add_argument("--summary-json", type=Path, default=DEFAULT_ACTION_IMPACT_SUMMARY)
+
+    eval_parser = subparsers.add_parser(
+        "evaluate-policy",
+        help="Evaluate a candidate policy by conservative replay over action-impact rows.",
+    )
+    eval_parser.add_argument("--summary-json", type=Path, default=DEFAULT_ACTION_IMPACT_SUMMARY)
+    eval_parser.add_argument("--candidate-policy-id", required=True)
+    eval_parser.add_argument("--candidate-policy-ref")
+    eval_parser.add_argument(
+        "--candidate-action-map",
+        type=Path,
+        required=True,
+        help="JSON object mapping context signatures to candidate action arms.",
+    )
+    eval_parser.add_argument("--context-key", action="append", dest="context_keys", required=True)
+    eval_parser.add_argument("--objective-metric")
+    eval_parser.add_argument("--min-matched", type=int, default=20)
+    eval_parser.add_argument("--min-support-coverage", type=float, default=0.25)
+    eval_parser.add_argument("--max-negative-externality-rate", type=float, default=0.0)
+    eval_parser.add_argument("--max-human-review-rate", type=float, default=0.25)
+    eval_parser.add_argument("--record", action="store_true")
+    eval_parser.add_argument("--policy-evaluations-log", type=Path, default=DEFAULT_POLICY_EVALUATIONS_LOG)
+
+    packet_parser = subparsers.add_parser(
+        "build-promotion-packet",
+        help="Build a governance review packet from an offline policy evaluation.",
+    )
+    packet_source = packet_parser.add_mutually_exclusive_group(required=True)
+    packet_source.add_argument("--evaluation-json", type=Path)
+    packet_source.add_argument("--evaluation-id")
+    packet_parser.add_argument("--policy-evaluations-log", type=Path, default=DEFAULT_POLICY_EVALUATIONS_LOG)
+    packet_parser.add_argument("--proposed-by", required=True)
+    packet_parser.add_argument("--target-ref")
+    packet_parser.add_argument("--title")
+    packet_parser.add_argument("--rationale")
+    packet_parser.add_argument("--expected-behavior-change")
+    packet_parser.add_argument("--rollback-plan")
+    packet_parser.add_argument("--authority-diff-ref")
+    packet_parser.add_argument("--formal-verification-ref", action="append", default=[])
+    packet_parser.add_argument("--learning-event-ref", action="append", default=[])
+    packet_parser.add_argument("--evidence-ref", action="append", default=[])
+    packet_parser.add_argument("--record", action="store_true")
+    packet_parser.add_argument(
+        "--policy-promotion-packets-log",
+        type=Path,
+        default=DEFAULT_POLICY_PROMOTION_PACKETS_LOG,
+    )
+
     args = parser.parse_args(argv)
-    summary = summary_from_optional_path(args.summary_json)
-    print(json.dumps(summary.as_dict(), indent=2, sort_keys=True))
+    if args.command in {None, "summary"}:
+        summary = summary_from_optional_path(args.summary_json)
+        print(json.dumps(summary.as_dict(), indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "evaluate-policy":
+        summary = summary_from_optional_path(args.summary_json)
+        candidate_action_by_context = json.loads(args.candidate_action_map.read_text(encoding="utf-8"))
+        if not isinstance(candidate_action_by_context, dict):
+            raise ValueError("candidate action map must be a JSON object")
+        report = evaluate_offline_policy_candidate(
+            summary.records,
+            candidate_policy_id=args.candidate_policy_id,
+            candidate_policy_ref=args.candidate_policy_ref,
+            candidate_action_by_context={str(k): str(v) for k, v in candidate_action_by_context.items()},
+            context_keys=args.context_keys,
+            objective_metric=args.objective_metric,
+            min_matched=args.min_matched,
+            min_support_coverage=args.min_support_coverage,
+            max_negative_externality_rate=args.max_negative_externality_rate,
+            max_human_review_rate=args.max_human_review_rate,
+        )
+        if args.record:
+            append_policy_evaluation(report, log_path=args.policy_evaluations_log)
+        print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "build-promotion-packet":
+        if args.evaluation_json:
+            report = load_policy_evaluation_from_json(args.evaluation_json)
+        else:
+            report = get_policy_evaluation(args.evaluation_id, log_path=args.policy_evaluations_log)
+        packet = build_policy_promotion_packet(
+            report,
+            proposed_by=args.proposed_by,
+            target_ref=args.target_ref,
+            title=args.title,
+            rationale=args.rationale,
+            expected_behavior_change=args.expected_behavior_change,
+            rollback_plan=args.rollback_plan,
+            authority_diff_ref=args.authority_diff_ref,
+            formal_verification_refs=args.formal_verification_ref,
+            learning_event_refs=args.learning_event_ref,
+            evidence_refs=args.evidence_ref,
+        )
+        if args.record:
+            append_policy_promotion_packet(packet, log_path=args.policy_promotion_packets_log)
+        print(json.dumps(packet.as_dict(), indent=2, sort_keys=True))
+        return 0
+
     return 0
 
 

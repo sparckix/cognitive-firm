@@ -29,6 +29,14 @@ The kernel primitives own behavior:
 This keeps Orbit, Slack/Teams adapters, CLI wrappers, and future dashboards
 from reimplementing primitive lifecycle rules.
 
+`GET /kernel/org-surface` and `GET /kernel/accountability-summary` are built
+from the service's configured kernel logs: evidence gaps, human work,
+forecast/action-impact summaries, governance changes, accountability cases,
+approved learning events, learning encounters, outcome links, routine reviews,
+and transition/run rows. A service deployment that points those logs at a
+tenant workspace gets one coherent projection without replacing the primitive
+modules.
+
 ## Current Routes
 
 ```text
@@ -38,6 +46,8 @@ GET  /kernel/accountability-summary
 GET  /kernel/attention/{actor_id}
 GET  /kernel/vocabulary
 GET  /kernel/governance-changes
+GET  /kernel/governance-changes/{proposal_id}
+POST /kernel/governance-changes
 POST /kernel/governance-changes/{proposal_id}/decision
 POST /kernel/actors
 POST /kernel/memberships
@@ -49,12 +59,68 @@ POST /kernel/human-work
 POST /kernel/human-work/{session_id}/state
 POST /kernel/human-work/{session_id}/interaction
 POST /kernel/accountability-cases
+GET  /kernel/operating-units
+GET  /kernel/operating-units/{unit_id}
+GET  /kernel/operating-unit-dashboard
+POST /kernel/operating-units
+GET  /kernel/runs
+GET  /kernel/runs/{run_id}
+GET  /kernel/runs/{run_id}/resume
+POST /kernel/runs
+POST /kernel/runs/{run_id}/checkpoints
+POST /kernel/runs/{run_id}/state
+GET  /kernel/learning-events
+GET  /kernel/learning-events/replay
+GET  /kernel/learning-events/summary
+POST /kernel/learning-event-encounters
+GET  /kernel/outcome-links
+GET  /kernel/outcome-links/summary
+POST /kernel/outcome-links
+POST /kernel/outcome-links/{outcome_link_id}/snapshots
+POST /kernel/outcome-links/{outcome_link_id}/verdict
+POST /kernel/outcome-links/{outcome_link_id}/void
+GET  /kernel/routine-reviews
+GET  /kernel/routine-reviews/due
+GET  /kernel/routine-reviews/summary
+POST /kernel/routine-reviews
+POST /kernel/routine-reviews/{review_id}/start
+POST /kernel/routine-reviews/{review_id}/record-outcome
+POST /kernel/routine-reviews/{review_id}/retire
+GET  /kernel/work-items
+GET  /kernel/work-items/{work_id}
+POST /kernel/work-items
+POST /kernel/work-items/claim-next
+POST /kernel/work-items/{work_id}/claim
+POST /kernel/work-items/{work_id}/start
+POST /kernel/work-items/{work_id}/heartbeat
+POST /kernel/work-items/{work_id}/complete
+POST /kernel/work-items/{work_id}/fail
+POST /kernel/work-items/{work_id}/retire
+POST /kernel/work-items/{work_id}/requeue
 POST /kernel/a2a/messages
 POST /kernel/gates/{gate_id}/resolve
 POST /kernel/directives
 POST /kernel/controls
 POST /kernel/chat/messages
 POST /kernel/roles/{role_id}/agent-utilization
+```
+
+Read routes for resource-projected primitives can render the common
+[`Resource Envelope`](resource-envelope.md) when called with `resource=true`.
+For example:
+
+```text
+GET /kernel/outcome-links?resource=true
+GET /kernel/governance-changes?resource=true
+GET /kernel/governance-changes/{proposal_id}?resource=true
+GET /kernel/operating-units?resource=true
+GET /kernel/operating-units/{unit_id}?resource=true
+GET /kernel/learning-events?resource=true
+GET /kernel/learning-events/replay?resource=true
+GET /kernel/routine-reviews?resource=true
+GET /kernel/routine-reviews/due?resource=true
+GET /kernel/work-items?resource=true
+GET /kernel/work-items/{work_id}?resource=true
 ```
 
 Run locally:
@@ -78,9 +144,9 @@ Python kernel functions
 -> filesystem SourceConnector + Git audit/sync
 ```
 
-This is appropriate for one principal or a small trusted operator set on one
-deployment. Git is audit, rollback, and synchronization. It is not the runtime
-message bus.
+This is appropriate for one accountable authority or a small trusted operator
+set on one deployment. Git is audit, rollback, and synchronization. It is not
+the runtime message bus.
 
 Move to SQLite, Postgres, or another event backend when multiple active
 operators need concurrent writes, stronger leases, or compliance evidence.
@@ -181,7 +247,7 @@ When enabled, authenticated subject role and tenant claims must match the
 request `actor_context`. For local bearer-token mode, the scope claims come
 from the environment variables above. For production, an identity-provider
 adapter should supply the same fields from OIDC, SAML, mTLS, or a trusted
-gateway. This is the lean multi-principal isolation guard: the IdP
+gateway. This is the lean multi-authority isolation guard: the IdP
 authenticates the subject, and the kernel rejects cross-role or cross-tenant
 mutations before primitive code runs.
 

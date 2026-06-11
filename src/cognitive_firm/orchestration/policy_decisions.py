@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
+from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
 
 
 PolicyEffect = Literal["allow", "deny"]
@@ -228,6 +229,71 @@ def policy_decision_from_authorization(
     return result
 
 
+def policy_decision_resource(result: PolicyDecisionResult) -> KernelResource:
+    """Project a policy decision into the common resource envelope.
+
+    The append-only decision row remains canonical. The resource view is for
+    adapters, dashboards, migration checks, and conformance fixtures that need
+    the same object shape used by other kernel-owned state.
+    """
+    request = result.request
+    labels = {
+        "effect": result.effect,
+        "status": result.status,
+        "action": request.action,
+        "actor_id": request.actor_id,
+    }
+    if request.role_id:
+        labels["role_id"] = request.role_id
+    if result.matched_rule_id:
+        labels["matched_rule_id"] = result.matched_rule_id
+    links = [
+        {"rel": "actor", "href": request.actor_id},
+        {"rel": "resource", "href": request.resource_ref},
+    ]
+    if request.role_id:
+        links.append({"rel": "role", "href": request.role_id})
+    if result.policy_ref:
+        links.append({"rel": "policy", "href": result.policy_ref})
+    if result.source_decision_ref:
+        links.append({"rel": "source_decision", "href": result.source_decision_ref})
+    for ref in result.evidence_refs:
+        links.append({"rel": "evidence", "href": ref})
+    return make_resource(
+        kind="PolicyDecision",
+        name=result.decision_id,
+        resource_id=result.decision_id,
+        tenant_id=request.tenant_id,
+        project_id=request.project_id,
+        stability="alpha",
+        labels=labels,
+        annotations={
+            key: str(value)
+            for key, value in result.metadata.items()
+            if isinstance(key, str) and value is not None
+        },
+        spec={
+            "request": request.as_dict(),
+            "policy_ref": result.policy_ref,
+            "matched_rule_id": result.matched_rule_id,
+            "source_surface": result.source_surface,
+            "source_decision_ref": result.source_decision_ref,
+            "reason": result.reason,
+            "matched_paths": result.matched_paths,
+            "evidence_refs": result.evidence_refs,
+        },
+        status={
+            "effect": result.effect,
+            "allowed": result.allowed,
+            "status": result.status,
+            "required_approval": result.required_approval,
+            "terminal": result.terminal,
+            "decided_at_utc": result.decided_at_utc,
+        },
+        links=links,
+    )
+
+
 def _validate_request(request: PolicyDecisionRequest) -> None:
     if not request.action.strip():
         raise ValueError("action is required")
@@ -296,6 +362,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--default-effect", choices=sorted(VALID_EFFECTS), default="deny")
     parser.add_argument("--policy-ref")
     parser.add_argument("--log-path", type=Path)
+    parser.add_argument("--resource", action="store_true", help="render resource envelope")
     args = parser.parse_args(argv)
 
     result = evaluate_policy(
@@ -305,7 +372,8 @@ def main(argv: list[str] | None = None) -> int:
         policy_ref=args.policy_ref,
         log_path=args.log_path,
     )
-    print(json.dumps(result.as_dict(), indent=2, sort_keys=True))
+    payload = policy_decision_resource(result).as_dict() if args.resource else result.as_dict()
+    print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
 

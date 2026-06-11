@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
+from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
 
 
 EvidenceGapSeverity = Literal["blocking", "useful", "archival"]
@@ -200,6 +201,67 @@ def evidence_gap_summary(gap: EvidenceGap) -> dict[str, Any]:
     return asdict(gap)
 
 
+def evidence_gap_resource(gap: EvidenceGap) -> KernelResource:
+    """Project an evidence gap into the common resource envelope.
+
+    The evidence-gap JSONL row remains canonical. The resource view is for
+    adapters, dashboards, migration checks, and conformance fixtures that need a
+    stable object shape for missing-evidence work.
+    """
+    labels = {
+        "gap_type": gap.gap_type,
+        "severity": gap.severity,
+        "status": gap.status,
+        "producer": gap.producer,
+        "adversarial_direction": str(gap.adversarial_direction).lower(),
+    }
+    if gap.owner_role:
+        labels["owner_role"] = gap.owner_role
+
+    links = [
+        {"rel": "target", "href": gap.target},
+        {"rel": "producer", "href": gap.producer},
+    ]
+    if gap.owner_role:
+        links.append({"rel": "owner_role", "href": gap.owner_role})
+    if gap.source_ref:
+        links.append({"rel": "source", "href": gap.source_ref})
+    if gap.fetch_query:
+        links.append({"rel": "fetch_query", "href": gap.fetch_query})
+
+    return make_resource(
+        kind="EvidenceGap",
+        name=gap.gap_id,
+        resource_id=gap.gap_id,
+        tenant_id=gap.tenant_id,
+        project_id=gap.project_id,
+        stability="alpha",
+        labels=labels,
+        annotations={
+            key: str(value)
+            for key, value in gap.metadata.items()
+            if isinstance(key, str) and value is not None
+        },
+        spec={
+            "gap_type": gap.gap_type,
+            "target": gap.target,
+            "description": gap.description,
+            "severity": gap.severity,
+            "producer": gap.producer,
+            "adversarial_direction": gap.adversarial_direction,
+            "fetch_query": gap.fetch_query,
+            "owner_role": gap.owner_role,
+            "source_ref": gap.source_ref,
+        },
+        status={
+            "status": gap.status,
+            "created_at_utc": gap.created_at_utc,
+            "updated_at_utc": gap.updated_at_utc,
+        },
+        links=links,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Manage cognitive-firm evidence gaps.")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -210,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
     list_parser.add_argument("--tenant-id")
     list_parser.add_argument("--project-id")
     list_parser.add_argument("--log-path", type=Path)
+    list_parser.add_argument("--resource", action="store_true", help="render resource envelopes")
 
     create_parser = sub.add_parser("create")
     create_parser.add_argument("--gap-type", required=True)
@@ -240,7 +303,12 @@ def main(argv: list[str] | None = None) -> int:
             log_path=args.log_path,
         )
         for gap in gaps:
-            print(json.dumps(evidence_gap_summary(gap), sort_keys=True))
+            payload = (
+                evidence_gap_resource(gap).as_dict()
+                if args.resource
+                else evidence_gap_summary(gap)
+            )
+            print(json.dumps(payload, sort_keys=True))
         return 0
     if args.cmd == "create":
         gap = create_evidence_gap(

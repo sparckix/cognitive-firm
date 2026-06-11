@@ -1,6 +1,6 @@
 """Tests for the GP-231 MCP outbox-relay primitive.
 
-Three load-bearing properties under test (each one falsifiable):
+Three required properties under test (each one falsifiable):
 
   1. WRITE-BEFORE-DISPATCH: the kernel writes the `mcp_call_requested`
      transition BEFORE the relay attempts dispatch. Crash between write

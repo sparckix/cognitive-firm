@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
 from cognitive_firm.orchestration.actor_identity import ActorContext
+from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
 
 
 LeaseState = Literal["active", "released", "expired"]
@@ -174,6 +175,54 @@ def lease_summary(lease: LeaseRecord) -> dict[str, Any]:
     return asdict(lease)
 
 
+def lease_resource(lease: LeaseRecord) -> KernelResource:
+    """Project a lease into the common kernel resource envelope.
+
+    The lease JSONL row remains canonical. The resource view exists for
+    adapters, dashboards, migration checks, and conformance fixtures that need
+    a stable object shape for mutation-control state.
+    """
+    labels = {
+        "resource_ref": lease.resource_ref,
+        "held_by_actor_id": lease.held_by_actor_id,
+        "state": lease.state,
+    }
+    if lease.held_by_role_id:
+        labels["held_by_role_id"] = lease.held_by_role_id
+    links = [
+        {"rel": "leased_resource", "href": lease.resource_ref},
+        {"rel": "holder_actor", "href": lease.held_by_actor_id},
+    ]
+    if lease.held_by_role_id:
+        links.append({"rel": "holder_role", "href": lease.held_by_role_id})
+    return make_resource(
+        kind="Lease",
+        name=lease.lease_id,
+        resource_id=lease.lease_id,
+        stability="alpha",
+        labels=labels,
+        annotations={
+            key: str(value)
+            for key, value in lease.metadata.items()
+            if isinstance(key, str) and value is not None
+        },
+        spec={
+            "resource_ref": lease.resource_ref,
+            "held_by_actor_id": lease.held_by_actor_id,
+            "held_by_role_id": lease.held_by_role_id,
+            "purpose": lease.purpose,
+        },
+        status={
+            "state": lease.state,
+            "fencing_token": lease.fencing_token,
+            "acquired_at_utc": lease.acquired_at_utc,
+            "expires_at_utc": lease.expires_at_utc,
+            "released_at_utc": lease.released_at_utc,
+        },
+        links=links,
+    )
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -247,6 +296,7 @@ def main(argv: list[str] | None = None) -> int:
     list_parser.add_argument("--resource-ref")
     list_parser.add_argument("--state")
     list_parser.add_argument("--log-path", type=Path)
+    list_parser.add_argument("--resource", action="store_true", help="render resource envelopes")
     args = parser.parse_args(argv)
     if args.cmd == "acquire":
         actor = ActorContext(
@@ -280,7 +330,8 @@ def main(argv: list[str] | None = None) -> int:
             state=args.state,
             log_path=args.log_path,
         ):
-            print(json.dumps(lease_summary(lease), sort_keys=True))
+            payload = lease_resource(lease).as_dict() if args.resource else lease_summary(lease)
+            print(json.dumps(payload, sort_keys=True))
         return 0
     return 2
 

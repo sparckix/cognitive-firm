@@ -72,7 +72,7 @@ _Folder index. Prose may be added above the auto-index block._
 - [task_authorization.py](task_authorization.py)
 - [tenant_isolation.py](tenant_isolation.py)
 - [transition_log.py](transition_log.py)
+- [worker_taxonomy.py](worker_taxonomy.py)
 - [work_discovery.py](work_discovery.py)
 
-<sub>2 sub-folder(s), 60 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
-
+<sub>2 sub-folder(s), 61 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>

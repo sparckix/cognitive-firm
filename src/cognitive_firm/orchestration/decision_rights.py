@@ -40,6 +40,7 @@ from typing import Any, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
 from cognitive_firm.orchestration.kernel_events import record_kernel_event
+from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
 
 
 ScopeKind = Literal["project", "resource_class", "decision_class", "operating_unit"]
@@ -338,6 +339,59 @@ def get_residual_right_holder(
     return None
 
 
+def residual_right_assignment_resource(
+    assignment: ResidualRightAssignment,
+) -> KernelResource:
+    """Project a residual-right assignment into the common resource envelope.
+
+    The JSONL row remains canonical. The resource view gives adapters,
+    dashboards, migration checks, and conformance fixtures a common object
+    shape for the default-decider contract.
+    """
+    labels = {
+        "scope_kind": assignment.scope_kind,
+        "holder_role": assignment.holder_role,
+        "status": assignment.status,
+    }
+    if assignment.holder_actor:
+        labels["holder_actor"] = assignment.holder_actor
+    links = [
+        {"rel": "scope", "href": _scope_ref_for(assignment.scope_kind, assignment.scope_ref)},
+        {"rel": "holder_role", "href": assignment.holder_role},
+        {"rel": "assigned_by", "href": assignment.assigned_by},
+    ]
+    if assignment.holder_actor:
+        links.append({"rel": "holder_actor", "href": assignment.holder_actor})
+    return make_resource(
+        kind="ResidualRightAssignment",
+        name=assignment.assignment_id,
+        resource_id=assignment.assignment_id,
+        tenant_id=assignment.tenant_id,
+        project_id=assignment.project_id,
+        stability="alpha",
+        labels=labels,
+        annotations={
+            key: str(value)
+            for key, value in assignment.metadata.items()
+            if isinstance(key, str) and value is not None
+        },
+        spec={
+            "scope_kind": assignment.scope_kind,
+            "scope_ref": assignment.scope_ref,
+            "holder_role": assignment.holder_role,
+            "holder_actor": assignment.holder_actor,
+            "basis": assignment.basis,
+            "assigned_by": assignment.assigned_by,
+        },
+        status={
+            "status": assignment.status,
+            "created_at_utc": assignment.created_at_utc,
+            "updated_at_utc": assignment.updated_at_utc,
+        },
+        links=links,
+    )
+
+
 # ---------------------------------------------------------------------------
 # residual decisions: exercising the residual right in an unspecified situation
 # ---------------------------------------------------------------------------
@@ -538,6 +592,70 @@ def get_residual_decision(
     return None
 
 
+def residual_decision_resource(decision: ResidualDecision) -> KernelResource:
+    """Project a residual decision into the common resource envelope.
+
+    The decision JSONL row remains canonical. The projection exposes
+    fail-open authorization flags and review outcomes in a common object shape
+    without changing the residual-decision lifecycle.
+    """
+    labels = {
+        "scope_kind": decision.scope_kind,
+        "deciding_role": decision.deciding_role,
+        "status": decision.status,
+        "unauthorized": str(decision.unauthorized).lower(),
+    }
+    if decision.review_outcome:
+        labels["review_outcome"] = decision.review_outcome
+    links = [
+        {"rel": "scope", "href": _scope_ref_for(decision.scope_kind, decision.scope_ref)},
+        {"rel": "deciding_actor", "href": decision.deciding_actor},
+        {"rel": "deciding_role", "href": decision.deciding_role},
+    ]
+    if decision.assignment_id:
+        links.append(
+            {
+                "rel": "residual_right_assignment",
+                "href": f"residual_right_assignment:{decision.assignment_id}",
+            }
+        )
+    if decision.reviewed_by:
+        links.append({"rel": "reviewed_by", "href": decision.reviewed_by})
+    return make_resource(
+        kind="ResidualDecision",
+        name=decision.decision_id,
+        resource_id=decision.decision_id,
+        tenant_id=decision.tenant_id,
+        project_id=decision.project_id,
+        stability="alpha",
+        labels=labels,
+        annotations={
+            key: str(value)
+            for key, value in decision.metadata.items()
+            if isinstance(key, str) and value is not None
+        },
+        spec={
+            "scope_kind": decision.scope_kind,
+            "scope_ref": decision.scope_ref,
+            "deciding_actor": decision.deciding_actor,
+            "deciding_role": decision.deciding_role,
+            "decision_summary": decision.decision_summary,
+            "rationale": decision.rationale,
+            "assignment_id": decision.assignment_id,
+        },
+        status={
+            "status": decision.status,
+            "unauthorized": decision.unauthorized,
+            "reviewed_by": decision.reviewed_by,
+            "review_outcome": decision.review_outcome,
+            "review_notes": decision.review_notes,
+            "created_at_utc": decision.created_at_utc,
+            "updated_at_utc": decision.updated_at_utc,
+        },
+        links=links,
+    )
+
+
 # ---------------------------------------------------------------------------
 # read model
 # ---------------------------------------------------------------------------
@@ -642,6 +760,7 @@ def main(argv: list[str] | None = None) -> int:
     list_assignments.add_argument("--holder-role")
     list_assignments.add_argument("--status")
     list_assignments.add_argument("--log-path", type=Path)
+    list_assignments.add_argument("--resource", action="store_true", help="render resource envelopes")
 
     record = sub.add_parser("record", help="record a decision on an unspecified situation")
     record.add_argument("--scope-kind", required=True)
@@ -671,6 +790,7 @@ def main(argv: list[str] | None = None) -> int:
     list_decisions.add_argument("--review-outcome")
     list_decisions.add_argument("--unauthorized", action="store_true")
     list_decisions.add_argument("--log-path", type=Path)
+    list_decisions.add_argument("--resource", action="store_true", help="render resource envelopes")
 
     summarize = sub.add_parser("summary", help="read model over residual decision rights")
     summarize.add_argument("--tenant-id")
@@ -708,7 +828,15 @@ def main(argv: list[str] | None = None) -> int:
             status=args.status,
             log_path=args.log_path,
         ):
-            print(json.dumps(assignment.as_dict(), sort_keys=True))
+            if args.resource:
+                print(
+                    json.dumps(
+                        residual_right_assignment_resource(assignment).as_dict(),
+                        sort_keys=True,
+                    )
+                )
+            else:
+                print(json.dumps(assignment.as_dict(), sort_keys=True))
         return 0
     if args.cmd == "record":
         decision = record_residual_decision(
@@ -746,7 +874,15 @@ def main(argv: list[str] | None = None) -> int:
             unauthorized=True if args.unauthorized else None,
             log_path=args.log_path,
         ):
-            print(json.dumps(decision.as_dict(), sort_keys=True))
+            if args.resource:
+                print(
+                    json.dumps(
+                        residual_decision_resource(decision).as_dict(),
+                        sort_keys=True,
+                    )
+                )
+            else:
+                print(json.dumps(decision.as_dict(), sort_keys=True))
         return 0
     if args.cmd == "summary":
         print(

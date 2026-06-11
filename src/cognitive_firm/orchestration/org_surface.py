@@ -51,16 +51,20 @@ from cognitive_firm.orchestration.human_work import (
 )
 from cognitive_firm.orchestration.intelligence_sources import build_intelligence_coverage
 from cognitive_firm.orchestration.learning_events import (
+    DEFAULT_LEARNING_ENCOUNTERS_LOG,
     DEFAULT_LEARNING_EVENTS_LOG,
     ApprovedLearningEvent,
     list_learning_events,
+    summarize_learning_events,
 )
+from cognitive_firm.orchestration.outcome_links import DEFAULT_OUTCOME_LINKS_LOG
 from cognitive_firm.orchestration.project_charter import (
     ProjectCharter,
     charter_summary,
     load_project_charter,
     validate_project_charter,
 )
+from cognitive_firm.orchestration.routine_reviews import DEFAULT_ROUTINE_REVIEWS_LOG
 from cognitive_firm.orchestration.run_checkpoints import (
     ACTIVE_STATES as ACTIVE_RUN_STATES,
     TRANSITIONS_LOG,
@@ -116,6 +120,7 @@ class OrgSurface:
     pending_governance_changes: list[GovernanceChangeProposal] = field(default_factory=list)
     open_accountability_cases: list[AccountabilityCase] = field(default_factory=list)
     active_learning_events: list[ApprovedLearningEvent] = field(default_factory=list)
+    learning_event_summary: dict[str, Any] = field(default_factory=dict)
     active_runs: list[RunProjection] = field(default_factory=list)
     failed_runs: list[RunProjection] = field(default_factory=list)
 
@@ -162,6 +167,16 @@ class OrgSurface:
                 1 for proposal in self.pending_governance_changes if proposal.status == "blocked"
             ),
             "active_learning_events": len(self.active_learning_events),
+            "learning_events_compounded": int(self.learning_event_summary.get("compounded") or 0),
+            "learning_events_with_encounters": int(
+                self.learning_event_summary.get("events_with_encounters") or 0
+            ),
+            "learning_event_outcome_links": int(
+                self.learning_event_summary.get("outcome_link_count") or 0
+            ),
+            "learning_event_overdue_reviews": int(
+                self.learning_event_summary.get("overdue_routine_review_count") or 0
+            ),
             "active_runs": len(self.active_runs),
             "failed_runs": len(self.failed_runs),
         }
@@ -193,6 +208,7 @@ class OrgSurface:
             ],
             "open_accountability_cases": [asdict(case) for case in self.open_accountability_cases],
             "active_learning_events": [event.as_dict() for event in self.active_learning_events],
+            "learning_event_summary": self.learning_event_summary,
             "active_runs": [run.as_dict() for run in self.active_runs],
             "failed_runs": [run.as_dict() for run in self.failed_runs],
         }
@@ -240,6 +256,9 @@ def build_org_surface(
     governance_changes_log: Path = DEFAULT_GOVERNANCE_CHANGES_LOG,
     accountability_cases_log: Path = DEFAULT_ACCOUNTABILITY_CASES_LOG,
     learning_events_log: Path = DEFAULT_LEARNING_EVENTS_LOG,
+    learning_encounters_log: Path = DEFAULT_LEARNING_ENCOUNTERS_LOG,
+    outcome_links_log: Path = DEFAULT_OUTCOME_LINKS_LOG,
+    routine_reviews_log: Path = DEFAULT_ROUTINE_REVIEWS_LOG,
     transitions_log: Path = TRANSITIONS_LOG,
     damage_limit: int = 20,
 ) -> OrgSurface:
@@ -289,6 +308,12 @@ def build_org_surface(
         *list_accountability_cases(status="escalated", log_path=accountability_cases_log),
     ]
     active_learning_events = list_learning_events(status="active", log_path=learning_events_log)
+    learning_summary = summarize_learning_events(
+        log_path=learning_events_log,
+        encounters_log_path=learning_encounters_log,
+        outcome_links_log_path=outcome_links_log,
+        routine_reviews_log_path=routine_reviews_log,
+    )
     runs = list_runs(log_path=transitions_log)
     recent_damage = _recent_damage(damage_limit)
     strategy_review = build_strategy_review(
@@ -313,6 +338,8 @@ def build_org_surface(
         "invalid_project_charters": len(charter_issues),
         "open_accountability_cases": len(open_accountability_cases),
         "active_learning_events": len(active_learning_events),
+        "learning_events_with_encounters": learning_summary.events_with_encounters,
+        "learning_event_overdue_reviews": learning_summary.overdue_routine_review_count,
         "active_runs": sum(1 for run in runs if run.state in ACTIVE_RUN_STATES),
         "failed_runs": sum(1 for run in runs if run.state == "failed"),
     }
@@ -342,6 +369,7 @@ def build_org_surface(
         pending_governance_changes=governance_changes,
         open_accountability_cases=open_accountability_cases,
         active_learning_events=active_learning_events,
+        learning_event_summary=learning_summary.as_dict(),
         active_runs=[run for run in runs if run.state in ACTIVE_RUN_STATES],
         failed_runs=[run for run in runs if run.state == "failed"],
     )
@@ -463,6 +491,26 @@ def format_surface_brief(surface: OrgSurface) -> str:
                 f"({event.future_application_cue})"
             )
 
+    learning_summary = surface.learning_event_summary
+    if learning_summary.get("total"):
+        coverage = float(learning_summary.get("outcome_verdict_coverage") or 0.0)
+        lines.extend(["", "## Learning Unit Health"])
+        lines.append(
+            "- "
+            f"{learning_summary.get('active', 0)} active; "
+            f"{learning_summary.get('compounded', 0)} compounded; "
+            f"{learning_summary.get('events_with_encounters', 0)} encountered; "
+            f"{learning_summary.get('outcome_link_count', 0)} outcome links; "
+            f"{coverage:.0%} verdict coverage"
+        )
+        if learning_summary.get("overdue_learning_event_ids"):
+            lines.append(
+                "- overdue review: "
+                + ", ".join(str(item) for item in learning_summary["overdue_learning_event_ids"][:10])
+            )
+        if learning_summary.get("recommendation"):
+            lines.append(f"- next: {learning_summary['recommendation']}")
+
     intelligence_coverage = surface.intelligence_coverage_state
     if intelligence_coverage.get("n_improvements"):
         lines.extend(["", "## Intelligence Source Improvements"])
@@ -494,6 +542,9 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_ACCOUNTABILITY_CASES_LOG,
     )
     parser.add_argument("--learning-events-log", type=Path, default=DEFAULT_LEARNING_EVENTS_LOG)
+    parser.add_argument("--learning-encounters-log", type=Path, default=DEFAULT_LEARNING_ENCOUNTERS_LOG)
+    parser.add_argument("--outcome-links-log", type=Path, default=DEFAULT_OUTCOME_LINKS_LOG)
+    parser.add_argument("--routine-reviews-log", type=Path, default=DEFAULT_ROUTINE_REVIEWS_LOG)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
@@ -506,6 +557,9 @@ def main(argv: list[str] | None = None) -> int:
         governance_changes_log=args.governance_changes_log,
         accountability_cases_log=args.accountability_cases_log,
         learning_events_log=args.learning_events_log,
+        learning_encounters_log=args.learning_encounters_log,
+        outcome_links_log=args.outcome_links_log,
+        routine_reviews_log=args.routine_reviews_log,
     )
     if args.json:
         print(json.dumps(surface.as_dict(), indent=2, sort_keys=True))

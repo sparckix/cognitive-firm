@@ -26,7 +26,7 @@ adopt the kernel shape and focuses on setup boundaries.
 - organizational surface reads;
 - local kernel service calls for app surfaces;
 - actor identity and per-action attribution;
-- actor memberships for scoped multi-human or service authority;
+- actor memberships for scoped human, agent, or service authority;
 - optional leases over mutable resources.
 
 Those primitives serve the invariants in
@@ -35,9 +35,11 @@ work as state, machine provenance, accountable closure, and durable learning.
 
 It does not replace your agent runtime, project management system, document
 store, or enterprise identity provider. Those are adapters around the kernel.
-The built-in daemon is a first-party governance runtime, not a graph runtime:
-it discovers work, applies mandate/gate policy, dispatches role-bearing agent
-CLIs, and records durable organization state.
+The built-in daemon is a first-party governed work runtime: it discovers work,
+applies mandate/gate policy, dispatches role-bearing agent CLIs and
+capability-gated tools, routes human interrupts, and records durable
+organization state. External graph runtimes can still own graph replay and
+provider-native execution when that is the better fit.
 
 ## Boundary Model
 
@@ -73,7 +75,7 @@ writing governance files directly.
    surface you intend to use.
 8. Run `scripts/org_role_preflight.py` for each role you intend to activate.
 9. Run one dry-run daemon tick before allowing autonomous dispatch.
-10. Inspect the organization surface before and after real work.
+10. Inspect the organization surface before and after a live task.
 
 Useful commands:
 

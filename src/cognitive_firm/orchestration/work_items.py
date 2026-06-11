@@ -42,6 +42,7 @@ from cognitive_firm.common.paths import ORG_ROOT_DIR
 from cognitive_firm.orchestration.extension_schemas import validate_payload
 from cognitive_firm.orchestration.kernel_events import record_kernel_event
 from cognitive_firm.orchestration.operating_units import OperatingUnit, get_operating_unit
+from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
 
 
 WorkItemStatus = Literal[
@@ -781,6 +782,74 @@ def get_work_item(work_id: str, *, log_path: Path | None = None) -> WorkItem | N
     return None
 
 
+def work_item_resource(item: WorkItem) -> KernelResource:
+    """Project a work item into the common kernel resource envelope.
+
+    The JSONL row remains canonical. The resource envelope is the portable
+    object shape for adapters, dashboards, migrations, and conformance tests.
+    """
+    labels = {
+        "unit_id": item.unit_id,
+        "kind": item.kind,
+        "owner_role": item.owner_role,
+        "status": item.status,
+    }
+    if item.claimed_by_role:
+        labels["claimed_by_role"] = item.claimed_by_role
+    links: list[dict[str, str]] = [
+        {"rel": "operating_unit", "href": f"operating_unit:{item.unit_id}"}
+    ]
+    for ref in item.artifact_refs:
+        href = ref.get("path") or ref.get("ref")
+        if isinstance(href, str) and href.strip():
+            links.append(
+                {
+                    "rel": str(ref.get("kind") or "artifact"),
+                    "href": href.strip(),
+                }
+            )
+    return make_resource(
+        kind="WorkItem",
+        name=item.work_id,
+        resource_id=item.work_id,
+        tenant_id=item.tenant_id,
+        project_id=item.project_id,
+        stability="alpha",
+        labels=labels,
+        annotations={
+            key: str(value)
+            for key, value in item.metadata.items()
+            if isinstance(key, str) and value is not None
+        },
+        spec={
+            "unit_id": item.unit_id,
+            "kind": item.kind,
+            "owner_role": item.owner_role,
+            "priority": item.priority,
+            "max_attempts": item.max_attempts,
+            "payload": item.payload,
+            "idempotency_key": item.idempotency_key,
+        },
+        status={
+            "status": item.status,
+            "attempts": item.attempts,
+            "claimed_by_actor": item.claimed_by_actor,
+            "claimed_by_role": item.claimed_by_role,
+            "claim_token": item.claim_token,
+            "lease_until_utc": item.lease_until_utc,
+            "exit_kind": item.exit_kind,
+            "result": item.result,
+            "producer": item.producer,
+            "verifier": item.verifier,
+            "failure_reason": item.failure_reason,
+            "dead_letter_reason": item.dead_letter_reason,
+            "created_at_utc": item.created_at_utc,
+            "updated_at_utc": item.updated_at_utc,
+        },
+        links=links,
+    )
+
+
 def list_dead_letters(
     *,
     unit_id: str | None = None,
@@ -840,6 +909,7 @@ def main(argv: list[str] | None = None) -> int:
     list_parser.add_argument("--status")
     list_parser.add_argument("--kind")
     list_parser.add_argument("--log-path", type=Path)
+    list_parser.add_argument("--resource", action="store_true", help="render resource envelopes")
 
     args = parser.parse_args(argv)
     if args.cmd == "enqueue":
@@ -903,7 +973,8 @@ def main(argv: list[str] | None = None) -> int:
             kind=args.kind,
             log_path=args.log_path,
         ):
-            print(json.dumps(item.as_dict(), sort_keys=True))
+            payload = work_item_resource(item).as_dict() if args.resource else item.as_dict()
+            print(json.dumps(payload, sort_keys=True))
         return 0
     return 2
 

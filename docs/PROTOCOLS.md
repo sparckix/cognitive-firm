@@ -44,6 +44,12 @@ OpenAI Agents SDK, Google ADK, Microsoft Agent Framework, CrewAI, AutoGen, or
 Letta can project lifecycle events into the run-checkpoint interface. The
 runtime owns execution; cognitive-firm owns the organizational projection.
 
+Worker taxonomy (orthogonal): capability, fungibility, state, and transport
+are separate axes. This vocabulary explains whether a worker is a bare model
+call, tool-using agent, deterministic system, or human, and whether the worker
+is interchangeable or a named continuing role. It does not grant authority;
+roles, mandates, memberships, and leases still decide who may act.
+
 Forecast market and action-impact interfaces (orthogonal): read-model adapters
 that let tenant forecast markets and measured-impact ledgers feed the generic
 organization surface without moving tenant policy or optimizers into the
@@ -60,7 +66,13 @@ source-improvement items without collecting tenant-specific metrics.
 
 Action attestations (orthogonal): compact machine-side provenance rows for
 agent actions, tool calls, runtime events, prompts, datasets, and artifacts.
-They are the machine counterpart to human-work receipts.
+They are the machine counterpart to human-work receipts and expose a
+resource-envelope projection for adapter and dashboard compatibility.
+
+Formal verification (orthogonal): provider-agnostic certificate rows from Lean,
+SMT, Isabelle, Coq, Alloy, TLA+, or tenant checkers. A refuted or invalid
+certificate fails the governed-run bundle; an inconclusive certificate makes it
+incomplete.
 
 Audit integrity (orthogonal): chained manifests over JSONL state logs, with
 optional HMAC verification and external timestamp/transparency-log proof
@@ -82,14 +94,16 @@ storage, SQLite transactional mutation fencing, and an optional Postgres
 mutation backend. MCP remains the enterprise-system connector family for ERPs,
 Linear, Salesforce, and similar systems.
 
-Kernel service, identity providers, actor identity, actor membership, and leases (orthogonal):
+Kernel service, identity providers, actor identity, actor membership, authority domains, and leases (orthogonal):
 app surfaces can call the same kernel primitives through a local HTTP service.
 Authentication remains an adapter concern; actor attribution and leases remain
 first-party kernel records because they carry accountability and mutation
 control. Gateway-verified OIDC/SAML/mTLS deployments can use the trusted-header
 identity adapter, identity-provisioning seam, subject-scope enforcement, and
-scoped actor memberships. Tenant isolation starts with kernel scope guards, but
-hard isolation across authority domains remains deployment architecture.
+scoped actor memberships. Authority domains resolve which authority role owns a
+tenant, project, operating unit, resource class, or decision class. Tenant
+isolation starts with kernel scope guards, but hard isolation across authority
+domains remains deployment architecture.
 
 App integration (orthogonal): app surfaces, external enterprise systems,
 runtime engines, state backends, notification providers, and identity providers
@@ -119,7 +133,7 @@ Schema to validate custom primitive payloads without a kernel change.
 
 How role offices coordinate with each other inside the kernel. Typed `AgentMessage` envelopes, seven performative kinds (`request`, `proposal`, `handoff`, `inform`, `clarification`, `refusal`, `status`), an **obligation lifecycle** distinct from envelope status (so "B is blocked waiting on A's output" is structurally visible, not inferred), and a **content-addressed artifact-dependency primitive** so "task B requires task A's output X with property Y" is a typed event rather than implicit knowledge.
 
-Status: shipped for single-principal governance kernels. Phase A (obligation lifecycle), Phase B (artifact dependencies), and Phase C (saga compensation) all shipped. Remote adapter (cross-VPS role-to-role messaging) remains queued for T2 deployments.
+Status: shipped for single-authority governance kernels. Phase A (obligation lifecycle), Phase B (artifact dependencies), and Phase C (saga compensation) all shipped. Remote adapter (cross-VPS role-to-role messaging) remains queued for T2 deployments.
 
 ### [H2A — Human-to-Agent](protocols/h2a.md)
 
@@ -148,9 +162,12 @@ A2A obligation when the human work is carrying a role-to-role dependency.
 The organization surface exposes A2H waiting, follow-up, missing receipts, and
 repeated pressure by role/bottleneck class. Work discovery routes A2H sessions
 back to the role office only after the human has handed off or completed the
-bounded work.
+bounded work. Human-work sessions also expose a resource-envelope projection
+for adapter and dashboard compatibility while keeping the JSONL rows
+authoritative.
 
-Status: shipped as a helper and protocol pattern over `human_work.py`.
+Status: shipped as a helper and protocol pattern over `human_work.py`, with a
+resource projection and tests.
 
 ### [MCP — Model Context Protocol](protocols/mcp.md)
 
@@ -239,6 +256,27 @@ not prove correctness; it makes machine-side work reviewable.
 
 Status: T1 filesystem adapter and tests shipped.
 
+### [Governed Run Attestation Bundle](protocols/governed-run-attestation.md)
+
+How the kernel exports one governed run as a compact audit packet over
+existing records: run checkpoints, action attestations, formal verifications,
+human work sessions, linked production work items, outcome links,
+accountability cases, linked leases, referenced governance approvals,
+derived evidence hashes, observability refs, plus an owner-authority snapshot.
+The bundle reports caveats rather than turning provenance into a correctness
+claim. Existing bundle JSON can be validated against the v1 interchange schema
+and digest before another runtime or provider consumes it.
+
+Status: export view and tests shipped.
+
+### [Loop Engineering](protocols/loop-engineering.md)
+
+How the kernel wraps repeated agent and human-agent loops with authority,
+state, verification, escalation, outcome, and learning records. Agent runtimes
+own execution; cognitive-firm owns the organizational packet around the loop.
+
+Status: composition guide over shipped primitives.
+
 ### [Audit Integrity](protocols/audit-integrity.md)
 
 How the kernel creates and verifies tamper-evident chain manifests over JSONL
@@ -320,6 +358,18 @@ projects backlog, claimed, p95, throughput, and blockers per unit.
 
 Status: first-party interfaces, kernel-service routes, CLIs, and tests shipped.
 
+### [Worker Taxonomy](protocols/worker-taxonomy.md)
+
+How the kernel describes worker roles without collapsing capability,
+fungibility, state, and transport. A worker can be a tool-using agent and still
+be interchangeable if all relevant context is externalized; a worker can be
+stateful and singular when continuity or review identity matters. Transport
+choices such as API, subscription CLI, local process, or human channel are
+sourcing decisions, not governance categories.
+
+Status: shared vocabulary module, operating-unit import, protocol doc, and
+tests shipped.
+
 ### [Outcome Links](protocols/outcome-links.md)
 
 How the kernel records whether an approved change actually improved a measured
@@ -360,7 +410,9 @@ mandate is an incomplete contract; when it is silent, the residual-rights
 holder decides. Residual-right assignments name the default decider per scope;
 residual decisions record what was decided where no clause applied, flag an
 unauthorized decider rather than rejecting the record, and can be promoted to a
-new mandate clause. This keeps mandate-gap decisions reviewable.
+new mandate clause. Both canonical row types expose resource-envelope
+projections for adapter and dashboard compatibility while keeping the JSONL
+rows authoritative. This keeps mandate-gap decisions reviewable.
 
 Status: first-party interfaces, kernel-service routes, CLI, and tests shipped.
 
@@ -447,9 +499,12 @@ Status: envelope and validation tests shipped.
 How bounded allow/deny decisions are recorded with request, matched rule,
 reason, and evidence refs. This is an audit shape for policy decisions, not a
 replacement for mandates, task authorization, MCP capability checks, or human
-approval.
+approval. Policy decisions also expose a resource-envelope projection for
+adapter and dashboard compatibility while keeping the append-only row
+authoritative.
 
-Status: local deterministic evaluator, JSONL record, and tests shipped.
+Status: local deterministic evaluator, JSONL record, resource projection, and
+tests shipped.
 
 ### [Migration Records](protocols/migrations.md)
 
@@ -482,10 +537,14 @@ Status: read-model interface shipped.
 How the kernel records proposed changes to mandates, roles, routes, gates,
 capability policy, learning policy, or tenant policy while keeping
 self-modification governed. Proposals must carry deterministic invariant checks
-and are either blocked or review-ready. The primitive does not apply changes.
+and structural evidence sufficiency: source refs, expected behavior change,
+risk summary, rollback plan, and evidence refs for passing invariant checks.
+They are either blocked or review-ready. The primitive does not apply changes.
+Governance-change proposals also expose a resource-envelope projection for
+adapter, dashboard, migration, and conformance compatibility.
 
-Status: proposal log, invariant checks, org-surface integration, and tests
-shipped.
+Status: proposal log, invariant checks, evidence sufficiency gate,
+resource projection, org-surface integration, and tests shipped.
 
 ### [Learning Transition Compiler](protocols/learning-transition-compiler.md)
 
@@ -511,10 +570,10 @@ How a runnable governed organization is packaged, installed, verified, and
 rolled back. A `distro` is a curated day-one-runnable starter organization; an
 `overlay` is an add-on installed on an existing organization. Install is
 transactional and git-backed: the installer ensures the target is its own git
-repo, applies the package, enforces a kernel-version gate, runs a
-governance-graph `boot_check`, and only then commits and tags the result
-`install/<package>/<version>`. A failed or unbootable install leaves the
-target untouched. A component carries a composition `op` —
+repo, applies the package, enforces a kernel-version gate, verifies the
+governance graph and installed adapter/provider policy, and only then commits
+and tags the result `install/<package>/<version>`. A failed or unbootable
+install leaves the target untouched. A component carries a composition `op` —
 `add` / `replace` / `patch` (RFC 7386 JSON Merge Patch). `rollback` undoes a
 bad install — a clean `git reset` when nothing has run since the install
 boundary, or a compensating `git revert` forward commit when the org has run.
@@ -571,4 +630,4 @@ These specs describe **what is currently shipped**, not what is aspirational. Wh
 
 ## Threat-model coverage
 
-Each protocol spec ends with a threat-model table separating **T1** (single-principal, trusted-hardware) from **T2** (regulated enterprise, multi-tenant). Some primitives ship for both; some are queued at one and deferred at the other; some are explicitly out of scope. The discipline is to state which adversary class each primitive defends against.
+Each protocol spec ends with a threat-model table separating **T1** (single-authority, trusted-hardware) from **T2** (regulated enterprise, multi-tenant). Some primitives ship for both; some are queued at one and deferred at the other; some are explicitly out of scope. The discipline is to state which adversary class each primitive defends against.

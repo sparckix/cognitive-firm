@@ -21,12 +21,13 @@ from cognitive_firm.identity_providers import (
     IdentityProviderAdapter,
     StaticBearerTokenIdentityProvider,
 )
-from cognitive_firm.common.paths import ORG_ROOT_DIR, WORKSPACE_DIR
+from cognitive_firm.common.paths import ORG_ROOT_DIR, REPO_ROOT, WORKSPACE_DIR
 from cognitive_firm.orchestration.accountability import build_accountability_summary
 from cognitive_firm.orchestration.accountability_cases import (
     DEFAULT_ACCOUNTABILITY_CASES_LOG,
     create_accountability_case,
 )
+from cognitive_firm.orchestration.action_impact import DEFAULT_ACTION_IMPACT_SUMMARY
 from cognitive_firm.orchestration.actor_identity import (
     DEFAULT_ACTOR_IDENTITY_LOG,
     ActorContext,
@@ -47,6 +48,8 @@ from cognitive_firm.orchestration.app_intents import (
     update_role_agent_utilization,
 )
 from cognitive_firm.orchestration.agent_channels import send_agent_message
+from cognitive_firm.orchestration.evidence_gaps import DEFAULT_EVIDENCE_GAPS_LOG
+from cognitive_firm.orchestration.forecast_market import DEFAULT_FORECAST_MARKET_ROOT
 from cognitive_firm.orchestration.human_work import (
     DEFAULT_HUMAN_WORK_LOG,
     append_human_work_interaction,
@@ -55,16 +58,28 @@ from cognitive_firm.orchestration.human_work import (
     update_human_work_state,
 )
 from cognitive_firm.orchestration.leases import DEFAULT_LEASES_LOG, acquire_lease, release_lease, verify_lease
+from cognitive_firm.orchestration.learning_events import (
+    DEFAULT_LEARNING_ENCOUNTERS_LOG,
+    DEFAULT_LEARNING_EVENTS_LOG,
+    learning_event_resource,
+    list_learning_events,
+    record_learning_event_encounter,
+    replay_learning_events,
+    summarize_learning_events,
+)
 from cognitive_firm.orchestration.operating_units import (
     DEFAULT_OPERATING_UNITS_LOG,
     define_operating_unit,
+    get_operating_unit,
     list_operating_units,
+    operating_unit_resource,
 )
 from cognitive_firm.orchestration.operating_unit_surface import build_operating_unit_dashboard
 from cognitive_firm.orchestration.outcome_links import (
     DEFAULT_OUTCOME_LINKS_LOG,
     create_outcome_link,
     list_outcome_links,
+    outcome_link_resource,
     record_metric_snapshot,
     record_verdict,
     summarize_outcome_links,
@@ -73,11 +88,21 @@ from cognitive_firm.orchestration.outcome_links import (
 from cognitive_firm.orchestration.routine_reviews import (
     DEFAULT_ROUTINE_REVIEWS_LOG,
     list_due_reviews,
+    list_routine_reviews,
     record_review_outcome,
     retire_routine,
+    routine_review_resource,
     schedule_routine_review,
     start_routine_review,
     summarize_routine_reviews,
+)
+from cognitive_firm.orchestration.run_checkpoints import (
+    append_checkpoint,
+    get_run,
+    list_runs,
+    resume_summary,
+    set_run_state,
+    start_run,
 )
 from cognitive_firm.orchestration.resource_allocation import (
     DEFAULT_RESOURCE_ALLOCATION_LOG,
@@ -108,10 +133,13 @@ from cognitive_firm.orchestration.work_items import (
     complete_work_item,
     enqueue_work_item,
     fail_work_item,
+    get_work_item,
     heartbeat_work_item,
+    list_work_items,
     requeue_dead_letter,
     retire_work_item,
     start_work_item,
+    work_item_resource,
 )
 
 
@@ -128,13 +156,19 @@ class KernelServiceConfig:
     actor_identity_log: Path = DEFAULT_ACTOR_IDENTITY_LOG
     actor_membership_log: Path = DEFAULT_ACTOR_MEMBERSHIP_LOG
     leases_log: Path = DEFAULT_LEASES_LOG
+    evidence_gaps_log: Path = DEFAULT_EVIDENCE_GAPS_LOG
+    forecast_market_summary: Path = DEFAULT_FORECAST_MARKET_ROOT / "global_health.json"
+    action_impact_summary: Path = DEFAULT_ACTION_IMPACT_SUMMARY
     work_items_log: Path = DEFAULT_WORK_ITEMS_LOG
     operating_units_log: Path = DEFAULT_OPERATING_UNITS_LOG
     outcome_links_log: Path = DEFAULT_OUTCOME_LINKS_LOG
     routine_reviews_log: Path = DEFAULT_ROUTINE_REVIEWS_LOG
+    learning_events_log: Path = DEFAULT_LEARNING_EVENTS_LOG
+    learning_encounters_log: Path = DEFAULT_LEARNING_ENCOUNTERS_LOG
     resource_allocation_log: Path = DEFAULT_RESOURCE_ALLOCATION_LOG
     residual_rights_log: Path = DEFAULT_RESIDUAL_RIGHTS_LOG
     residual_decisions_log: Path = DEFAULT_RESIDUAL_DECISIONS_LOG
+    project_root: Path = REPO_ROOT
     kernel_events_log: Path | None = None
     org_dir: Path = Path(os.environ.get("ORG_ROOT") or ORG_ROOT_DIR)
     gates_dir: Path = Path(os.environ.get("GATES_DIR") or WORKSPACE_DIR / "gates" / "pending")
@@ -176,6 +210,24 @@ def _governance_changes_log(config: KernelServiceConfig) -> Path:
     return config.org_dir / "governance_changes" / "governance_changes.jsonl"
 
 
+def _configured_org_surface(config: KernelServiceConfig):
+    """Build the service projection from the service's configured logs."""
+    return build_org_surface(
+        project_root=config.project_root,
+        evidence_gaps_log=config.evidence_gaps_log,
+        human_work_log=config.human_work_log,
+        forecast_market_summary=config.forecast_market_summary,
+        action_impact_summary=config.action_impact_summary,
+        governance_changes_log=_governance_changes_log(config),
+        accountability_cases_log=config.accountability_cases_log,
+        learning_events_log=config.learning_events_log,
+        learning_encounters_log=config.learning_encounters_log,
+        outcome_links_log=config.outcome_links_log,
+        routine_reviews_log=config.routine_reviews_log,
+        transitions_log=config.transition_log,
+    )
+
+
 def _decided_governance_ids(config: KernelServiceConfig) -> set[str]:
     """Proposal ids that already carry an attested approve/decline event.
 
@@ -200,11 +252,11 @@ def _attention_feed(config: KernelServiceConfig) -> list[dict[str, Any]]:
     """Gather the firm's pending signals and route them to participants (L1).
 
     Pending gates, A2H work requests, and governance-change proposals awaiting
-    a human decision are normalized, then the userland attention router
+    an accountable actor decision are normalized, then the userland attention router
     classifies each and resolves its target participant.
     """
-    from cognitive_firm.orchestration.actor_membership import (
-        list_actor_memberships,
+    from cognitive_firm.orchestration.authority_domains import (
+        resolve_authority_assignment_from_org,
     )
     from cognitive_firm.orchestration.governance_changes import (
         list_governance_changes,
@@ -215,7 +267,6 @@ def _attention_feed(config: KernelServiceConfig) -> list[dict[str, Any]]:
     from cognitive_firm.userland.attention_router import (
         AttentionSignal,
         pending_gate_signals,
-        resolve_authority_role,
         route_signals,
     )
 
@@ -227,8 +278,8 @@ def _attention_feed(config: KernelServiceConfig) -> list[dict[str, Any]]:
         if proposal.proposal_id in decided:
             continue  # already approved/declined — stop nagging the operator
         # Governance signals leave the target empty — the router fills it with
-        # the authority. This closes the governed-install human loop: an
-        # overlay's authority-diff proposal surfaces in the operator's queue.
+        # the authority. This closes the governed-install review loop: an
+        # overlay's authority-diff proposal surfaces in an accountable actor's queue.
         signals.append(
             AttentionSignal(
                 signal_id=proposal.proposal_id,
@@ -236,6 +287,9 @@ def _attention_feed(config: KernelServiceConfig) -> list[dict[str, Any]]:
                 headline=f"Governance change awaiting review: {proposal.title}",
                 source_ref=proposal.proposal_id,
                 created_at_utc=proposal.created_at_utc,
+                tenant_id=proposal.tenant_id,
+                project_id=proposal.project_id,
+                decision_class=proposal.change_kind,
             )
         )
     for session in list_a2h_waiting_on_human_sessions(
@@ -253,27 +307,30 @@ def _attention_feed(config: KernelServiceConfig) -> list[dict[str, Any]]:
             )
         )
 
-    authority_role = resolve_authority_role(config.org_dir)
-    authority_actor: str | None = None
-    if authority_role:
-        memberships = list_actor_memberships(
-            role_id=authority_role,
-            status="active",
-            log_path=config.actor_membership_log,
+    def _authority_for_signal(signal: AttentionSignal) -> tuple[str | None, str | None]:
+        resolution = resolve_authority_assignment_from_org(
+            config.org_dir,
+            tenant_id=signal.tenant_id,
+            project_id=signal.project_id,
+            operating_unit_id=signal.operating_unit_id,
+            resource_class=signal.resource_class,
+            decision_class=signal.decision_class,
+            actor_membership_log=config.actor_membership_log,
         )
-        if memberships:
-            # The authority role may have more than one active holder; pick
-            # deterministically (lowest actor_id) so a given firm state always
-            # routes governance interrupts to the same holder, not to whichever
-            # membership the log happened to return first.
-            authority_actor = min(m.actor_id for m in memberships)
+        if not resolution.authority_role_id:
+            return None, None
+        authority_actor = resolution.actor_ids[0] if resolution.actor_ids else None
+        return resolution.authority_role_id, authority_actor
 
     routed = route_signals(
         signals,
-        authority_actor_id=authority_actor,
-        authority_role_id=authority_role,
+        authority_resolver=_authority_for_signal,
     )
     return [signal.as_dict() for signal in routed]
+
+
+def _query_bool(query: dict[str, list[str]], key: str) -> bool:
+    return (query.get(key, ["false"])[0] or "").lower() in {"1", "true", "yes"}
 
 
 def dispatch_kernel_request(
@@ -315,17 +372,11 @@ def dispatch_kernel_request(
             return _ok({"ok": True, "service": "cognitive-firm-kernel"})
 
         if method == "GET" and route == "/kernel/org-surface":
-            surface = build_org_surface(
-                human_work_log=config.human_work_log,
-                accountability_cases_log=config.accountability_cases_log,
-            )
+            surface = _configured_org_surface(config)
             return _ok({"surface": surface.as_dict()})
 
         if method == "GET" and route == "/kernel/accountability-summary":
-            surface = build_org_surface(
-                human_work_log=config.human_work_log,
-                accountability_cases_log=config.accountability_cases_log,
-            )
+            surface = _configured_org_surface(config)
             summary = build_accountability_summary(surface)
             return _ok({"summary": summary.as_dict()})
 
@@ -334,14 +385,30 @@ def dispatch_kernel_request(
 
         if method == "GET" and route == "/kernel/governance-changes":
             from cognitive_firm.orchestration.governance_changes import (
+                governance_change_resource,
                 list_governance_changes,
             )
 
             status_filter = query.get("status", [None])[0]
+            change_kind_filter = query.get("change_kind", [None])[0]
+            tenant_filter = query.get("tenant_id", [None])[0]
+            project_filter = query.get("project_id", [None])[0]
             proposals = list_governance_changes(
                 status=status_filter,
+                change_kind=change_kind_filter,
+                tenant_id=tenant_filter,
+                project_id=project_filter,
                 log_path=_governance_changes_log(config),
             )
+            if _query_bool(query, "resource"):
+                return _ok(
+                    {
+                        "proposals": [
+                            governance_change_resource(proposal).as_dict()
+                            for proposal in proposals
+                        ]
+                    }
+                )
             decided = _decided_governance_ids(config)
             payload = []
             for proposal in proposals:
@@ -349,6 +416,72 @@ def dispatch_kernel_request(
                 row["decided"] = proposal.proposal_id in decided
                 payload.append(row)
             return _ok({"proposals": payload})
+
+        if (
+            method == "GET"
+            and len(parts) == 3
+            and parts[:2] == ["kernel", "governance-changes"]
+        ):
+            from cognitive_firm.orchestration.governance_changes import (
+                governance_change_resource,
+                list_governance_changes,
+            )
+
+            proposal_id = parts[2]
+            proposals = {
+                proposal.proposal_id: proposal
+                for proposal in list_governance_changes(
+                    log_path=_governance_changes_log(config)
+                )
+            }
+            proposal = proposals.get(proposal_id)
+            if proposal is None:
+                return _error(404, f"no governance change {proposal_id!r}")
+            if _query_bool(query, "resource"):
+                return _ok(
+                    {
+                        "proposal": governance_change_resource(
+                            proposal
+                        ).as_dict()
+                    }
+                )
+            row = proposal.as_dict()
+            row["decided"] = proposal_id in _decided_governance_ids(config)
+            return _ok({"proposal": row})
+
+        if method == "POST" and route == "/kernel/governance-changes":
+            from cognitive_firm.orchestration.governance_changes import (
+                propose_governance_change,
+            )
+
+            _verify_mutation_lease(
+                "governance_changes:propose", body, actor=actor, config=config
+            )
+            proposal = propose_governance_change(
+                change_kind=_required_str(body, "change_kind"),
+                title=_required_str(body, "title"),
+                proposed_by=(
+                    actor.actor_id
+                    if subject is not None
+                    else str(body.get("proposed_by") or actor.actor_id)
+                ),
+                target_ref=_required_str(body, "target_ref"),
+                rationale=_required_str(body, "rationale"),
+                source_refs=_list_str(body.get("source_refs")),
+                expected_behavior_change=_optional_str(
+                    body, "expected_behavior_change"
+                ),
+                risk_summary=_optional_str(body, "risk_summary"),
+                rollback_plan=_optional_str(body, "rollback_plan"),
+                owner_role=_optional_str(body, "owner_role"),
+                tenant_id=_optional_str(body, "tenant_id"),
+                project_id=_optional_str(body, "project_id"),
+                invariant_checks=list(body.get("invariant_checks") or []),
+                metadata=dict(body.get("metadata") or {}),
+                proposal_id=_optional_str(body, "proposal_id"),
+                log_path=_governance_changes_log(config),
+            )
+            return _ok({"proposal": proposal.as_dict()}, status=201)
 
         if (
             method == "GET"
@@ -717,8 +850,36 @@ def dispatch_kernel_request(
             return _ok({"mutation": result}, status=201)
 
         if method == "GET" and route == "/kernel/operating-units":
-            units = list_operating_units(log_path=config.operating_units_log)
+            units = list_operating_units(
+                status=query.get("status", [None])[0],
+                tenant_id=query.get("tenant_id", [None])[0],
+                project_id=query.get("project_id", [None])[0],
+                log_path=config.operating_units_log,
+            )
+            if _query_bool(query, "resource"):
+                return _ok(
+                    {
+                        "operating_units": [
+                            operating_unit_resource(unit).as_dict() for unit in units
+                        ]
+                    }
+                )
             return _ok({"operating_units": [unit.as_dict() for unit in units]})
+
+        if (
+            method == "GET"
+            and len(parts) == 3
+            and parts[:2] == ["kernel", "operating-units"]
+        ):
+            unit = get_operating_unit(parts[2], log_path=config.operating_units_log)
+            if unit is None:
+                return _error(404, f"operating unit not found: {parts[2]}")
+            payload = (
+                operating_unit_resource(unit).as_dict()
+                if _query_bool(query, "resource")
+                else unit.as_dict()
+            )
+            return _ok({"operating_unit": payload})
 
         if method == "GET" and route == "/kernel/operating-unit-dashboard":
             dashboard = build_operating_unit_dashboard(
@@ -726,6 +887,91 @@ def dispatch_kernel_request(
                 work_items_log=config.work_items_log,
             )
             return _ok({"dashboard": dashboard.as_dict()})
+
+        if method == "GET" and route == "/kernel/runs":
+            runs = list_runs(log_path=config.transition_log)
+            state_filter = query.get("state", [None])[0]
+            owner_role_filter = query.get("owner_role", [None])[0]
+            tenant_filter = query.get("tenant_id", [None])[0]
+            project_filter = query.get("project_id", [None])[0]
+            if state_filter is not None:
+                runs = [run for run in runs if run.state == state_filter]
+            if owner_role_filter is not None:
+                runs = [run for run in runs if run.owner_role == owner_role_filter]
+            if tenant_filter is not None:
+                runs = [run for run in runs if run.tenant_id == tenant_filter]
+            if project_filter is not None:
+                runs = [run for run in runs if run.project_id == project_filter]
+            return _ok({"runs": [run.as_dict() for run in runs]})
+
+        if method == "POST" and route == "/kernel/runs":
+            _verify_mutation_lease("run_checkpoints:start", body, actor=actor, config=config)
+            run = start_run(
+                owner_role=str(body.get("owner_role") or actor.role_id or actor.actor_id),
+                objective=_required_str(body, "objective"),
+                tenant_id=_optional_str(body, "tenant_id"),
+                project_id=_optional_str(body, "project_id"),
+                idempotency_key=_optional_str(body, "idempotency_key"),
+                run_id=_optional_str(body, "run_id"),
+                log_path=config.transition_log,
+            )
+            return _ok({"run": run.as_dict()}, status=201)
+
+        if method == "GET" and len(parts) == 3 and parts[:2] == ["kernel", "runs"]:
+            try:
+                run = get_run(parts[2], log_path=config.transition_log)
+            except KeyError:
+                return _error(404, f"run not found: {parts[2]}")
+            return _ok({"run": run.as_dict()})
+
+        if (
+            method == "GET"
+            and len(parts) == 4
+            and parts[:2] == ["kernel", "runs"]
+            and parts[3] == "resume"
+        ):
+            try:
+                summary = resume_summary(parts[2], log_path=config.transition_log)
+            except KeyError:
+                return _error(404, f"run not found: {parts[2]}")
+            return _ok({"summary": summary})
+
+        if (
+            method == "POST"
+            and len(parts) == 4
+            and parts[:2] == ["kernel", "runs"]
+            and parts[3] == "checkpoints"
+        ):
+            run_id = parts[2]
+            _verify_mutation_lease(f"run:{run_id}", body, actor=actor, config=config)
+            event = append_checkpoint(
+                run_id,
+                actor=str(body.get("actor") or actor.actor_id),
+                step_id=_required_str(body, "step_id"),
+                status=_required_str(body, "status"),
+                summary=_required_str(body, "summary"),
+                payload_ref=_optional_str(body, "payload_ref"),
+                side_effect_key=_optional_str(body, "side_effect_key"),
+                log_path=config.transition_log,
+            )
+            return _ok({"event": event}, status=201)
+
+        if (
+            method == "POST"
+            and len(parts) == 4
+            and parts[:2] == ["kernel", "runs"]
+            and parts[3] == "state"
+        ):
+            run_id = parts[2]
+            _verify_mutation_lease(f"run:{run_id}", body, actor=actor, config=config)
+            event = set_run_state(
+                run_id,
+                actor=str(body.get("actor") or actor.actor_id),
+                state=_required_str(body, "state"),
+                failure_reason=_optional_str(body, "failure_reason"),
+                log_path=config.transition_log,
+            )
+            return _ok({"event": event})
 
         if method == "POST" and route == "/kernel/operating-units":
             _verify_mutation_lease("operating_units:define", body, actor=actor, config=config)
@@ -738,6 +984,8 @@ def dispatch_kernel_request(
                 allowed_work_kinds=_list_str(body.get("allowed_work_kinds")),
                 allowed_exits=_list_str(body.get("allowed_exits")),
                 worker_roles=_list_str(body.get("worker_roles")),
+                worker_role_classes=dict(body.get("worker_role_classes") or {}),
+                worker_role_archetypes=dict(body.get("worker_role_archetypes") or {}),
                 sla=dict(body.get("sla") or {}),
                 operator_required_when=_list_str(body.get("operator_required_when")),
                 governance_required_for=_list_str(body.get("governance_required_for")),
@@ -782,6 +1030,28 @@ def dispatch_kernel_request(
                 kernel_events_log=config.kernel_events_log,
             )
             return _ok({"work_item": item.as_dict() if item else None})
+
+        if method == "GET" and route == "/kernel/work-items":
+            items = list_work_items(
+                unit_id=query.get("unit_id", [None])[0],
+                status=query.get("status", [None])[0],
+                kind=query.get("kind", [None])[0],
+                tenant_id=query.get("tenant_id", [None])[0],
+                project_id=query.get("project_id", [None])[0],
+                log_path=config.work_items_log,
+            )
+            if _query_bool(query, "resource"):
+                return _ok(
+                    {"work_items": [work_item_resource(item).as_dict() for item in items]}
+                )
+            return _ok({"work_items": [item.as_dict() for item in items]})
+
+        if method == "GET" and len(parts) == 3 and parts[:2] == ["kernel", "work-items"]:
+            item = get_work_item(parts[2], log_path=config.work_items_log)
+            if item is None:
+                return _error(404, f"work item not found: {parts[2]}")
+            payload = work_item_resource(item).as_dict() if _query_bool(query, "resource") else item.as_dict()
+            return _ok({"work_item": payload})
 
         if (
             method == "POST"
@@ -863,6 +1133,83 @@ def dispatch_kernel_request(
                 return _error(404, f"unknown work-item action: {action}")
             return _ok({"work_item": item.as_dict()})
 
+        # --- learning events: approved learning replay and encounter telemetry ---
+        if method == "GET" and route == "/kernel/learning-events/summary":
+            summary = summarize_learning_events(
+                tenant_id=query.get("tenant_id", [None])[0],
+                project_id=query.get("project_id", [None])[0],
+                log_path=config.learning_events_log,
+                encounters_log_path=config.learning_encounters_log,
+                outcome_links_log_path=config.outcome_links_log,
+                routine_reviews_log_path=config.routine_reviews_log,
+            )
+            return _ok({"summary": summary.as_dict()})
+
+        if method == "GET" and route == "/kernel/learning-events/replay":
+            events = replay_learning_events(
+                role=query.get("role", [None])[0],
+                tenant_id=query.get("tenant_id", [None])[0],
+                project_id=query.get("project_id", [None])[0],
+                cue=query.get("cue", [None])[0],
+                log_path=config.learning_events_log,
+            )
+            if _query_bool(query, "resource"):
+                return _ok(
+                    {
+                        "learning_events": [
+                            learning_event_resource(event).as_dict() for event in events
+                        ]
+                    }
+                )
+            return _ok({"learning_events": [event.as_dict() for event in events]})
+
+        if method == "GET" and route == "/kernel/learning-events":
+            events = list_learning_events(
+                status=query.get("status", [None])[0],
+                learning_unit_kind=query.get("learning_unit_kind", [None])[0],
+                tenant_id=query.get("tenant_id", [None])[0],
+                project_id=query.get("project_id", [None])[0],
+                log_path=config.learning_events_log,
+            )
+            if _query_bool(query, "resource"):
+                return _ok(
+                    {
+                        "learning_events": [
+                            learning_event_resource(event).as_dict() for event in events
+                        ]
+                    }
+                )
+            return _ok({"learning_events": [event.as_dict() for event in events]})
+
+        if method == "POST" and route == "/kernel/learning-event-encounters":
+            learning_event_id = _required_str(body, "learning_event_id")
+            if not any(
+                event.learning_event_id == learning_event_id
+                for event in list_learning_events(log_path=config.learning_events_log)
+            ):
+                return _error(404, f"learning event not found: {learning_event_id}")
+            _verify_mutation_lease(
+                f"learning_event:{learning_event_id}:encounter",
+                body,
+                actor=actor,
+                config=config,
+            )
+            encounter = record_learning_event_encounter(
+                learning_event_id=learning_event_id,
+                role=str(body.get("role") or actor.role_id or actor.actor_id),
+                cue=_required_str(body, "cue"),
+                outcome=str(body.get("outcome") or "encountered"),
+                work_ref=_optional_str(body, "work_ref"),
+                tenant_id=_optional_str(body, "tenant_id"),
+                project_id=_optional_str(body, "project_id"),
+                reason=_optional_str(body, "reason"),
+                evidence_refs=_list_str(body.get("evidence_refs")),
+                metadata=dict(body.get("metadata") or {}),
+                idempotency_key=_optional_str(body, "idempotency_key"),
+                log_path=config.learning_encounters_log,
+            )
+            return _ok({"encounter": encounter.as_dict()}, status=201)
+
         # --- outcome links: did an approved change improve a measured outcome? ---
         if method == "GET" and route == "/kernel/outcome-links/summary":
             summary = summarize_outcome_links(
@@ -879,6 +1226,14 @@ def dispatch_kernel_request(
                 learning_event_id=query.get("learning_event_id", [None])[0],
                 log_path=config.outcome_links_log,
             )
+            if _query_bool(query, "resource"):
+                return _ok(
+                    {
+                        "outcome_links": [
+                            outcome_link_resource(link).as_dict() for link in links
+                        ]
+                    }
+                )
             return _ok({"outcome_links": [link.as_dict() for link in links]})
 
         if method == "POST" and route == "/kernel/outcome-links":
@@ -946,8 +1301,36 @@ def dispatch_kernel_request(
             return _ok({"outcome_link": link.as_dict()})
 
         # --- routine reviews: scheduled review and retirement of stale routines ---
+        if method == "GET" and route == "/kernel/routine-reviews":
+            reviews = list_routine_reviews(
+                status=query.get("status", [None])[0],
+                routine_kind=query.get("routine_kind", [None])[0],
+                learning_event_id=query.get("learning_event_id", [None])[0],
+                routine_ref=query.get("routine_ref", [None])[0],
+                tenant_id=query.get("tenant_id", [None])[0],
+                project_id=query.get("project_id", [None])[0],
+                log_path=config.routine_reviews_log,
+            )
+            if _query_bool(query, "resource"):
+                return _ok(
+                    {
+                        "routine_reviews": [
+                            routine_review_resource(review).as_dict() for review in reviews
+                        ]
+                    }
+                )
+            return _ok({"routine_reviews": [review.as_dict() for review in reviews]})
+
         if method == "GET" and route == "/kernel/routine-reviews/due":
             due = list_due_reviews(log_path=config.routine_reviews_log)
+            if _query_bool(query, "resource"):
+                return _ok(
+                    {
+                        "due_reviews": [
+                            routine_review_resource(review).as_dict() for review in due
+                        ]
+                    }
+                )
             return _ok({"due_reviews": [review.as_dict() for review in due]})
 
         if method == "GET" and route == "/kernel/routine-reviews/summary":
@@ -1494,10 +1877,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--actor-identity-log", type=Path, default=DEFAULT_ACTOR_IDENTITY_LOG)
     parser.add_argument("--actor-membership-log", type=Path, default=DEFAULT_ACTOR_MEMBERSHIP_LOG)
     parser.add_argument("--leases-log", type=Path, default=DEFAULT_LEASES_LOG)
+    parser.add_argument("--project-root", type=Path, default=REPO_ROOT)
+    parser.add_argument("--evidence-gaps-log", type=Path, default=DEFAULT_EVIDENCE_GAPS_LOG)
+    parser.add_argument(
+        "--forecast-market-summary",
+        type=Path,
+        default=DEFAULT_FORECAST_MARKET_ROOT / "global_health.json",
+    )
+    parser.add_argument("--action-impact-summary", type=Path, default=DEFAULT_ACTION_IMPACT_SUMMARY)
     parser.add_argument("--work-items-log", type=Path, default=DEFAULT_WORK_ITEMS_LOG)
     parser.add_argument("--operating-units-log", type=Path, default=DEFAULT_OPERATING_UNITS_LOG)
     parser.add_argument("--outcome-links-log", type=Path, default=DEFAULT_OUTCOME_LINKS_LOG)
     parser.add_argument("--routine-reviews-log", type=Path, default=DEFAULT_ROUTINE_REVIEWS_LOG)
+    parser.add_argument("--learning-events-log", type=Path, default=DEFAULT_LEARNING_EVENTS_LOG)
+    parser.add_argument(
+        "--learning-encounters-log", type=Path, default=DEFAULT_LEARNING_ENCOUNTERS_LOG
+    )
     parser.add_argument(
         "--resource-allocation-log", type=Path, default=DEFAULT_RESOURCE_ALLOCATION_LOG
     )
@@ -1579,13 +1974,19 @@ def main(argv: list[str] | None = None) -> int:
             actor_identity_log=args.actor_identity_log,
             actor_membership_log=args.actor_membership_log,
             leases_log=args.leases_log,
+            evidence_gaps_log=args.evidence_gaps_log,
+            forecast_market_summary=args.forecast_market_summary,
+            action_impact_summary=args.action_impact_summary,
             work_items_log=args.work_items_log,
             operating_units_log=args.operating_units_log,
             outcome_links_log=args.outcome_links_log,
             routine_reviews_log=args.routine_reviews_log,
+            learning_events_log=args.learning_events_log,
+            learning_encounters_log=args.learning_encounters_log,
             resource_allocation_log=args.resource_allocation_log,
             residual_rights_log=args.residual_rights_log,
             residual_decisions_log=args.residual_decisions_log,
+            project_root=args.project_root,
             org_dir=args.org_dir,
             gates_dir=args.gates_dir,
             gates_resolved_dir=args.gates_resolved_dir,

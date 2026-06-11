@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -94,6 +95,34 @@ def test_verify_install_catches_a_broken_role(tmp_path):
     assert any("principal.yaml" in issue for issue in issues)
 
 
+def test_verify_install_catches_drifted_adapter_policy(tmp_path):
+    manifest = load_manifest(STARTER / "package.yaml")
+    receipt = install(manifest, STARTER, tmp_path)
+    conformance_dir = tmp_path / "adapter_conformance"
+    conformance_dir.mkdir()
+    (conformance_dir / "ghost.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "cognitive-firm-adapter-conformance/v1",
+                "adapter_id": "ghost-adapter",
+                "protocol": "runtime_event",
+                "fixture_command": "make ghost-adapter-fixture",
+                "required_checks": [
+                    {
+                        "check_id": "started_event_idempotent",
+                        "evidence": "tests/test_runtime_adapters.py",
+                    }
+                ],
+            }
+        )
+    )
+
+    issues = verify_install(receipt, tmp_path)
+
+    assert any("adapter_conformance/ghost.json" in issue for issue in issues)
+    assert any("no matching adapter manifest" in issue for issue in issues)
+
+
 def test_load_receipt_roundtrip(tmp_path):
     manifest = load_manifest(STARTER / "package.yaml")
     install(manifest, STARTER, tmp_path)
@@ -111,6 +140,137 @@ def test_cli_list_install_and_verify(tmp_path, capsys):
     assert (target / "roles" / "principal.yaml").is_file()
 
     assert distro_main(["verify", "starter-firm", "--into", str(target)]) == 0
+
+
+def test_cli_lint_validates_adapter_manifest_and_conformance_config(tmp_path, capsys):
+    pkg = tmp_path / "adapter-pkg"
+    (pkg / "files" / "adapters").mkdir(parents=True)
+    (pkg / "files" / "adapter_conformance").mkdir(parents=True)
+    (pkg / "package.yaml").write_text(
+        "schema_version: 1\n"
+        "name: adapter-pkg\n"
+        "version: 0.1.0\n"
+        "kind: overlay\n"
+        "description: adapter package with invalid declarations\n"
+        "components:\n"
+        "  - source: adapters\n"
+        "    dest: adapters\n"
+        "  - source: adapter_conformance\n"
+        "    dest: adapter_conformance\n"
+    )
+    (pkg / "files" / "adapters" / "bad.yaml").write_text(
+        "schema_version: cognitive-firm-adapter-manifest/v1\n"
+        "adapter_id: bad-adapter\n"
+        "family: runtime\n"
+        "protocol: runtime_event\n"
+        "description: too short\n"
+        "executable:\n"
+        "  kind: python_package\n"
+        "  ref: bad_pkg\n"
+        "conformance_checks:\n"
+        "  - started_event_idempotent\n"
+    )
+    (pkg / "files" / "adapter_conformance" / "bad.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "cognitive-firm-adapter-conformance/v1",
+                "adapter_id": "other-adapter",
+                "protocol": "runtime_event",
+                "fixture_command": "make adapter-fixture",
+                "required_checks": [
+                    {
+                        "check_id": "started_event_idempotent",
+                        "evidence": "tests/test_runtime_adapters.py",
+                    }
+                ],
+            }
+        )
+    )
+
+    assert distro_main(["lint", str(pkg)]) == 1
+    err = capsys.readouterr().err
+
+    assert "files/adapters/bad.yaml" in err
+    assert "description is too short" in err
+    assert "files/adapter_conformance/bad.json" in err
+    assert "no matching adapter manifest" in err
+
+
+def test_cli_lint_accepts_langgraph_adapter_policy_package(capsys):
+    assert distro_main(["lint", str(REGISTRY / "langgraph-runtime-adapter")]) == 0
+    out = capsys.readouterr().out
+    assert "lint ok: langgraph-runtime-adapter" in out
+
+
+def test_cli_lint_validates_formal_verification_trust_policy(tmp_path, capsys):
+    pkg = tmp_path / "formal-provider-pkg"
+    (pkg / "files" / "formal_verification").mkdir(parents=True)
+    (pkg / "package.yaml").write_text(
+        "schema_version: 1\n"
+        "name: formal-provider-pkg\n"
+        "version: 0.1.0\n"
+        "kind: overlay\n"
+        "description: formal provider package with bad trust policy\n"
+        "components:\n"
+        "  - source: formal_verification\n"
+        "    dest: formal_verification\n"
+    )
+    (pkg / "files" / "formal_verification" / "trusted_providers.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "formal-verification-trust/v1",
+                "trusted_providers": [
+                    {
+                        "provider": "leanmill",
+                        "requires_payload_signature": True,
+                    }
+                ],
+            }
+        )
+    )
+
+    assert distro_main(["lint", str(pkg)]) == 1
+    err = capsys.readouterr().err
+
+    assert "files/formal_verification/trusted_providers.json" in err
+    assert "requires payload signatures" in err
+
+
+def test_install_refuses_bad_formal_verification_trust_policy(tmp_path):
+    starter_manifest = load_manifest(STARTER / "package.yaml")
+    install(starter_manifest, STARTER, tmp_path)
+
+    pkg = tmp_path / "bad-formal-provider"
+    (pkg / "files" / "formal_verification").mkdir(parents=True)
+    (pkg / "package.yaml").write_text(
+        "schema_version: 1\n"
+        "name: bad-formal-provider\n"
+        "version: 0.1.0\n"
+        "kind: overlay\n"
+        "description: bad formal provider package\n"
+        "components:\n"
+        "  - source: formal_verification\n"
+        "    dest: formal_verification\n"
+    )
+    (pkg / "files" / "formal_verification" / "trusted_providers.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "formal-verification-trust/v1",
+                "trusted_providers": [
+                    {
+                        "provider": "leanmill",
+                        "requires_payload_signature": True,
+                    }
+                ],
+            }
+        )
+    )
+    manifest = load_manifest(pkg / "package.yaml")
+
+    with pytest.raises(InstallError, match="requires payload signatures"):
+        install(manifest, pkg, tmp_path)
+
+    assert not (tmp_path / "formal_verification" / "trusted_providers.json").exists()
 
 
 # --- G1: kernel-version gate -------------------------------------------------
@@ -160,6 +320,68 @@ def test_boot_check_catches_missing_authority(tmp_path):
         )
     )
     assert any("authority" in issue for issue in boot_check(tmp_path))
+
+
+def test_boot_check_accepts_multiple_authorities_when_domains_scope_them(tmp_path):
+    manifest = load_manifest(STARTER / "package.yaml")
+    install(manifest, STARTER, tmp_path)
+    principal = tmp_path / "roles" / "principal.yaml"
+    legal = tmp_path / "roles" / "legal_authority.yaml"
+    legal.write_text(
+        principal.read_text().replace("role_id: principal", "role_id: legal_authority")
+    )
+    domains = tmp_path / "authority_domains" / "authority_domains.json"
+    domains.parent.mkdir()
+    domains.write_text(
+        json.dumps(
+            {
+                "authority_domains": [
+                    {
+                        "domain_id": "global",
+                        "authority_role_id": "role.principal",
+                        "scope_kind": "global",
+                        "scope_id": "*",
+                    },
+                    {
+                        "domain_id": "tenant_a_legal",
+                        "authority_role_id": "role.legal_authority",
+                        "scope_kind": "tenant",
+                        "scope_id": "tenant-a",
+                    },
+                ]
+            }
+        )
+    )
+
+    assert boot_check(tmp_path) == []
+
+
+def test_boot_check_rejects_unscoped_extra_authority(tmp_path):
+    manifest = load_manifest(STARTER / "package.yaml")
+    install(manifest, STARTER, tmp_path)
+    principal = tmp_path / "roles" / "principal.yaml"
+    legal = tmp_path / "roles" / "legal_authority.yaml"
+    legal.write_text(
+        principal.read_text().replace("role_id: principal", "role_id: legal_authority")
+    )
+    domains = tmp_path / "authority_domains" / "authority_domains.json"
+    domains.parent.mkdir()
+    domains.write_text(
+        json.dumps(
+            {
+                "authority_domains": [
+                    {
+                        "domain_id": "global",
+                        "authority_role_id": "role.principal",
+                        "scope_kind": "global",
+                        "scope_id": "*",
+                    }
+                ]
+            }
+        )
+    )
+
+    assert any("missing authority-domain records" in issue for issue in boot_check(tmp_path))
 
 
 # --- G11 / R1: transactional, git-backed install -----------------------------

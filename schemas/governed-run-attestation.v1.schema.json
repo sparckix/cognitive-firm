@@ -1,0 +1,279 @@
+{
+  "$id": "https://example.com/cognitive-firm/schemas/governed-run-attestation.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "accountability_cases": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "work_items": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "action_attestations": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "approval_events": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "evidence_hashes": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "algorithm": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "digest": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "ref": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "source",
+          "ref",
+          "algorithm",
+          "digest"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "authority_snapshot": {
+      "additionalProperties": true,
+      "properties": {
+        "owner_role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner_role",
+        "status"
+      ],
+      "type": "object"
+    },
+    "bundle_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "bundle_id": {
+      "pattern": "^gab_.+",
+      "type": "string"
+    },
+    "bundle_version": {
+      "const": "governed-run-attestation/v1",
+      "type": "string"
+    },
+    "caveats": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "created_at_utc": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "formal_verifications": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "human_work_sessions": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "leases": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "observability_refs": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "kind": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "ref": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "source",
+          "ref"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "outcome_links": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "run": {
+      "additionalProperties": true,
+      "properties": {
+        "checkpoints": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "event_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "payload_ref": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "side_effect_key": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "step_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "summary": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ts": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "objective": {
+          "type": "string"
+        },
+        "owner_role": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "paused",
+            "completed",
+            "failed",
+            "cancelled"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "owner_role",
+        "objective",
+        "state",
+        "checkpoints"
+      ],
+      "type": "object"
+    },
+    "verdict": {
+      "enum": [
+        "passed",
+        "incomplete",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "verifier": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "bundle_id",
+    "bundle_version",
+    "created_at_utc",
+    "verifier",
+    "run",
+    "action_attestations",
+    "formal_verifications",
+    "human_work_sessions",
+    "outcome_links",
+    "accountability_cases",
+    "work_items",
+    "leases",
+    "approval_events",
+    "evidence_hashes",
+    "observability_refs",
+    "authority_snapshot",
+    "verdict",
+    "caveats",
+    "bundle_digest"
+  ],
+  "title": "Governed Run Attestation Bundle v1",
+  "type": "object"
+}

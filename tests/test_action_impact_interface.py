@@ -8,7 +8,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from cognitive_firm.orchestration.action_impact import (  # noqa: E402
+    append_policy_evaluation,
+    append_policy_promotion_packet,
+    build_policy_promotion_packet,
+    context_signature,
+    evaluate_offline_policy_candidate,
+    list_policy_evaluations,
+    list_policy_promotion_packets,
     load_summary_from_json,
+    main as action_impact_main,
     summary_from_mapping,
 )
 
@@ -76,6 +84,7 @@ def test_normalizes_action_impact_summary():
     assert first.decision_changed_bool is True
     assert first.artifact_refs == ["contracts/c1"]
     assert first.negative_externality_tags == ["latency"]
+    assert first.reward == 0.4
 
 
 def test_flags_local_negative_externalities():
@@ -148,3 +157,290 @@ def test_load_summary_from_json(tmp_path: Path):
     path.write_text(json.dumps({"n_total": 3}), encoding="utf-8")
     summary = load_summary_from_json(path)
     assert summary.n_total == 3
+
+
+def test_evaluates_promotable_offline_policy_candidate():
+    rows = []
+    for idx in range(30):
+        region = "enterprise"
+        arm = "senior_review" if idx % 2 == 0 else "fast_lane"
+        reward = 0.9 if arm == "senior_review" else 0.6
+        rows.append(
+            {
+                "action_id": f"a{idx}",
+                "action_ref": f"actions/{idx}",
+                "actor": "role.support_router",
+                "objective_metric": "resolution_quality",
+                "status": "measured",
+                "context_features": {"segment": region},
+                "action_arm": arm,
+                "logging_policy_probability": 0.5,
+                "counterfactual_action": "other",
+                "reward": reward,
+                "guardrail_metrics": {"sla_hours": 4.0},
+            }
+        )
+    summary = summary_from_mapping({"records": rows})
+    enterprise_sig = context_signature({"segment": "enterprise"}, ["segment"])
+    assert enterprise_sig is not None
+    report = evaluate_offline_policy_candidate(
+        summary.records,
+        candidate_policy_id="policy.support.enterprise-review",
+        candidate_policy_ref="policy://support/enterprise-review",
+        candidate_action_by_context={enterprise_sig: "senior_review"},
+        context_keys=["segment"],
+        objective_metric="resolution_quality",
+        min_matched=10,
+        min_support_coverage=0.4,
+    )
+
+    assert report.status == "promotable"
+    assert report.promotion_allowed is True
+    assert report.n_logged == 30
+    assert report.n_eligible == 30
+    assert report.n_matched == 15
+    assert report.support_coverage == 0.5
+    assert report.delta_mean_reward is not None
+    assert report.delta_mean_reward > 0
+    assert report.has_logging_propensities is True
+    assert report.has_counterfactuals is True
+    assert report.has_guardrail_metrics is True
+
+
+def test_blocks_policy_candidate_with_thin_support_and_externalities():
+    rows = [
+        {
+            "action_id": "a1",
+            "action_ref": "actions/1",
+            "actor": "role.router",
+            "objective_metric": "throughput",
+            "status": "measured",
+            "context_features": {"queue": "sales"},
+            "action_arm": "auto_send",
+            "reward": 1.0,
+            "negative_externality_tags": ["trust"],
+        },
+        {
+            "action_id": "a2",
+            "action_ref": "actions/2",
+            "actor": "role.router",
+            "objective_metric": "throughput",
+            "status": "measured",
+            "context_features": {"queue": "support"},
+            "action_arm": "manual_review",
+            "reward": 0.8,
+        },
+    ]
+    summary = summary_from_mapping({"records": rows})
+    sales_sig = context_signature({"queue": "sales"}, ["queue"])
+    assert sales_sig is not None
+    report = evaluate_offline_policy_candidate(
+        summary.records,
+        candidate_policy_id="policy.fast-sales",
+        candidate_action_by_context={sales_sig: "auto_send"},
+        context_keys=["queue"],
+        objective_metric="throughput",
+        min_matched=5,
+        min_support_coverage=0.5,
+    )
+
+    assert report.status == "blocked"
+    assert report.promotion_allowed is False
+    assert report.negative_externality_rate == 1.0
+    assert any("matched rows below threshold" in blocker for blocker in report.promotion_blockers)
+    assert any("negative externality rate" in blocker for blocker in report.promotion_blockers)
+
+
+def test_records_policy_evaluation_reports(tmp_path: Path):
+    log_path = tmp_path / "policy_evaluations.jsonl"
+    summary = summary_from_mapping(
+        {
+            "records": [
+                {
+                    "action_id": "a1",
+                    "action_ref": "actions/1",
+                    "actor": "role.router",
+                    "objective_metric": "quality",
+                    "status": "measured",
+                    "context_features": {"tier": "gold"},
+                    "action_arm": "review",
+                    "reward": 1.0,
+                }
+            ]
+        }
+    )
+    sig = context_signature({"tier": "gold"}, ["tier"])
+    assert sig is not None
+    report = evaluate_offline_policy_candidate(
+        summary.records,
+        candidate_policy_id="policy.gold-review",
+        candidate_action_by_context={sig: "review"},
+        context_keys=["tier"],
+        objective_metric="quality",
+        min_matched=1,
+        min_support_coverage=1.0,
+    )
+
+    append_policy_evaluation(report, log_path=log_path)
+    loaded = list_policy_evaluations(log_path=log_path)
+    assert [row.evaluation_id for row in loaded] == [report.evaluation_id]
+
+
+def test_builds_policy_promotion_packet_without_applying_policy():
+    rows = []
+    for idx in range(24):
+        rows.append(
+            {
+                "action_id": f"a{idx}",
+                "action_ref": f"actions/{idx}",
+                "actor": "role.router",
+                "objective_metric": "resolution_quality",
+                "status": "measured",
+                "context_features": {"segment": "enterprise"},
+                "action_arm": "senior_review" if idx % 2 == 0 else "fast_lane",
+                "reward": 1.0 if idx % 2 == 0 else 0.5,
+                "logging_policy_probability": 0.5,
+                "counterfactual_action": "other",
+                "guardrail_metrics": {"sla_hours": 3.0},
+            }
+        )
+    summary = summary_from_mapping({"records": rows})
+    sig = context_signature({"segment": "enterprise"}, ["segment"])
+    assert sig is not None
+    report = evaluate_offline_policy_candidate(
+        summary.records,
+        candidate_policy_id="policy.enterprise-review",
+        candidate_policy_ref="policy://support/enterprise-review",
+        candidate_action_by_context={sig: "senior_review"},
+        context_keys=["segment"],
+        objective_metric="resolution_quality",
+        min_matched=10,
+        min_support_coverage=0.4,
+        evidence_refs=["action-impact:fixture"],
+    )
+
+    packet = build_policy_promotion_packet(
+        report,
+        proposed_by="role.governance_reviewer",
+        authority_diff_ref="authority-diff://policy-enterprise-review",
+        formal_verification_refs=["formal-verification:fver_policy_boundary"],
+        learning_event_refs=["learning-event:learn_route_review"],
+    )
+
+    assert packet.status == "review_ready"
+    assert packet.review_blockers == []
+    assert packet.governance_change_candidate["change_kind"] == "route_policy_change"
+    assert packet.governance_change_candidate["target_ref"] == "policy://support/enterprise-review"
+    assert "authority-diff://policy-enterprise-review" in packet.evidence_refs
+    assert packet.guardrail_summary["has_guardrail_metrics"] is True
+    assert packet.evaluation_report.evaluation_id == report.evaluation_id
+
+
+def test_policy_promotion_packet_is_advisory_without_authority_diff(tmp_path: Path):
+    summary = summary_from_mapping(
+        {
+            "records": [
+                {
+                    "action_id": f"a{idx}",
+                    "action_ref": f"actions/{idx}",
+                    "actor": "role.router",
+                    "objective_metric": "quality",
+                    "status": "measured",
+                    "context_features": {"tier": "gold"},
+                    "action_arm": "review" if idx % 2 == 0 else "fast_lane",
+                    "reward": 1.0 if idx % 2 == 0 else 0.5,
+                    "logging_policy_probability": 0.5,
+                    "counterfactual_action": "other",
+                    "guardrail_metrics": {"sla_hours": 2.0},
+                }
+                for idx in range(6)
+            ]
+        }
+    )
+    sig = context_signature({"tier": "gold"}, ["tier"])
+    assert sig is not None
+    report = evaluate_offline_policy_candidate(
+        summary.records,
+        candidate_policy_id="policy.gold-review",
+        candidate_action_by_context={sig: "review"},
+        context_keys=["tier"],
+        objective_metric="quality",
+        min_matched=3,
+        min_support_coverage=0.5,
+    )
+    packet = build_policy_promotion_packet(report, proposed_by="role.reviewer")
+    log_path = tmp_path / "policy_promotion_packets.jsonl"
+
+    append_policy_promotion_packet(packet, log_path=log_path)
+    loaded = list_policy_promotion_packets(log_path=log_path, candidate_policy_id="policy.gold-review")
+
+    assert packet.status == "advisory"
+    assert "authority diff not attached" in packet.review_blockers
+    assert loaded[0].packet_id == packet.packet_id
+    assert loaded[0].evaluation_report.evaluation_id == report.evaluation_id
+
+
+def test_cli_builds_and_records_policy_promotion_packet(tmp_path: Path, capsys):
+    evaluations_log = tmp_path / "policy_evaluations.jsonl"
+    packets_log = tmp_path / "policy_promotion_packets.jsonl"
+    summary = summary_from_mapping(
+        {
+            "records": [
+                {
+                    "action_id": f"a{idx}",
+                    "action_ref": f"actions/{idx}",
+                    "actor": "role.router",
+                    "objective_metric": "quality",
+                    "status": "measured",
+                    "context_features": {"tier": "gold"},
+                    "action_arm": "review" if idx % 2 == 0 else "fast_lane",
+                    "reward": 1.0 if idx % 2 == 0 else 0.5,
+                    "logging_policy_probability": 0.5,
+                    "counterfactual_action": "other",
+                    "guardrail_metrics": {"sla_hours": 2.0},
+                }
+                for idx in range(8)
+            ]
+        }
+    )
+    sig = context_signature({"tier": "gold"}, ["tier"])
+    assert sig is not None
+    report = evaluate_offline_policy_candidate(
+        summary.records,
+        candidate_policy_id="policy.gold-review",
+        candidate_policy_ref="policy://support/gold-review",
+        candidate_action_by_context={sig: "review"},
+        context_keys=["tier"],
+        objective_metric="quality",
+        min_matched=4,
+        min_support_coverage=0.5,
+    )
+    append_policy_evaluation(report, log_path=evaluations_log)
+
+    rc = action_impact_main(
+        [
+            "build-promotion-packet",
+            "--evaluation-id",
+            report.evaluation_id,
+            "--policy-evaluations-log",
+            str(evaluations_log),
+            "--proposed-by",
+            "role.governance_reviewer",
+            "--authority-diff-ref",
+            "authority-diff://gold-review",
+            "--formal-verification-ref",
+            "formal-verification:fver_gold_review",
+            "--learning-event-ref",
+            "learning-event:learn_gold_review",
+            "--record",
+            "--policy-promotion-packets-log",
+            str(packets_log),
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    loaded = list_policy_promotion_packets(log_path=packets_log)
+
+    assert rc == 0
+    assert payload["status"] == "review_ready"
+    assert payload["governance_change_candidate"]["target_ref"] == "policy://support/gold-review"
+    assert loaded[0].packet_id == payload["packet_id"]

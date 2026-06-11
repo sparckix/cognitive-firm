@@ -6,9 +6,12 @@ Start with:
 - [First 30 Minutes](first-30-minutes.md)
 - [Abstraction Map](abstraction-map.md)
 - [Resource And Event Catalog](resource-event-catalog.md)
+- [Capability Map](capability-map.md)
 - [Blueprints](blueprints/README.md)
 - [Kernel Invariants](kernel-invariants.md)
 - [Recursive Organization](recursive-organization.md)
+- [System Positioning](system-positioning.md)
+- [Testing Strategy](testing-strategy.md)
 - [Roadmap](ROADMAP.md)
 - [Field Validation Pilot](field-validation-pilot.md)
 - [Field Pilot Selector](field-pilot-selector.md)
@@ -16,6 +19,7 @@ Start with:
 - [Reader Checklist](reader-checklist.md)
 - [Adopting cognitive-firm](adopting-cognitive-firm.md)
 - [Human-Agent Work](human-agent-work.md)
+- [Loop Engineering](protocols/loop-engineering.md)
 - [Accountability Speed Envelope](accountability-speed-envelope.md)
 - [Agent prompts](agent-prompts.md)
 - [Organizational Learning Loop](organizational_learning_loop.md)
@@ -23,6 +27,7 @@ Start with:
 - [Adapter Conformance](protocols/adapter-conformance.md)
 - [Inbound Events](protocols/inbound-events.md)
 - [A2H — Agent-to-Human Work Coordination](protocols/a2h.md)
+- [Worker Taxonomy](protocols/worker-taxonomy.md)
 - [Actor Identity](protocols/actor-identity.md)
 - [Actor Membership](protocols/actor-membership.md)
 - [Identity Provider Adapters](protocols/identity-providers.md)
@@ -34,6 +39,8 @@ Start with:
 - [Learning Transition Compiler](protocols/learning-transition-compiler.md)
 - [Intelligence Sources](protocols/intelligence-sources.md)
 - [Approved Learning Events](protocols/learning-events.md)
+- [Governed Run Attestation Bundle](protocols/governed-run-attestation.md)
+- [Formal Verification](protocols/formal-verification.md)
 - [EU AI Act Deploy Gate](protocols/eu-ai-act-deploy-gate.md)
 - [Kernel Service](protocols/kernel-service.md)
 - [Kernel Event Envelope](protocols/kernel-events.md)
@@ -51,6 +58,10 @@ Start with:
 - [Field Validation Pilot Example](examples/field-validation-pilot-example.md)
 - [Learning Event Replay Example](examples/learning-event-replay.md)
 - [LangGraph Runtime Adapter Example](examples/langgraph-runtime-adapter.md)
+- [Governance Failure Benchmark](examples/governance-failure-benchmark.md)
+- [Decision-Log Replay Demo](examples/decision-log-replay-demo.md)
+- [Field-Pilot Action-Impact Demo](examples/field-pilot-action-impact-demo.md)
+- [Formal Provider Bundle Demo](examples/formal-provider-bundle-demo.md)
 - [App-Service Integration Example](examples/app-service-integration-example.md)
 - [Learning Loop Demo](examples/learning-loop-demo.md)
 - [A2H Workflow Demo](examples/a2h-workflow-demo.md)
@@ -62,9 +73,9 @@ Start with:
 **Sub-folders**
 
 - [`blueprints/`](blueprints/) - 2 file(s)
-- [`examples/`](examples/) - 10 file(s)
-- [`protocols/`](protocols/) - 38 file(s)
-- [`templates/`](templates/) - 1 file(s)
+- [`examples/`](examples/) - 12 file(s)
+- [`protocols/`](protocols/) - 50 file(s)
+- [`templates/`](templates/) - 2 file(s)
 
 **Documents**
 
@@ -74,9 +85,12 @@ Start with:
 - [accountability-speed-envelope.md](accountability-speed-envelope.md)
 - [adopting-cognitive-firm.md](adopting-cognitive-firm.md)
 - [agent-prompts.md](agent-prompts.md)
+- [capability-map.md](capability-map.md)
+- [community-packages.md](community-packages.md)
 - [field-pilot-selector.md](field-pilot-selector.md)
 - [field-validation-pilot.md](field-validation-pilot.md)
 - [first-30-minutes.md](first-30-minutes.md)
+- [getting-started.md](getting-started.md)
 - [human-agent-work.md](human-agent-work.md)
 - [kernel-invariants.md](kernel-invariants.md)
 - [organizational_learning_loop.md](organizational_learning_loop.md)
@@ -84,8 +98,9 @@ Start with:
 - [recursive-organization.md](recursive-organization.md)
 - [resource-event-catalog.md](resource-event-catalog.md)
 - [reverse_transfer_to_human_org_design.md](reverse_transfer_to_human_org_design.md)
+- [system-positioning.md](system-positioning.md)
 - [t1_t2_upgrade_matrix.md](t1_t2_upgrade_matrix.md)
+- [testing-strategy.md](testing-strategy.md)
 - [theory.md](theory.md)
 
-<sub>4 sub-folder(s), 18 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
-
+<sub>4 sub-folder(s), 23 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>

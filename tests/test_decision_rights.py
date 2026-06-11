@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -16,10 +17,14 @@ from cognitive_firm.orchestration.decision_rights import (  # noqa: E402
     get_residual_right_holder,
     list_residual_decisions,
     list_residual_right_assignments,
+    main as decision_rights_main,
     record_residual_decision,
+    residual_decision_resource,
+    residual_right_assignment_resource,
     review_residual_decision,
     summarize_decision_rights,
 )
+from cognitive_firm.orchestration.resource_envelope import validate_resource  # noqa: E402
 
 
 class _Logs:
@@ -102,6 +107,44 @@ def test_reassignment_supersedes_the_prior_assignment(logs: _Logs):
     assert [a.assignment_id for a in active] == [second.assignment_id]
 
 
+def test_residual_right_assignment_projects_to_resource_envelope(logs: _Logs):
+    assignment = _assign(
+        logs,
+        holder_actor="actor.lead_1",
+        tenant_id="tenant-a",
+        project_id="project-a",
+        metadata={"source": "charter"},
+    )
+
+    payload = residual_right_assignment_resource(assignment).as_dict()
+
+    assert validate_resource(payload) == []
+    assert payload["kind"] == "ResidualRightAssignment"
+    assert payload["metadata"]["name"] == assignment.assignment_id
+    assert payload["metadata"]["tenant_id"] == "tenant-a"
+    assert payload["metadata"]["project_id"] == "project-a"
+    assert payload["metadata"]["labels"]["scope_kind"] == "project"
+    assert payload["metadata"]["labels"]["holder_role"] == "role.project_lead"
+    assert payload["metadata"]["annotations"]["source"] == "charter"
+    assert payload["spec"]["basis"] == "named in the project charter as residual decider"
+    assert payload["status"]["status"] == "active"
+    assert {"rel": "scope", "href": "project:proj.atlas"} in payload["links"]
+    assert {"rel": "holder_actor", "href": "actor.lead_1"} in payload["links"]
+
+
+def test_residual_right_assignment_resource_reflects_superseded_state(logs: _Logs):
+    first = _assign(logs, holder_role="role.project_lead")
+    _assign(logs, holder_role="role.deputy_lead")
+
+    superseded = get_residual_right_assignment(first.assignment_id, log_path=logs.assignments)
+    assert superseded is not None
+
+    payload = residual_right_assignment_resource(superseded).as_dict()
+
+    assert payload["metadata"]["labels"]["status"] == "superseded"
+    assert payload["status"]["status"] == "superseded"
+
+
 def test_record_decision_under_the_right_holder_is_authorized(logs: _Logs):
     _assign(logs)
     decision = _record(logs)
@@ -109,6 +152,38 @@ def test_record_decision_under_the_right_holder_is_authorized(logs: _Logs):
     assert decision.status == "recorded"
     assert decision.unauthorized is False
     assert decision.assignment_id is not None
+
+
+def test_residual_decision_projects_to_resource_envelope(logs: _Logs):
+    assignment = _assign(logs)
+    decision = _record(
+        logs,
+        tenant_id="tenant-a",
+        project_id="project-a",
+        metadata={"source": "operator_note"},
+    )
+
+    payload = residual_decision_resource(decision).as_dict()
+
+    assert validate_resource(payload) == []
+    assert payload["kind"] == "ResidualDecision"
+    assert payload["metadata"]["name"] == decision.decision_id
+    assert payload["metadata"]["tenant_id"] == "tenant-a"
+    assert payload["metadata"]["project_id"] == "project-a"
+    assert payload["metadata"]["labels"]["scope_kind"] == "project"
+    assert payload["metadata"]["labels"]["deciding_role"] == "role.project_lead"
+    assert payload["metadata"]["labels"]["unauthorized"] == "false"
+    assert payload["metadata"]["annotations"]["source"] == "operator_note"
+    assert payload["spec"]["decision_summary"] == (
+        "paused the data import while the schema was ambiguous"
+    )
+    assert payload["spec"]["assignment_id"] == assignment.assignment_id
+    assert payload["status"]["status"] == "recorded"
+    assert payload["status"]["unauthorized"] is False
+    assert {
+        "rel": "residual_right_assignment",
+        "href": f"residual_right_assignment:{assignment.assignment_id}",
+    } in payload["links"]
 
 
 def test_record_decision_under_the_wrong_role_is_flagged_but_recorded(logs: _Logs):
@@ -156,6 +231,28 @@ def test_review_outcomes_including_promote_to_mandate_clause(logs: _Logs):
     )
     assert promoted.review_outcome == "promote_to_mandate_clause"
     assert promoted.review_notes
+
+
+def test_residual_decision_resource_reflects_review_outcome(logs: _Logs):
+    _assign(logs)
+    decision = _record(logs, deciding_role="role.stranger")
+    reviewed = review_residual_decision(
+        decision.decision_id,
+        reviewed_by="actor.governance",
+        review_outcome="corrected",
+        review_notes="role did not hold the residual right",
+        log_path=logs.decisions,
+        kernel_events_log=logs.events,
+    )
+
+    payload = residual_decision_resource(reviewed).as_dict()
+
+    assert payload["metadata"]["labels"]["status"] == "reviewed"
+    assert payload["metadata"]["labels"]["unauthorized"] == "true"
+    assert payload["metadata"]["labels"]["review_outcome"] == "corrected"
+    assert payload["status"]["reviewed_by"] == "actor.governance"
+    assert payload["status"]["review_notes"] == "role did not hold the residual right"
+    assert {"rel": "reviewed_by", "href": "actor.governance"} in payload["links"]
 
 
 def test_review_rejects_unknown_outcome(logs: _Logs):
@@ -277,3 +374,38 @@ def test_transitions_emit_kernel_events(logs: _Logs):
         )
     ]
     assert decision_verbs == ["residual_decision.recorded", "residual_decision.reviewed"]
+
+
+def test_cli_can_render_residual_right_assignment_resources(
+    logs: _Logs,
+    capsys: pytest.CaptureFixture[str],
+):
+    assignment = _assign(logs)
+
+    rc = decision_rights_main(
+        ["list-assignments", "--log-path", str(logs.assignments), "--resource"]
+    )
+
+    assert rc == 0
+    payloads = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [payload["kind"] for payload in payloads] == ["ResidualRightAssignment"]
+    assert payloads[0]["metadata"]["name"] == assignment.assignment_id
+    assert payloads[0]["spec"]["holder_role"] == "role.project_lead"
+
+
+def test_cli_can_render_residual_decision_resources(
+    logs: _Logs,
+    capsys: pytest.CaptureFixture[str],
+):
+    _assign(logs)
+    decision = _record(logs)
+
+    rc = decision_rights_main(
+        ["list-decisions", "--log-path", str(logs.decisions), "--resource"]
+    )
+
+    assert rc == 0
+    payloads = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [payload["kind"] for payload in payloads] == ["ResidualDecision"]
+    assert payloads[0]["metadata"]["name"] == decision.decision_id
+    assert payloads[0]["spec"]["deciding_role"] == "role.project_lead"
