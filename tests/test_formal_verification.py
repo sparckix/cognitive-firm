@@ -24,6 +24,7 @@ from cognitive_firm.orchestration.formal_verification import (  # noqa: E402
     provider_payload_from_dict,
     sign_provider_payload,
     validate_formal_verification_trust_policy_file,
+    validate_provider_payload_contract,
 )
 
 
@@ -207,6 +208,90 @@ def test_signed_provider_payload_verifies_against_installed_policy(tmp_path: Pat
 
     assert record.metadata["provider_payload_signature_verified"] is True
     assert record.metadata["provider_payload_digest"].startswith("sha256:")
+
+
+def test_validate_provider_payload_contract_is_no_write_schema_check(tmp_path: Path):
+    formal_log = tmp_path / "formal_verifications.jsonl"
+    payload = {
+        "schema_version": FORMAL_VERIFICATION_PROVIDER_SCHEMA_VERSION,
+        "provider": "leanmill",
+        "formal_system": "lean",
+        "verifier_ref": "leanmill:certify-demo@abc123",
+        "property_class": "workflow_safety",
+        "subject_ref": "workflow://release-checklist",
+        "subject_digest": "sha256:workflow",
+        "claim_ref": "claim://release-requires-review",
+        "certificate_ref": "leanmill://certificates/release_requires_review",
+        "certificate_digest": "sha256:certificate",
+        "verdict": "verified",
+        "verification_summary": "LeanMill emitted a checked workflow invariant.",
+        "metadata": {"provider_payload_signature": "ed25519:signature-not-checked"},
+    }
+
+    result = validate_provider_payload_contract(payload)
+
+    assert result["ok"] is True
+    assert result["provider"] == "leanmill"
+    assert result["trusted_provider"] is False
+    assert result["signature_status"] == "present_not_verified_without_trust_policy"
+    assert result["provider_payload_digest"].startswith("sha256:")
+    assert not formal_log.exists()
+
+
+def test_validate_provider_payload_contract_checks_trust_policy_requirements(
+    tmp_path: Path,
+):
+    keypair = generate_keypair()
+    authority_root = tmp_path / "org"
+    _write_trusted_provider_policy(
+        authority_root,
+        provider="leanmill",
+        public_key_pem=keypair.public_pem,
+    )
+    payload = {
+        "schema_version": FORMAL_VERIFICATION_PROVIDER_SCHEMA_VERSION,
+        "provider": "leanmill",
+        "formal_system": "lean",
+        "verifier_ref": "leanmill:certify-demo@abc123",
+        "property_class": "workflow_safety",
+        "subject_ref": "workflow://release-checklist",
+        "subject_digest": "sha256:workflow",
+        "claim_ref": "claim://release-requires-review",
+        "certificate_ref": "leanmill://certificates/release_requires_review",
+        "certificate_digest": "sha256:certificate",
+        "verdict": "verified",
+        "verification_summary": "LeanMill emitted a checked workflow invariant.",
+        "metadata": {},
+    }
+    payload["metadata"]["provider_payload_signature"] = sign_provider_payload(
+        payload,
+        private_key_pem=keypair.private_pem,
+    )
+
+    result = validate_provider_payload_contract(payload, authority_root=authority_root)
+
+    assert result["ok"] is False
+    assert result["trusted_provider"] is True
+    assert result["signature_status"] == "verified"
+    assert "checker_evidence_refs are required by trusted provider policy" in result["issues"]
+    assert "faithfulness_refs are required by trusted provider policy" in result["issues"]
+
+    payload["faithfulness_refs"] = ["leanmill://faithfulness/release_requires_review"]
+    payload["checker_evidence_refs"] = ["leanmill://kernel-log/release_requires_review"]
+    payload["metadata"]["provider_payload_signature"] = sign_provider_payload(
+        payload,
+        private_key_pem=keypair.private_pem,
+    )
+
+    accepted = validate_provider_payload_contract(
+        payload,
+        authority_root=authority_root,
+        require_trusted_provider=True,
+    )
+
+    assert accepted["ok"] is True
+    assert accepted["signature_status"] == "verified"
+    assert accepted["trust_requirements"]["requires_payload_signature"] is True
 
 
 def test_signed_provider_payload_rejects_forged_signature(tmp_path: Path):
@@ -407,6 +492,84 @@ def test_provider_payload_cli_creates_record(tmp_path: Path, capsys):
     assert payload["run_id"] == "run_provider_cli"
     assert payload["metadata"]["provider"] == "alloy-adapter"
     assert len(list_formal_verifications(run_id="run_provider_cli", log_path=formal_log)) == 1
+
+
+def test_provider_payload_cli_validates_without_recording(tmp_path: Path, capsys):
+    payload_path = tmp_path / "provider_payload.json"
+    formal_log = tmp_path / "formal_verifications.jsonl"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "schema_version": FORMAL_VERIFICATION_PROVIDER_SCHEMA_VERSION,
+                "provider": "alloy-adapter",
+                "formal_system": "alloy",
+                "verifier_ref": "alloy:6.1",
+                "property_class": "schema",
+                "subject_ref": "schema://order",
+                "subject_digest": "sha256:order",
+                "claim_ref": "claim://order-transition-total",
+                "certificate_ref": "alloy://instances/order-transition-total",
+                "certificate_digest": "sha256:alloy",
+                "verdict": "inconclusive",
+                "verification_summary": "Bounded search did not settle the property.",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert formal_verification_main(
+        [
+            "validate-provider-payload",
+            "--payload-json",
+            str(payload_path),
+        ]
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["provider"] == "alloy-adapter"
+    assert not formal_log.exists()
+
+
+def test_provider_payload_cli_fails_when_required_trust_is_missing(
+    tmp_path: Path,
+    capsys,
+):
+    payload_path = tmp_path / "provider_payload.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "schema_version": FORMAL_VERIFICATION_PROVIDER_SCHEMA_VERSION,
+                "provider": "alloy-adapter",
+                "formal_system": "alloy",
+                "verifier_ref": "alloy:6.1",
+                "property_class": "schema",
+                "subject_ref": "schema://order",
+                "subject_digest": "sha256:order",
+                "claim_ref": "claim://order-transition-total",
+                "certificate_ref": "alloy://instances/order-transition-total",
+                "certificate_digest": "sha256:alloy",
+                "verdict": "inconclusive",
+                "verification_summary": "Bounded search did not settle the property.",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert formal_verification_main(
+        [
+            "validate-provider-payload",
+            "--payload-json",
+            str(payload_path),
+            "--authority-root",
+            str(tmp_path / "org"),
+            "--require-trusted-provider",
+        ]
+    ) == 2
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert "not trusted" in payload["issues"][0]
 
 
 def test_formal_verification_validates_enums(tmp_path: Path):

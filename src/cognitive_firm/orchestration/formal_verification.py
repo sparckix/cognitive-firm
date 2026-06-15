@@ -397,6 +397,116 @@ def verify_provider_payload_signature(
         raise ValueError(str(exc)) from exc
 
 
+def validate_provider_payload_contract(
+    payload: dict[str, Any],
+    *,
+    authority_root: Path | None = None,
+    require_trusted_provider: bool = False,
+) -> dict[str, Any]:
+    """Validate a provider payload without recording kernel state.
+
+    This is the adapter-facing contract check for external formal checkers. It
+    confirms the payload can be parsed, reports the canonical digest the kernel
+    will record, and, when org policy is supplied, checks the provider trust
+    requirements that determine whether a verified row can later count as clean
+    governed-run evidence.
+    """
+    issues: list[str] = []
+    try:
+        provider_payload = provider_payload_from_dict(payload)
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "issues": [str(exc)],
+            "provider": None,
+            "schema_version": None,
+            "provider_payload_digest": None,
+            "trusted_provider": False,
+            "signature_status": "not_checked",
+            "authority_root": str(authority_root) if authority_root is not None else None,
+        }
+
+    digest = provider_payload_digest(provider_payload)
+    trusted_entry: dict[str, Any] | None = None
+    if authority_root is not None:
+        try:
+            trusted_entry = trusted_provider_entry(
+                provider_payload.provider,
+                authority_root=authority_root,
+            )
+        except ValueError as exc:
+            issues.append(str(exc))
+    trusted = trusted_entry is not None
+    if require_trusted_provider and not trusted:
+        issues.append(
+            f"provider {provider_payload.provider!r} is not trusted by the supplied authority_root"
+        )
+
+    signature = provider_payload.metadata.get(PROVIDER_PAYLOAD_SIGNATURE_KEY)
+    signature_status = "not_required"
+    if trusted_entry is None:
+        if signature is not None:
+            signature_status = "present_not_verified_without_trust_policy"
+    else:
+        requires_signature = bool(trusted_entry.get("requires_payload_signature"))
+        if requires_signature or signature is not None:
+            try:
+                signature_verified = verify_provider_payload_signature(
+                    provider_payload,
+                    trusted_provider=trusted_entry,
+                )
+            except ValueError as exc:
+                signature_status = "failed"
+                issues.append(str(exc))
+            else:
+                signature_status = "verified" if signature_verified else "failed"
+                if not signature_verified:
+                    issues.append("provider_payload_signature did not verify")
+        if (
+            trusted_entry.get("requires_reverification_refs")
+            and not provider_payload.checker_evidence_refs
+        ):
+            issues.append("checker_evidence_refs are required by trusted provider policy")
+        if (
+            trusted_entry.get("requires_faithfulness_refs")
+            and not provider_payload.faithfulness_refs
+        ):
+            issues.append("faithfulness_refs are required by trusted provider policy")
+
+    return {
+        "ok": not issues,
+        "issues": issues,
+        "provider": provider_payload.provider,
+        "schema_version": provider_payload.schema_version,
+        "formal_system": provider_payload.formal_system,
+        "property_class": provider_payload.property_class,
+        "verdict": provider_payload.verdict,
+        "subject_ref": provider_payload.subject_ref,
+        "claim_ref": provider_payload.claim_ref,
+        "certificate_ref": provider_payload.certificate_ref,
+        "provider_payload_digest": digest,
+        "trusted_provider": trusted,
+        "signature_status": signature_status,
+        "authority_root": str(authority_root) if authority_root is not None else None,
+        "trust_requirements": {
+            "requires_payload_signature": bool(
+                trusted_entry.get("requires_payload_signature") if trusted_entry else False
+            ),
+            "requires_reverification_refs": bool(
+                trusted_entry.get("requires_reverification_refs") if trusted_entry else False
+            ),
+            "requires_faithfulness_refs": bool(
+                trusted_entry.get("requires_faithfulness_refs") if trusted_entry else False
+            ),
+        },
+        "evidence": {
+            "faithfulness_refs": list(provider_payload.faithfulness_refs),
+            "checker_evidence_refs": list(provider_payload.checker_evidence_refs),
+            "has_counterexample_ref": provider_payload.counterexample_ref is not None,
+        },
+    }
+
+
 @dataclass(frozen=True)
 class FormalVerification:
     verification_id: str
@@ -855,6 +965,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     provider_parser.add_argument("--no-action-attestation", action="store_true")
 
+    validate_provider_parser = sub.add_parser("validate-provider-payload")
+    validate_provider_parser.add_argument("--payload-json", required=True, type=Path)
+    validate_provider_parser.add_argument(
+        "--authority-root",
+        type=Path,
+        help="Org root containing formal_verification/trusted_providers.json.",
+    )
+    validate_provider_parser.add_argument(
+        "--require-trusted-provider",
+        action="store_true",
+        help="Fail unless the payload provider is trusted by the supplied authority root.",
+    )
+
     trust_parser = sub.add_parser("trust-provider")
     trust_parser.add_argument("--provider", required=True)
     trust_parser.add_argument(
@@ -940,6 +1063,17 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError as exc:
             raise SystemExit(str(exc)) from exc
         print(json.dumps(record.as_dict(), indent=2, sort_keys=True))
+    elif args.cmd == "validate-provider-payload":
+        with args.payload_json.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        result = validate_provider_payload_contract(
+            payload,
+            authority_root=args.authority_root,
+            require_trusted_provider=args.require_trusted_provider,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        if not result["ok"]:
+            return 2
     elif args.cmd == "trust-provider":
         public_key_pem = (
             args.public_key_file.read_text(encoding="utf-8")

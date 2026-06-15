@@ -135,6 +135,29 @@ itself: schema version, provider ids, boolean requirement fields, duplicate
 providers, and either a configured public key or an explicit public-key
 placeholder for overlays that require post-install key configuration.
 
+Provider adapters can preflight their JSON without writing kernel state:
+
+```bash
+cognitive-firm-formal-verification validate-provider-payload \
+  --payload-json leanmill_payload.json
+```
+
+With an org trust policy, the same command checks the signature and the
+policy-required evidence refs that decide whether a later `verified` row can
+count as clean governed-run evidence:
+
+```bash
+cognitive-firm-formal-verification validate-provider-payload \
+  --payload-json leanmill_payload.json \
+  --authority-root /path/to/org \
+  --require-trusted-provider
+```
+
+This command does not append formal-verification rows or action attestations.
+It prints the canonical provider-payload digest, trust requirements, signature
+status, and any missing evidence. Use it in provider CI before handing payloads
+to `create-from-provider-payload`.
+
 Configure the provider key with the CLI; it validates the Ed25519 public key
 and writes the org policy file:
 
@@ -194,6 +217,11 @@ cognitive-firm-formal-verification list --run-id run_123
 Create a row from a provider payload:
 
 ```bash
+cognitive-firm-formal-verification validate-provider-payload \
+  --payload-json leanmill_payload.json \
+  --authority-root /path/to/org \
+  --require-trusted-provider
+
 cognitive-firm-formal-verification create-from-provider-payload \
   --payload-json leanmill_payload.json \
   --authority-root /path/to/org
