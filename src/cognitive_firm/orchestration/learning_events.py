@@ -92,6 +92,7 @@ class LearningEventEncounter:
     project_id: str | None = None
     reason: str | None = None
     evidence_refs: list[str] = field(default_factory=list)
+    context_packet_ref: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
@@ -423,11 +424,16 @@ def record_learning_event_encounter(
     project_id: str | None = None,
     reason: str | None = None,
     evidence_refs: list[str] | None = None,
+    context_packet_ref: str | None = None,
     metadata: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
     log_path: Path | None = None,
 ) -> LearningEventEncounter:
-    """Record that future work encountered, applied, or ignored learning."""
+    """Record that future work encountered, applied, or ignored learning.
+
+    Stronger outcomes are learning-use receipts. They need enough evidence to
+    support later audit without turning replay into automatic application.
+    """
     if not learning_event_id.strip():
         raise ValueError("learning_event_id is required")
     if not role.strip():
@@ -435,6 +441,19 @@ def record_learning_event_encounter(
     if not cue.strip():
         raise ValueError("cue is required")
     normalized = _validate_encounter_outcome(str(outcome))
+    normalized_evidence_refs = evidence_refs or []
+    if normalized in {"ignored", "deferred"} and not (reason or "").strip():
+        raise ValueError(f"{normalized} learning encounters require a reason")
+    if (
+        normalized == "applied"
+        and not work_ref
+        and not normalized_evidence_refs
+        and not context_packet_ref
+    ):
+        raise ValueError(
+            "applied learning encounters require work_ref, evidence_refs, "
+            "or context_packet_ref"
+        )
     dedupe_key = idempotency_key or _encounter_idempotency_key(
         learning_event_id=learning_event_id,
         role=role,
@@ -443,6 +462,7 @@ def record_learning_event_encounter(
         work_ref=work_ref,
         tenant_id=tenant_id,
         project_id=project_id,
+        context_packet_ref=context_packet_ref,
     )
     path = log_path or DEFAULT_LEARNING_ENCOUNTERS_LOG
     for existing in list_learning_event_encounters(log_path=path):
@@ -459,7 +479,8 @@ def record_learning_event_encounter(
         tenant_id=tenant_id,
         project_id=project_id,
         reason=reason,
-        evidence_refs=evidence_refs or [],
+        evidence_refs=normalized_evidence_refs,
+        context_packet_ref=context_packet_ref,
         metadata={**(metadata or {}), "idempotency_key": dedupe_key},
     )
     _append_jsonl(path, encounter.as_dict())
@@ -725,6 +746,7 @@ def _encounter_idempotency_key(
     work_ref: str | None,
     tenant_id: str | None,
     project_id: str | None,
+    context_packet_ref: str | None,
 ) -> str:
     payload = "\x1f".join(
         [
@@ -732,6 +754,7 @@ def _encounter_idempotency_key(
             role,
             outcome,
             work_ref or "",
+            context_packet_ref or "",
             tenant_id or "",
             project_id or "",
             cue.strip().lower(),

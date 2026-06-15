@@ -2558,6 +2558,7 @@ def dispatch_kernel_request(
                 project_id=_optional_str(body, "project_id"),
                 reason=_optional_str(body, "reason"),
                 evidence_refs=_list_str(body.get("evidence_refs")),
+                context_packet_ref=_optional_str(body, "context_packet_ref"),
                 metadata=dict(body.get("metadata") or {}),
                 idempotency_key=_optional_str(body, "idempotency_key"),
                 log_path=config.learning_encounters_log,

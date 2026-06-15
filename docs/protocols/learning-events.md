@@ -148,6 +148,9 @@ it does not record a learning encounter.
 encountered, applied, ignored, or deferred an approved event. The service
 rejects encounter telemetry for an unknown learning event id, so usage rows do
 not drift away from approved learning state.
+`applied` is a learning-use receipt and requires `work_ref`, `evidence_refs`, or
+`context_packet_ref`. `ignored` and `deferred` require `reason`. This keeps
+non-application legitimate while making it auditable.
 
 ## Compounding
 

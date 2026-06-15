@@ -4179,6 +4179,38 @@ def test_kernel_service_routes_the_durable_learning_layer(tmp_path: Path):
         if candidate["source"] == "learning-event-replay"
     ] == [event.learning_event_id]
 
+    weak_applied = dispatch_kernel_request(
+        "POST",
+        "/kernel/learning-event-encounters",
+        {
+            "learning_event_id": event.learning_event_id,
+            "role": "role.manager",
+            "cue": "A similar queue stalls during triage.",
+            "outcome": "applied",
+            "tenant_id": "tenant-a",
+        },
+        config=config,
+    )
+    assert weak_applied.status == 400
+    assert "applied learning encounters require" in weak_applied.payload["error"]
+    weak_deferred = dispatch_kernel_request(
+        "POST",
+        "/kernel/learning-event-encounters",
+        {
+            "learning_event_id": event.learning_event_id,
+            "role": "role.manager",
+            "cue": "A similar queue stalls during triage.",
+            "outcome": "deferred",
+            "context_packet_ref": work_context.payload["context_packet"][
+                "context_packet_id"
+            ],
+            "tenant_id": "tenant-a",
+        },
+        config=config,
+    )
+    assert weak_deferred.status == 400
+    assert "deferred learning encounters require a reason" in weak_deferred.payload["error"]
+
     encounter = dispatch_kernel_request(
         "POST",
         "/kernel/learning-event-encounters",
@@ -4187,12 +4219,18 @@ def test_kernel_service_routes_the_durable_learning_layer(tmp_path: Path):
             "role": "role.manager",
             "cue": "A similar queue stalls during triage.",
             "outcome": "applied",
-            "work_ref": "work:triage-1",
+            "context_packet_ref": work_context.payload["context_packet"][
+                "context_packet_id"
+            ],
             "tenant_id": "tenant-a",
         },
         config=config,
     )
     assert encounter.status == 201
+    assert (
+        encounter.payload["encounter"]["context_packet_ref"]
+        == work_context.payload["context_packet"]["context_packet_id"]
+    )
     missing_encounter = dispatch_kernel_request(
         "POST",
         "/kernel/learning-event-encounters",

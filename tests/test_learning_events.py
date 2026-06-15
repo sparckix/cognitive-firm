@@ -602,3 +602,55 @@ def test_learning_event_encounter_records_future_use(tmp_path: Path):
     assert duplicate.encounter_id == encounter.encounter_id
     assert len(rows) == 1
     assert rows[0].work_ref == "project/demo/artifact-1"
+
+
+def test_learning_event_encounter_requires_auditable_use_receipts(tmp_path: Path):
+    encounter_log = tmp_path / "learning_encounters.jsonl"
+
+    try:
+        record_learning_event_encounter(
+            learning_event_id="learn_queue_gate",
+            role="role.manager",
+            cue="queue stalled",
+            outcome="applied",
+            log_path=encounter_log,
+        )
+    except ValueError as exc:
+        assert "applied learning encounters require" in str(exc)
+    else:
+        raise AssertionError("expected applied encounter without refs to fail")
+
+    applied = record_learning_event_encounter(
+        learning_event_id="learn_queue_gate",
+        role="role.manager",
+        cue="queue stalled",
+        outcome="applied",
+        context_packet_ref="ctx_1234",
+        log_path=encounter_log,
+    )
+    assert applied.context_packet_ref == "ctx_1234"
+
+    for outcome in ("ignored", "deferred"):
+        try:
+            record_learning_event_encounter(
+                learning_event_id="learn_queue_gate",
+                role="role.manager",
+                cue="queue stalled",
+                outcome=outcome,
+                work_ref="work:queue-1",
+                log_path=encounter_log,
+            )
+        except ValueError as exc:
+            assert f"{outcome} learning encounters require a reason" in str(exc)
+        else:
+            raise AssertionError(f"expected {outcome} encounter without reason to fail")
+
+    deferred = record_learning_event_encounter(
+        learning_event_id="learn_queue_gate",
+        role="role.manager",
+        cue="queue stalled",
+        outcome="deferred",
+        reason="Waiting for reviewer receipt before applying the routine.",
+        log_path=encounter_log,
+    )
+    assert deferred.reason.startswith("Waiting for reviewer")

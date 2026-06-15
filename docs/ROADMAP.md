@@ -308,6 +308,26 @@ rejection without mutation.
     administrator` where those terms are more precise. Do not mechanically
     rename code until compatibility aliases and migration tests exist.
 
+## Minimum Lovable v0.4
+
+Keep v0.4 narrower than the full memory/context wishlist. The release should
+make one governed learning loop visible and useful enough for a real operator:
+
+1. **Learning Loop v1:** role-context projection at work-discovery time plus
+   auditable learning-use receipts. The shipped `context_packet` digest answers
+   "what context was available?"; encounter discipline answers "how was it
+   used?"
+2. **Provenance / Timeline View:** a readable projection from run checkpoints
+   through human work, action attestations, proposals, decisions, outcome links,
+   routine reviews, and learning events. This should answer "why did we decide
+   X and what happened after?" without making operators inspect raw JSONL.
+3. **Proposal UX Improvements:** templates, pending-review visibility, and
+   clearer authority/evidence diffs over existing governance-change routes.
+
+Defer broad durable memory, topology matching, and team primitives unless they
+directly serve those three deliverables. Context packets remain receipts, not a
+memory product; proposal/timeline surfaces remain projections, not BPM.
+
 ## Cross-Disciplinary Pull-Forwards
 
 These candidates translate ideas from control, risk, formal methods,

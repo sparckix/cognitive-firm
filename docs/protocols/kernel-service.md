@@ -192,6 +192,16 @@ surface, the consumer records telemetry through
 `POST /kernel/learning-event-encounters`; the read route does not write that row
 automatically.
 
+Learning-use encounter discipline:
+
+- `encountered` can be recorded as a lightweight telemetry row.
+- `applied` requires `work_ref`, `evidence_refs`, or `context_packet_ref`.
+- `ignored` and `deferred` require `reason`.
+
+This makes the work-discovery context useful to operators while preserving the
+boundary: the service records what was seen and how it was used; it does not
+apply learning or execute a workflow.
+
 Decision aggregation routes record procedure evidence, not authority:
 
 - `GET /kernel/decision-procedure-profiles` lists built-in profile recipes.
