@@ -19,6 +19,11 @@ from cognitive_firm.orchestration.action_impact import (
     DEFAULT_ACTION_IMPACT_SUMMARY,
     summary_from_optional_path as action_impact_summary_from_path,
 )
+from cognitive_firm.orchestration.action_attestation import (
+    DEFAULT_ACTION_ATTESTATION_LOG,
+    AgentInvocationAudit,
+    list_agent_invocation_audits,
+)
 from cognitive_firm.orchestration.agent_channels import list_blocked_obligations
 from cognitive_firm.orchestration.accountability_cases import (
     DEFAULT_ACCOUNTABILITY_CASES_LOG,
@@ -123,6 +128,7 @@ class OrgSurface:
     learning_event_summary: dict[str, Any] = field(default_factory=dict)
     active_runs: list[RunProjection] = field(default_factory=list)
     failed_runs: list[RunProjection] = field(default_factory=list)
+    recent_agent_invocations: list[AgentInvocationAudit] = field(default_factory=list)
 
     @property
     def counts(self) -> dict[str, int]:
@@ -179,6 +185,10 @@ class OrgSurface:
             ),
             "active_runs": len(self.active_runs),
             "failed_runs": len(self.failed_runs),
+            "recent_agent_invocations": len(self.recent_agent_invocations),
+            "failed_agent_invocations": sum(
+                1 for row in self.recent_agent_invocations if row.verification_status == "failed"
+            ),
         }
 
     def as_dict(self) -> dict[str, Any]:
@@ -211,6 +221,9 @@ class OrgSurface:
             "learning_event_summary": self.learning_event_summary,
             "active_runs": [run.as_dict() for run in self.active_runs],
             "failed_runs": [run.as_dict() for run in self.failed_runs],
+            "recent_agent_invocations": [
+                row.as_dict() for row in self.recent_agent_invocations
+            ],
         }
 
 
@@ -260,7 +273,9 @@ def build_org_surface(
     outcome_links_log: Path = DEFAULT_OUTCOME_LINKS_LOG,
     routine_reviews_log: Path = DEFAULT_ROUTINE_REVIEWS_LOG,
     transitions_log: Path = TRANSITIONS_LOG,
+    action_attestation_log: Path = DEFAULT_ACTION_ATTESTATION_LOG,
     damage_limit: int = 20,
+    agent_invocation_limit: int = 10,
 ) -> OrgSurface:
     """Build the generic organization status projection."""
     all_open_gaps = [
@@ -315,6 +330,10 @@ def build_org_surface(
         routine_reviews_log_path=routine_reviews_log,
     )
     runs = list_runs(log_path=transitions_log)
+    recent_agent_invocations = list_agent_invocation_audits(
+        limit=agent_invocation_limit,
+        log_path=action_attestation_log,
+    )
     recent_damage = _recent_damage(damage_limit)
     strategy_review = build_strategy_review(
         forecast_summary=forecast_state,
@@ -342,6 +361,10 @@ def build_org_surface(
         "learning_event_overdue_reviews": learning_summary.overdue_routine_review_count,
         "active_runs": sum(1 for run in runs if run.state in ACTIVE_RUN_STATES),
         "failed_runs": sum(1 for run in runs if run.state == "failed"),
+        "recent_agent_invocations": len(recent_agent_invocations),
+        "failed_agent_invocations": sum(
+            1 for row in recent_agent_invocations if row.verification_status == "failed"
+        ),
     }
     intelligence_coverage = build_intelligence_coverage(
         forecast_state=forecast_state.as_dict(),
@@ -372,6 +395,7 @@ def build_org_surface(
         learning_event_summary=learning_summary.as_dict(),
         active_runs=[run for run in runs if run.state in ACTIVE_RUN_STATES],
         failed_runs=[run for run in runs if run.state == "failed"],
+        recent_agent_invocations=recent_agent_invocations,
     )
 
 
@@ -448,6 +472,19 @@ def format_surface_brief(surface: OrgSurface) -> str:
             reason = f": {run.failure_reason}" if run.failure_reason else ""
             lines.append(f"- {run.run_id}: {run.objective}{reason}")
 
+    if surface.recent_agent_invocations:
+        lines.extend(["", "## Recent Agent Invocations"])
+        for row in surface.recent_agent_invocations[:10]:
+            run_ref = f" {row.run_id}" if row.run_id else ""
+            status = f"{row.verification_status}/{row.returncode}"
+            session = f" session={row.agent_session_id}" if row.agent_session_id else ""
+            lines.append(
+                "- "
+                f"{row.attestation_id}:{run_ref} {row.producer} via "
+                f"{row.runtime or 'runtime'}:{row.adapter or 'adapter'} "
+                f"({status}){session}"
+            )
+
     action_impact = surface.action_impact_state
     if action_impact.get("n_local_with_negative_externalities"):
         lines.extend(["", "## Action-Impact Externalities"])
@@ -490,6 +527,13 @@ def format_surface_brief(surface: OrgSurface) -> str:
                 f"{event.learning_event_id}: {event.learning_unit_kind} "
                 f"({event.future_application_cue})"
             )
+            if event.source_carrier_refs:
+                lines.append(
+                    "  refs: " + ", ".join(event.source_carrier_refs[:3])
+                )
+            tags = _learning_event_tags(event.metadata)
+            if tags:
+                lines.append("  tags: " + ", ".join(tags[:5]))
 
     learning_summary = surface.learning_event_summary
     if learning_summary.get("total"):
@@ -524,6 +568,17 @@ def format_surface_brief(surface: OrgSurface) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _learning_event_tags(metadata: dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    for key in ("tag", "tags", "labels", "capability_tags"):
+        value = metadata.get(key)
+        values = value if isinstance(value, list) else [value]
+        for item in values:
+            if item and str(item) not in out:
+                out.append(str(item))
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Render the cognitive-firm organization surface.")
     parser.add_argument("--project-root", type=Path, default=REPO_ROOT)
@@ -545,6 +600,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--learning-encounters-log", type=Path, default=DEFAULT_LEARNING_ENCOUNTERS_LOG)
     parser.add_argument("--outcome-links-log", type=Path, default=DEFAULT_OUTCOME_LINKS_LOG)
     parser.add_argument("--routine-reviews-log", type=Path, default=DEFAULT_ROUTINE_REVIEWS_LOG)
+    parser.add_argument("--action-attestation-log", type=Path, default=DEFAULT_ACTION_ATTESTATION_LOG)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
@@ -560,6 +616,7 @@ def main(argv: list[str] | None = None) -> int:
         learning_encounters_log=args.learning_encounters_log,
         outcome_links_log=args.outcome_links_log,
         routine_reviews_log=args.routine_reviews_log,
+        action_attestation_log=args.action_attestation_log,
     )
     if args.json:
         print(json.dumps(surface.as_dict(), indent=2, sort_keys=True))

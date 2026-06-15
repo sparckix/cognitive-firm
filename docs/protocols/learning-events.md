@@ -88,10 +88,24 @@ Events have an explicit lifecycle:
 - `superseded`: replaced by a narrower or newer learning event;
 - `retired`: intentionally removed from future replay.
 
+There is no `rejected` status on `ApprovedLearningEvent`. Rejection belongs to
+the object that failed review: a learning-transition candidate, governance
+proposal, policy-promotion packet, or routine-review recommendation. If a
+candidate is rejected, do not mint an approved learning event to remember that
+rejection. Keep the rejected carrier/proposal and its evidence as the audit
+record. Only approved future-behavior changes become learning events.
+
 Replay is deterministic. `replay_learning_events(...)` filters by role,
-tenant/project scope, and lexical cue; it does not use semantic similarity as
-authority. A tenant/project replay includes global events unless an event is
-explicitly scoped to another tenant or project.
+tenant/project scope, exact source refs, explicit metadata tags, and lexical
+cue; it does not use semantic similarity as authority. A tenant/project replay
+includes global events unless an event is explicitly scoped to another tenant
+or project.
+
+Exact-ref replay matches refs already recorded on the approved learning unit:
+`learning_event:<id>`, `source_carrier_refs`, `candidate_ref`, `approval_ref`,
+parent learning-event refs, and externality-review refs. Tag replay matches
+explicit `metadata.tag`, `metadata.tags`, `metadata.labels`, or
+`metadata.capability_tags` entries. Partial matches are intentionally rejected.
 
 Work discovery also surfaces matching active events as
 `learning-event-replay` candidates so roles encounter approved learning before
@@ -115,12 +129,15 @@ surfaces:
 ```text
 GET  /kernel/learning-events
 GET  /kernel/learning-events/replay?role=role.manager&tenant_id=tenant-a&cue=...
+GET  /kernel/learning-events/replay?source_ref=multi_agent_attribution:packet_1
+GET  /kernel/learning-events/replay?tag=trace_attribution
 GET  /kernel/learning-events/summary
 POST /kernel/learning-event-encounters
 ```
 
 `GET /kernel/learning-events/replay` is read-only and deterministic. It returns
-active approved events that match role, tenant/project scope, and lexical cue.
+active approved events that match role, tenant/project scope, exact refs,
+explicit tags, and lexical cue.
 `POST /kernel/learning-event-encounters` records whether a later work surface
 encountered, applied, ignored, or deferred an approved event. The service
 rejects encounter telemetry for an unknown learning event id, so usage rows do
@@ -173,6 +190,21 @@ LearningTransitionCandidate
 
 This keeps the learning-transition compiler observer-only while still giving
 organizational learning a durable promotion object.
+
+If the candidate implies a structural change to a mandate, role, route,
+capability policy, gate, learning policy, project charter, or tenant policy,
+use the governance proposal path instead:
+
+```text
+LearningTransitionCandidate
+-> POST /kernel/learning-transition-candidates/{candidate_id}/governance-change
+-> GovernanceChangeProposal
+-> approval / decline
+-> separate governed mutation if approved
+```
+
+This preserves candidate evidence while keeping approved learning events and
+structural governance changes distinct.
 
 ## Resource Projection
 

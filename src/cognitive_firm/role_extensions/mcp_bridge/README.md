@@ -8,7 +8,7 @@ _Folder index. Prose may be added above the auto-index block._
 
 **Sub-folders**
 
-- [`servers/`](servers/) - 3 file(s)
+- [`servers/`](servers/) - 2 file(s)
 
 **Documents**
 
@@ -20,3 +20,4 @@ _Folder index. Prose may be added above the auto-index block._
 
 <sub>1 sub-folder(s), 5 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
 
+<!-- AUTO-INDEX:END -->

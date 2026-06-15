@@ -9,6 +9,10 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from cognitive_firm.orchestration.evidence_gaps import create_evidence_gap  # noqa: E402
 from cognitive_firm.orchestration.accountability_cases import create_accountability_case  # noqa: E402
+from cognitive_firm.orchestration.action_attestation import (  # noqa: E402
+    create_action_attestation,
+    digest_text,
+)
 from cognitive_firm.orchestration.human_work import (  # noqa: E402
     create_agent_requested_human_work_session,
     create_human_work_session,
@@ -229,6 +233,50 @@ def test_org_surface_includes_run_checkpoint_projection(tmp_path: Path):
     assert "source inaccessible" in brief
 
 
+def test_org_surface_includes_recent_agent_invocations(tmp_path: Path):
+    attestation_log = tmp_path / "action_attestations.jsonl"
+    create_action_attestation(
+        subject_kind="runtime_event",
+        subject_ref="agent_invocation_receipt:abc",
+        subject_digest=digest_text("receipt"),
+        producer="role.manager",
+        action_type="agent_cli_dispatch",
+        runtime_ref="run:run_1",
+        verification_status="failed",
+        run_id="run_1",
+        metadata={
+            "agent_invocation_receipt": {
+                "schema_version": "agent_invocation_receipt.v1",
+                "runtime": "claude",
+                "adapter": "claude_print",
+                "prompt_transport": "argv",
+                "returncode": 1,
+                "agent_session_id": "session-1",
+                "prompt_digest": digest_text("prompt"),
+                "stdout_digest": digest_text(""),
+                "stderr_digest": digest_text("error"),
+            }
+        },
+        log_path=attestation_log,
+    )
+
+    surface = build_org_surface(
+        project_root=tmp_path,
+        evidence_gaps_log=tmp_path / "missing_gaps.jsonl",
+        human_work_log=tmp_path / "missing_human.jsonl",
+        action_attestation_log=attestation_log,
+        damage_limit=0,
+    )
+
+    assert surface.counts["recent_agent_invocations"] == 1
+    assert surface.counts["failed_agent_invocations"] == 1
+    assert surface.recent_agent_invocations[0].agent_session_id == "session-1"
+    brief = format_surface_brief(surface)
+    assert "Recent Agent Invocations" in brief
+    assert "role.manager via claude:claude_print" in brief
+    assert "session=session-1" in brief
+
+
 def test_org_surface_includes_approved_learning_events(tmp_path: Path):
     learning_log = tmp_path / "learning_events.jsonl"
     encounters_log = tmp_path / "learning_encounters.jsonl"
@@ -238,7 +286,8 @@ def test_org_surface_includes_approved_learning_events(tmp_path: Path):
         future_application_cue="same failure mode repeats across reviewed runs",
         approved_by="role.principal",
         approval_ref="review/1",
-        source_carrier_refs=["forecast/c1"],
+        source_carrier_refs=["multi_agent_attribution:packet_1"],
+        metadata={"tags": ["trace_attribution"]},
         log_path=learning_log,
     )
     record_learning_event_encounter(
@@ -271,6 +320,8 @@ def test_org_surface_includes_approved_learning_events(tmp_path: Path):
     assert "Approved Learning Events" in brief
     assert "Learning Unit Health" in brief
     assert "same failure mode repeats" in brief
+    assert "refs: multi_agent_attribution:packet_1" in brief
+    assert "tags: trace_attribution" in brief
 
 
 def test_org_surface_counts_compounded_learning_units(tmp_path: Path):

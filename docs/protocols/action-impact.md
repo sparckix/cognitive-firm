@@ -145,6 +145,37 @@ only do that after it can show that the logged reward is measurable, delayed
 effects are handled, negative externalities are tracked, and offline replay
 beats the existing routing policy without increasing review debt.
 
+## Research Anchor
+
+This protocol treats bandits as a useful downstream consumer of action-impact
+rows, not as the kernel's control loop.
+
+- March's exploration/exploitation framing explains why firms need deliberate
+  variation as well as routine refinement: James G. March, "Exploration and
+  Exploitation in Organizational Learning",
+  <https://doi.org/10.1287/orsc.2.1.71>.
+- Contextual-bandit systems show the practical repeated-decision pattern this
+  interface is compatible with: Li, Chu, Langford, and Schapire,
+  "A Contextual-Bandit Approach to Personalized News Article Recommendation",
+  <https://arxiv.org/abs/1003.0146>.
+- Offline replay is necessary but easy to get wrong when logs contain only
+  partial feedback: Li, Chu, Langford, and Wang, "Unbiased Offline Evaluation
+  of Contextual-bandit-based News Article Recommendation Algorithms",
+  <https://arxiv.org/abs/1003.5956>.
+- Doubly robust and adaptive off-policy evaluation work explains why tenants
+  should preserve logging propensities and context/action/reward fields rather
+  than only storing summaries: Dudik, Langford, and Li,
+  <https://arxiv.org/abs/1103.4601>; Wang, Agarwal, and Dudik,
+  <https://arxiv.org/abs/1612.01205>.
+- Conservative contextual bandit work supports the kernel's baseline-preserving
+  posture for live systems: Kazerouni, Ghavamzadeh, Abbasi-Yadkori, and Van
+  Roy, "Conservative Contextual Linear Bandits",
+  <https://arxiv.org/abs/1611.06426>.
+
+The implementation implication is narrow: store enough state for tenant-owned
+offline evaluation and governance review; do not let the public kernel silently
+explore against live work.
+
 The kernel includes one conservative helper for this path:
 `propose_business_function_policy` in
 `cognitive_firm.orchestration.business_function_bandit`. It aggregates logged
@@ -196,6 +227,42 @@ The packet is not an approval and does not mutate a live policy. A report that
 is otherwise promotable is downgraded to `advisory` when required review
 evidence, such as an authority diff, is missing. This keeps learned loops in a
 proposal role while preserving the evidence a reviewer needs.
+
+A packet may also carry an optional typed `predicted_effect` inside its draft
+`governance_change_candidate`. The caller must supply this explicitly; the
+kernel does not infer metric semantics from reward fields. If the governance
+change is approved, clients can carry the same `predicted_effect` into an
+outcome link and use prediction review to reaffirm, amend, retire, or escalate
+the learned route policy. The governed-run recipe preserves policy-promotion
+packet provenance in the outcome-link metadata so later reviews can reconstruct
+which offline evaluation and review packet produced the measured change.
+
+Kernel service:
+
+```text
+GET  /kernel/action-impact/policy-evaluations
+POST /kernel/action-impact/policy-evaluations/evaluate
+GET  /kernel/action-impact/policy-promotion-packets
+POST /kernel/action-impact/policy-promotion-packets
+POST /kernel/action-impact/policy-promotion-packets/{packet_id}/governance-change
+```
+
+The governance-change route is a composition path from measured execution
+evidence to governed review. By default it accepts only `review_ready`
+promotion packets, adds `policy_promotion_packet:{packet_id}` to the proposal
+evidence refs, and records a `GovernanceChangeProposal` with
+`change_kind=route_policy_change`. It does not approve the proposal, apply a
+policy, choose a live action, or execute a runtime.
+
+That boundary is intentional: the kernel provides a common carrier between
+offline action-impact evaluation and governance review, while tenants keep the
+policy adapter, exploration budget, and live action selection outside the
+public kernel.
+
+These routes are composition surfaces over this module. They read the
+configured action-impact summary, record offline evaluation reports, and build
+promotion packets. They do not apply policies, approve governance changes, or
+choose actions at runtime.
 
 CLI:
 

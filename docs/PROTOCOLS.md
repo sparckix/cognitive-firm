@@ -44,6 +44,28 @@ OpenAI Agents SDK, Google ADK, Microsoft Agent Framework, CrewAI, AutoGen, or
 Letta can project lifecycle events into the run-checkpoint interface. The
 runtime owns execution; cognitive-firm owns the organizational projection.
 
+Multi-agent trace attribution (orthogonal): recursive delegation, team
+evolution, phase-based execution, and protocol-test runtimes can import local
+and cross-agent trace evidence as review carriers. The kernel records
+attribution packets, delegation graph projections, and diagnostics; it does
+not execute agents or mutate governance state from traces.
+
+Phase execution (orthogonal): runtimes or demos can record Strategy ->
+Execution -> Verification directives and verifier feedback with bounded retry
+budget decay. This is a small execution overlay, not a general runtime.
+
+Protocol experiments (orthogonal): runtimes or demos can record bounded
+comparisons of coordinator, sequential, batched sequential, shared, broadcast,
+or custom coordination patterns. Reports can emit observer-only route-policy
+candidates, but any promotion still requires governance review and approval.
+
+Capability signals (orthogonal): runtimes, work queues, authorization gates, or
+role offices can record abstention, insufficient authority, evidence gaps,
+capability gaps, tool unavailability, overload, budget exhaustion, or unsafe
+requests as routing evidence. A signal is not task failure by default; it routes
+to reassignment, escalation, evidence repair, capability request, learning, or
+governance review.
+
 Worker taxonomy (orthogonal): capability, fungibility, state, and transport
 are separate axes. This vocabulary explains whether a worker is a bare model
 call, tool-using agent, deterministic system, or human, and whether the worker
@@ -245,7 +267,8 @@ decision stage, expected effect, observed outcome, costs, evaluator role,
 decision-changed flag, and externality tags so tenants can evaluate future
 bandit or mini-RL policies offline before any live routing.
 
-Status: read-model interface and org-surface integration shipped.
+Status: read-model interface, org-surface integration, conservative offline
+policy evaluation, and service-routed promotion packets shipped.
 
 ### [Action Attestation](protocols/action-attestation.md)
 
@@ -265,9 +288,32 @@ accountability cases, linked leases, referenced governance approvals,
 derived evidence hashes, observability refs, plus an owner-authority snapshot.
 The bundle reports caveats rather than turning provenance into a correctness
 claim. Existing bundle JSON can be validated against the v1 interchange schema
-and digest before another runtime or provider consumes it.
+and digest before another runtime or provider consumes it. Read-only
+kernel-service routes can build and validate the same bundle for app surfaces
+and demos.
 
-Status: export view and tests shipped.
+Status: export view, CLI, kernel-service routes, and tests shipped.
+
+### [Governed Mutation Proofs](protocols/mutation-proofs.md)
+
+How the kernel summarizes an approved state mutation as an ordered proof row
+over existing records: run, work item, proposal, approval, mutation,
+attestation, learning, outcome, review, governed-run bundle, and git commit.
+The proof row is a review/export projection. It does not authorize mutation
+and it does not replace the underlying ledgers. Read-only kernel-service routes
+can build and validate proof payloads for app surfaces and demos.
+
+Status: projection helper, kernel-service routes, and tests shipped.
+
+### [Governed Run Recipes](protocols/governed-run-recipes.md)
+
+How demos, adapters, and starter overlays compose common governed paths without
+duplicating lifecycle glue. The current helpers shape mutation-proof request
+bodies and work-completion artifact refs, then call existing kernel service
+routes. Recipes do not authorize work, approve proposals, mutate files, build
+proofs, or create a second governance lifecycle.
+
+Status: thin helper module and tests shipped.
 
 ### [Loop Engineering](protocols/loop-engineering.md)
 
@@ -416,6 +462,20 @@ rows authoritative. This keeps mandate-gap decisions reviewable.
 
 Status: first-party interfaces, kernel-service routes, CLI, and tests shipped.
 
+### [Decision Aggregation Cases](protocols/decision-aggregation.md)
+
+How the kernel records decision procedure evidence without replacing authority.
+Decision rights answer who may decide; decision aggregation records how eligible
+inputs were collected and computed for a specific subject. Shipped procedures
+include `single_authority`, `quorum_majority`, `veto`, and `unanimity`, with
+built-in read-only procedure profiles that expand into the same case shape. A
+computed case is evidence for governance, policy, residual-decision,
+accountability, or learning paths; it does not apply organization mutations by
+itself.
+
+Status: first-party interface, kernel-service routes, resource projection, and
+tests shipped.
+
 ### [Accountability Summary](protocols/accountability.md)
 
 How the kernel joins owners, projects, review status, due dates, source
@@ -434,6 +494,17 @@ outbox/event adapter and not one ledger among many.
 
 Status: transition-log-backed interface and org-surface integration shipped.
 
+### [Execution Routing](protocols/execution-routing.md)
+
+How the first-party daemon and tenant adapters turn work-item frontmatter and
+body text into a conservative route contract before execution. It can identify
+direct work, expert review, synthesis review, scripted runs, artifact builds,
+joint human work, experiment loops, and docs/records work. The route is not
+authority: mandates, leases, policy decisions, and resource envelopes still
+decide what may run.
+
+Status: first-party route-contract helper and tests shipped.
+
 ### [Runtime Adapter Interface](protocols/runtime-adapters.md)
 
 How external graph, crew, chat, or agent runtimes expose lifecycle state to the
@@ -447,6 +518,62 @@ own resume token.
 Status: framework-neutral adapter and tests shipped. First-party vendor
 wrappers are intentionally left to tenants until a concrete integration needs
 one.
+
+### [Agent Runtime Invocation Policy](protocols/agent-runtime-invocation.md)
+
+How the first-party Python daemon and live kernel-native demos construct
+local/subscription agent subprocess commands without becoming a model runtime
+or graph scheduler. The policy resolves Claude/Codex adapters, project roots,
+permission modes, sandbox flags, optional tool controls, and subscription-auth
+environment scrubbing. It records redacted command shape for receipts while
+leaving model execution, tool calls, and native memory to the selected CLI.
+
+Status: shared daemon/demo invocation helper and tests shipped.
+
+### [Multi-Agent Trace Attribution](protocols/multi-agent-trace-attribution.md)
+
+How recursive delegation, team-evolution, phase-based execution, and protocol
+experiment runtimes import local-agent and cross-agent trace evidence into the
+kernel. The primitive records `MultiAgentTraceEvent` rows, summarizes
+abstention, failed handoff, verifier-failure, overcommitment, and
+undercommitment signals, and creates `FailureAttributionPacket` carriers that
+project to observer-only learning-transition candidates in the service review
+queue. It also projects an observer-only delegation graph for demos, audits,
+and dashboards. It does not spawn agents, approve changes, or mutate roles,
+mandates, protocols, or policies.
+
+Status: alpha evidence carrier and tests shipped.
+
+### [Phase Execution Overlay](protocols/phase-execution.md)
+
+How agent runtimes or deterministic harnesses record Strategy -> Execution ->
+Verification directives and independent verifier feedback. Failed, blocked, or
+inconclusive verification decays remaining retry budget and can block a plan
+when attempts or budget are exhausted. The overlay records the execution
+evidence; it does not execute agents or approve changes.
+
+Status: alpha execution overlay and tests shipped.
+
+### [Protocol Experiments](protocols/protocol-experiments.md)
+
+How runtimes or deterministic harnesses compare coordination patterns before
+promoting a route-policy change. Experiments record candidate protocols,
+observations, summaries, blockers, and observer-only governance candidates.
+They do not execute agents or mutate routing policy.
+
+Status: alpha telemetry carrier and tests shipped.
+
+### [Capability Signals](protocols/capability-signals.md)
+
+How runtimes, role offices, work queues, and authorization gates record
+grounded abstention or capability gaps without treating them as task failure.
+Signals preserve source refs, severity, route recommendation, evidence refs,
+and closure receipts for reassignment, escalation, evidence repair, capability
+request, learning, or governance review. Open signals project to observer-only
+learning-transition candidates so abstention and authority gaps can affect
+future review without counting as task failure.
+
+Status: alpha routing-evidence carrier and tests shipped.
 
 ### [OpenTelemetry Export](protocols/otel-export.md)
 
@@ -541,10 +668,16 @@ and structural evidence sufficiency: source refs, expected behavior change,
 risk summary, rollback plan, and evidence refs for passing invariant checks.
 They are either blocked or review-ready. The primitive does not apply changes.
 Governance-change proposals also expose a resource-envelope projection for
-adapter, dashboard, migration, and conformance compatibility.
+adapter, dashboard, migration, and conformance compatibility. Learning
+transition candidates can be promoted into governance-change proposals through
+the service route, but the normal evidence-sufficiency gate still decides
+whether the result is blocked or review-ready. Charters can opt into a
+deletion-duty check so structure-adding proposals must name a retirement
+candidate or justify net growth.
 
-Status: proposal log, invariant checks, evidence sufficiency gate,
-resource projection, org-surface integration, and tests shipped.
+Status: proposal log, candidate-promotion helper, invariant checks, evidence
+sufficiency gate, optional deletion-duty evidence, resource projection,
+org-surface integration, and tests shipped.
 
 ### [Learning Transition Compiler](protocols/learning-transition-compiler.md)
 
@@ -553,7 +686,8 @@ candidates. The compiler is a generic bridge from learning carriers to possible
 durable state changes, but it remains observer-only: tenants decide who reviews
 the candidates and which, if any, become real updates.
 
-Status: compiler and tests shipped.
+Status: compiler, execution-evidence candidate service projection,
+candidate-to-governance proposal route, and tests shipped.
 
 ### [Approved Learning Events](protocols/learning-events.md)
 

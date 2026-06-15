@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from cognitive_firm.orchestration import evidence_gaps, human_work, learning_events, work_discovery  # noqa: E402
+from cognitive_firm.orchestration import evidence_gaps, goals_inbox, human_work, learning_events, work_discovery  # noqa: E402
 from cognitive_firm.orchestration.evidence_gaps import create_evidence_gap  # noqa: E402
 from cognitive_firm.orchestration.human_work import (  # noqa: E402
     create_agent_requested_human_work_session,
@@ -21,6 +21,7 @@ from cognitive_firm.orchestration.work_discovery import (  # noqa: E402
     discover_evidence_gaps,
     discover_human_work_sessions,
     discover_open_debates,
+    discover_principal_goals,
     discover_relevant_learning_events,
 )
 
@@ -73,6 +74,37 @@ def test_work_discovery_surfaces_completed_human_work_for_integration(tmp_path: 
     assert candidates[0].source == "human-work"
     assert "integrate completed human work" in candidates[0].intent
     assert candidates[0].metadata["session_id"] == session.session_id
+
+
+def test_principal_goal_discovery_preserves_declared_paths(tmp_path: Path, monkeypatch):
+    goals_root = tmp_path / "tasks"
+    pending = goals_root / "pending"
+    pending.mkdir(parents=True)
+    monkeypatch.setattr(goals_inbox, "GOALS_ROOT", goals_root)
+    (pending / "adjust-mandate.md").write_text(
+        """
+---
+goal_id: adjust-mandate
+priority: high
+assigned_to: role.org_evolver
+autonomous_scope_ok: true
+estimated_cost_usd: 0.0
+declared_paths:
+  - org/mandates/org_evolver_mandate.md
+---
+
+Review the mandate and report the next bounded improvement candidate.
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    candidates = discover_principal_goals(assigned_to="role.org_evolver")
+
+    assert len(candidates) == 1
+    assert candidates[0].source == "principal-goal"
+    assert candidates[0].metadata["declared_paths"] == [
+        "org/mandates/org_evolver_mandate.md"
+    ]
 
 
 def test_work_discovery_routes_a2h_followup_to_agent_counterparty(tmp_path: Path, monkeypatch):
@@ -264,6 +296,29 @@ def test_discover_relevant_learning_events_surfaces_active_role_context(tmp_path
     assert candidates[0].source == "learning-event-replay"
     assert candidates[0].metadata["learning_event_id"] == event.learning_event_id
     assert candidates[0].raw_text.startswith("Require source note")
+
+
+def test_discover_relevant_learning_events_accepts_explicit_log_path(tmp_path: Path):
+    learning_log = tmp_path / "tenant_firm" / "learning_events.jsonl"
+    event = create_learning_event(
+        learning_unit_kind="routine_change",
+        decision_use="Replay this approved routine before repeating the queue repair.",
+        future_application_cue="queue repair repeats",
+        approved_by="role.manager",
+        approval_ref="review/learning/explicit",
+        owner_role="role.org_evolver",
+        log_path=learning_log,
+    )
+
+    candidates = discover_relevant_learning_events(
+        assigned_to="role.org_evolver",
+        cue="queue repair",
+        log_path=learning_log,
+    )
+
+    assert [candidate.metadata["learning_event_id"] for candidate in candidates] == [
+        event.learning_event_id
+    ]
 
 
 def test_discover_open_debates_returns_valid_candidate(tmp_path: Path, monkeypatch):

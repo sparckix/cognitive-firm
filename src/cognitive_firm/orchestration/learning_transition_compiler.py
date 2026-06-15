@@ -29,6 +29,7 @@ LearningTransitionKind = Literal[
     "mandate_review",
     "human_work_session",
     "forecast_contract",
+    "route_policy_change",
     "action_impact_repair",
     "role_review",
     "source_repair",
@@ -287,6 +288,7 @@ def _normalize_transition_kind(kind: str) -> str:
         "mandate_review",
         "human_work_session",
         "forecast_contract",
+        "route_policy_change",
         "role_review",
         "source_repair",
     }:

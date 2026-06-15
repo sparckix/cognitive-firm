@@ -54,6 +54,12 @@ MODEL_MAP = {
     "gpt4.1": "gpt-4.1",
     "gpt4.1-mini": "gpt-4.1-mini",
     "gpt5.5": "gpt-5.5",
+    "deepseek": "deepseek-chat",
+    "deepseek-chat": "deepseek-chat",
+    "deepseek-reasoner": "deepseek-reasoner",
+    "openai-compatible": "openai-compatible",
+    "oss": "openai-compatible",
+    "local": "openai-compatible",
     # GP-134 reasoning-model support (2026-04-23): added o3 family for
     # reasoning-heavy substrates (e.g., gp090_01 sopfr cold-recovery)
     # where chain-of-thought depth matters more than token throughput.
@@ -74,6 +80,12 @@ DIRECTOR_MODEL_MAP = {
     "gpt4.1": "gpt-4.1",
     "gpt4.1-mini": "gpt-4.1-mini",
     "gpt5.5": "gpt-5.5",
+    "deepseek": "deepseek-reasoner",
+    "deepseek-chat": "deepseek-chat",
+    "deepseek-reasoner": "deepseek-reasoner",
+    "openai-compatible": "openai-compatible",
+    "oss": "openai-compatible",
+    "local": "openai-compatible",
     "o1": "o1",
     "o3": "o3",
     "o3-mini": "o3-mini",
@@ -196,6 +208,35 @@ def is_openai_model(model_id: str) -> bool:
     return model_id.startswith("gpt") or model_id.startswith("o1") or model_id.startswith("o3") or model_id.startswith("o4")
 
 
+def is_deepseek_model(model_id: str) -> bool:
+    return model_id.startswith("deepseek")
+
+
+def is_openai_compatible_model(model_id: str) -> bool:
+    return (
+        model_id == "openai-compatible"
+        or model_id.startswith("openai-compatible:")
+        or model_id.startswith("oss:")
+        or model_id.startswith("local:")
+    )
+
+
+def openai_compatible_effective_model_id(model_id: str) -> str:
+    for prefix in ("openai-compatible:", "oss:", "local:"):
+        if model_id.startswith(prefix):
+            return model_id.split(":", 1)[1]
+    configured = (
+        os.environ.get("OPENAI_COMPATIBLE_MODEL")
+        or os.environ.get("LOCAL_LLM_MODEL")
+        or os.environ.get("OSS_MODEL")
+    )
+    if configured:
+        return configured
+    raise RuntimeError(
+        "OPENAI_COMPATIBLE_MODEL is not set for openai-compatible model calls."
+    )
+
+
 def is_reasoning_openai_model(model_id: str) -> bool:
     """True for OpenAI models that use the `max_completion_tokens` API
     (reasoning family: o1/o3/o4) and the gpt-5 frontier family which
@@ -214,12 +255,17 @@ def is_reasoning_openai_model(model_id: str) -> bool:
 def get_model_family(model_id: str) -> str:
     """Return provider family for a canonical model ID.
 
-    Returns one of ``"openai"``, ``"anthropic"``, or ``"google"``.
+    Returns one of ``"openai"``, ``"anthropic"``, ``"google"``,
+    ``"deepseek"``, or ``"openai_compatible"``.
     """
     if is_claude_model(model_id):
         return "anthropic"
     if is_openai_model(model_id):
         return "openai"
+    if is_deepseek_model(model_id):
+        return "deepseek"
+    if is_openai_compatible_model(model_id):
+        return "openai_compatible"
     return "google"
 
 
@@ -241,6 +287,8 @@ _SCRIPT_DEFAULT_PER_PROVIDER = {
     "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-4.1",
     "google": "gemini-3.1-pro-preview",
+    "deepseek": "deepseek-chat",
+    "openai_compatible": "openai-compatible",
 }
 
 
@@ -318,7 +366,7 @@ def pick_model_for_tier(tier: str = "cheap", *, prefer_provider: str | None = No
     principal_pref = _read_principal_preferred_provider()
     if principal_pref and principal_pref in providers and principal_pref not in candidate_order:
         candidate_order.append(principal_pref)
-    for p in ("google", "openai", "anthropic"):
+    for p in ("google", "openai", "anthropic", "deepseek", "openai_compatible"):
         if p in providers and p not in candidate_order:
             candidate_order.append(p)
 
@@ -326,8 +374,16 @@ def pick_model_for_tier(tier: str = "cheap", *, prefer_provider: str | None = No
         "anthropic": "ANTHROPIC_API_KEY",
         "openai": "OPENAI_API_KEY",
         "google": "GEMINI_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+        "openai_compatible": "OPENAI_COMPATIBLE_API_KEY",
     }
     for provider in candidate_order:
+        if provider == "openai_compatible":
+            if os.environ.get("OPENAI_COMPATIBLE_BASE_URL") and os.environ.get(
+                "OPENAI_COMPATIBLE_API_KEY"
+            ):
+                return providers[provider]
+            continue
         if os.environ.get(env_keys.get(provider, "")):
             return providers[provider]
     return None
@@ -336,7 +392,8 @@ def pick_model_for_tier(tier: str = "cheap", *, prefer_provider: str | None = No
 def _read_principal_preferred_provider() -> str | None:
     """Walk cwd-up looking for org/preferences/principal.yaml; return its
     `preferences.preferred_llm_provider` if set. Returns one of
-    'anthropic' | 'openai' | 'google' | None.
+    'anthropic' | 'openai' | 'google' | 'deepseek' |
+    'openai_compatible' | None.
 
     Single point of truth for provider preference. Cheap (one file read,
     cached for process lifetime). Walks up the tree the same way
@@ -364,7 +421,13 @@ def _read_principal_preferred_provider() -> str | None:
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
             prefs = data.get("preferences") or {}
             provider = prefs.get("preferred_llm_provider")
-            if provider in ("anthropic", "openai", "google"):
+            if provider in (
+                "anthropic",
+                "openai",
+                "google",
+                "deepseek",
+                "openai_compatible",
+            ):
                 _read_principal_preferred_provider._cached = provider  # type: ignore[attr-defined]
                 return provider
         except Exception:  # noqa: BLE001
@@ -391,7 +454,15 @@ def pick_default_model_id_for_scripts(
     if env_pref:
         # Map external names ("claude" / "gpt" / "gemini") onto canonical
         # family names used here.
-        alias_map = {"claude": "anthropic", "gpt": "openai", "gemini": "google"}
+        alias_map = {
+            "claude": "anthropic",
+            "gpt": "openai",
+            "gemini": "google",
+            "deepseek": "deepseek",
+            "oss": "openai_compatible",
+            "local": "openai_compatible",
+            "openai-compatible": "openai_compatible",
+        }
         order = []
         for raw in env_pref.split(","):
             name = raw.strip().lower()
@@ -414,6 +485,14 @@ def pick_default_model_id_for_scripts(
             return _SCRIPT_DEFAULT_PER_PROVIDER["openai"]
         if family == "google" and os.environ.get("GEMINI_API_KEY"):
             return _SCRIPT_DEFAULT_PER_PROVIDER["google"]
+        if family == "deepseek" and os.environ.get("DEEPSEEK_API_KEY"):
+            return _SCRIPT_DEFAULT_PER_PROVIDER["deepseek"]
+        if (
+            family == "openai_compatible"
+            and os.environ.get("OPENAI_COMPATIBLE_BASE_URL")
+            and os.environ.get("OPENAI_COMPATIBLE_API_KEY")
+        ):
+            return _SCRIPT_DEFAULT_PER_PROVIDER["openai_compatible"]
     return None
 
 
@@ -508,6 +587,8 @@ class LLMRuntime:
         self._gemini_client = None
         self._anthropic_client = None
         self._openai_client = None
+        self._deepseek_client = None
+        self._openai_compatible_client = None
 
     def gemini_client(self):
         if self._gemini_client is None and os.environ.get("GEMINI_API_KEY"):
@@ -530,6 +611,30 @@ class LLMRuntime:
             self._openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
         return self._openai_client
 
+    def deepseek_client(self):
+        if self._deepseek_client is None and os.environ.get("DEEPSEEK_API_KEY"):
+            from openai import OpenAI
+
+            self._deepseek_client = OpenAI(
+                api_key=os.environ.get("DEEPSEEK_API_KEY"),
+                base_url=os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+            )
+        return self._deepseek_client
+
+    def openai_compatible_client(self):
+        if (
+            self._openai_compatible_client is None
+            and os.environ.get("OPENAI_COMPATIBLE_API_KEY")
+            and os.environ.get("OPENAI_COMPATIBLE_BASE_URL")
+        ):
+            from openai import OpenAI
+
+            self._openai_compatible_client = OpenAI(
+                api_key=os.environ.get("OPENAI_COMPATIBLE_API_KEY"),
+                base_url=os.environ.get("OPENAI_COMPATIBLE_BASE_URL"),
+            )
+        return self._openai_compatible_client
+
     def require_gemini_client(self):
         client = self.gemini_client()
         if client is None:
@@ -541,6 +646,13 @@ class LLMRuntime:
             return bool(os.environ.get("ANTHROPIC_API_KEY"))
         if is_openai_model(model_id):
             return bool(os.environ.get("OPENAI_API_KEY"))
+        if is_deepseek_model(model_id):
+            return bool(os.environ.get("DEEPSEEK_API_KEY"))
+        if is_openai_compatible_model(model_id):
+            return bool(
+                os.environ.get("OPENAI_COMPATIBLE_API_KEY")
+                and os.environ.get("OPENAI_COMPATIBLE_BASE_URL")
+            )
         return bool(os.environ.get("GEMINI_API_KEY"))
 
     def default_fallback_model_ids(self, model_id: str) -> tuple[str, ...]:
@@ -601,12 +713,26 @@ class LLMRuntime:
                 messages=[{"role": "user", "content": prompt}],
             )
 
-        if is_openai_model(model_id):
-            client = self.openai_client()
-            if client is None:
-                raise RuntimeError("OPENAI_API_KEY is not set.")
+        if is_openai_model(model_id) or is_deepseek_model(model_id) or is_openai_compatible_model(model_id):
+            if is_openai_model(model_id):
+                client = self.openai_client()
+                if client is None:
+                    raise RuntimeError("OPENAI_API_KEY is not set.")
+                effective_model_id = model_id
+            elif is_deepseek_model(model_id):
+                client = self.deepseek_client()
+                if client is None:
+                    raise RuntimeError("DEEPSEEK_API_KEY is not set.")
+                effective_model_id = model_id
+            else:
+                client = self.openai_compatible_client()
+                if client is None:
+                    raise RuntimeError(
+                        "OPENAI_COMPATIBLE_API_KEY and OPENAI_COMPATIBLE_BASE_URL are not set."
+                    )
+                effective_model_id = openai_compatible_effective_model_id(model_id)
             kwargs = {
-                "model": model_id,
+                "model": effective_model_id,
                 "messages": [{"role": "user", "content": prompt}],
             }
             if is_reasoning_openai_model(model_id):
@@ -664,7 +790,11 @@ class LLMRuntime:
                 fallback_from_model_id=fallback_from_model_id,
             )
 
-        if is_openai_model(requested_model_id):
+        if (
+            is_openai_model(requested_model_id)
+            or is_deepseek_model(requested_model_id)
+            or is_openai_compatible_model(requested_model_id)
+        ):
             usage = getattr(response, "usage", None)
             input_tokens = 0
             output_tokens = 0

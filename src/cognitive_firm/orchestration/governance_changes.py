@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
+from cognitive_firm.orchestration.outcome_links import predicted_effect_from_dict
 from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
 
 
@@ -96,6 +97,7 @@ class GovernanceChangeProposal:
     status: GovernanceChangeStatus = "proposed"
     source_refs: list[str] = field(default_factory=list)
     expected_behavior_change: str | None = None
+    predicted_effect: dict[str, Any] | None = None
     risk_summary: str | None = None
     rollback_plan: str | None = None
     owner_role: str | None = None
@@ -133,6 +135,7 @@ def propose_governance_change(
     rationale: str,
     source_refs: list[str] | None = None,
     expected_behavior_change: str | None = None,
+    predicted_effect: dict[str, Any] | None = None,
     risk_summary: str | None = None,
     rollback_plan: str | None = None,
     owner_role: str | None = None,
@@ -154,9 +157,11 @@ def propose_governance_change(
         raise ValueError("rationale is required")
 
     checks = normalize_invariant_checks(invariant_checks or [])
+    normalized_predicted_effect = normalize_predicted_effect(predicted_effect)
     evidence_sufficiency = assess_evidence_sufficiency(
         source_refs=source_refs or [],
         expected_behavior_change=expected_behavior_change,
+        predicted_effect=normalized_predicted_effect,
         risk_summary=risk_summary,
         rollback_plan=rollback_plan,
         invariant_checks=checks,
@@ -176,6 +181,7 @@ def propose_governance_change(
         ),
         source_refs=source_refs or [],
         expected_behavior_change=expected_behavior_change,
+        predicted_effect=normalized_predicted_effect,
         risk_summary=risk_summary,
         rollback_plan=rollback_plan,
         owner_role=owner_role,
@@ -212,10 +218,12 @@ def list_governance_changes(
             row.get("evidence_sufficiency"),
             source_refs=row.get("source_refs") or [],
             expected_behavior_change=row.get("expected_behavior_change"),
+            predicted_effect=row.get("predicted_effect"),
             risk_summary=row.get("risk_summary"),
             rollback_plan=row.get("rollback_plan"),
             invariant_checks=row["invariant_checks"],
         )
+        row["predicted_effect"] = normalize_predicted_effect(row.get("predicted_effect"))
         proposal = GovernanceChangeProposal(**row)
         if status is not None and proposal.status != status:
             continue
@@ -248,10 +256,181 @@ def normalize_invariant_checks(rows: list[InvariantCheck | dict[str, Any]]) -> l
     return checks
 
 
+def classify_governance_change_tier(
+    *,
+    target_ref: str,
+    change_kind: GovernanceChangeKind | str,
+) -> dict[str, str]:
+    """Classify amendment tier for a proposed governance target.
+
+    This is a standard check helper. It does not decide or approve the
+    proposal; callers include the resulting invariant check as review evidence.
+    """
+
+    target = str(target_ref or "").strip()
+    kind = str(change_kind or "").strip()
+    if not target:
+        raise ValueError("target_ref is required for tier classification")
+    immutable_targets = (
+        "docs/kernel-invariants.md",
+        "org/invariants/",
+        "org/roles/principal",
+        "org/mandates/principal",
+        "org/authority/principal",
+    )
+    tier_one_targets = (
+        "org/charters/",
+        "org/workload/scorecards/",
+        "org/workload/scoring/",
+    )
+    tier_two_targets = (
+        "org/roles/",
+        "org/mandates/",
+        "org/policies/",
+        "org/reviews/",
+        "org/decision_models/",
+        "org/learning_events/",
+    )
+    if target == "AGENTS.md" or target.startswith(immutable_targets):
+        return {
+            "tier": "tier_0_immutable",
+            "required_approval_path": "not_admissible",
+            "rationale": (
+                "target affects immutable authority, invariant, or "
+                "principal-control surface"
+            ),
+        }
+    if kind == "project_charter_change" or target.startswith(tier_one_targets):
+        return {
+            "tier": "tier_1_principal_only",
+            "required_approval_path": "principal_explicit_approval",
+            "rationale": (
+                "target affects charter, capability definition, or scoring "
+                "interface"
+            ),
+        }
+    if target.startswith(tier_two_targets):
+        return {
+            "tier": "tier_2_governed_mutation",
+            "required_approval_path": "ordinary_governed_mutation",
+            "rationale": "target affects ordinary governed organization structure",
+        }
+    return {
+        "tier": "tier_2_governed_mutation",
+        "required_approval_path": "ordinary_governed_mutation",
+        "rationale": "target is not a known immutable or principal-only surface",
+    }
+
+
+def tier_classification_invariant_check(
+    *,
+    target_ref: str,
+    change_kind: GovernanceChangeKind | str,
+    evidence_refs: list[str] | None = None,
+) -> InvariantCheck:
+    """Return a standard invariant check for amendment-tier classification."""
+
+    classification = classify_governance_change_tier(
+        target_ref=target_ref,
+        change_kind=change_kind,
+    )
+    tier = classification["tier"]
+    status: InvariantStatus = "fail" if tier == "tier_0_immutable" else "pass"
+    refs = _string_list(evidence_refs or [])
+    refs.append(f"tier_classification:{tier}")
+    return InvariantCheck(
+        invariant="amendment_tier_classified",
+        status=status,
+        rationale=(
+            f"{tier}; required approval path: "
+            f"{classification['required_approval_path']}; "
+            f"{classification['rationale']}"
+        ),
+        evidence_refs=refs,
+    )
+
+
+def deletion_duty_invariant_check(
+    *,
+    target_ref: str,
+    change_kind: GovernanceChangeKind | str,
+    retirement_candidate_ref: str | None = None,
+    net_growth_justification: str | None = None,
+    evidence_refs: list[str] | None = None,
+) -> InvariantCheck:
+    """Return an optional net-growth/deletion-duty check.
+
+    This check is for charters that want structural additions to name what can
+    be retired, merged, or explicitly kept despite net growth. It does not make
+    deletion mandatory across the kernel; callers opt in by adding the check to
+    a proposal's invariant evidence.
+    """
+
+    target = str(target_ref or "").strip()
+    kind = str(change_kind or "").strip()
+    if not target:
+        raise ValueError("target_ref is required for deletion-duty check")
+    structural_addition = kind in {
+        "role_change",
+        "route_policy_change",
+        "capability_policy_change",
+        "gate_policy_change",
+        "learning_policy_change",
+        "tenant_policy_change",
+    } or target.startswith(
+        (
+            "org/roles/",
+            "org/policies/",
+            "org/decision_models/",
+            "org/protocols/",
+            "org/routes/",
+        )
+    )
+    refs = _string_list(evidence_refs or [])
+    if not structural_addition:
+        refs.append("deletion_duty:not_applicable")
+        return InvariantCheck(
+            invariant="deletion_duty_checked",
+            status="pass",
+            rationale="target is not classified as a structure-adding change",
+            evidence_refs=refs,
+        )
+
+    retirement = (retirement_candidate_ref or "").strip()
+    justification = (net_growth_justification or "").strip()
+    if retirement:
+        refs.append(f"retirement_candidate:{retirement}")
+        return InvariantCheck(
+            invariant="deletion_duty_checked",
+            status="pass",
+            rationale="structure-adding proposal names a retirement candidate",
+            evidence_refs=refs,
+        )
+    if justification:
+        refs.append("net_growth_justification:present")
+        return InvariantCheck(
+            invariant="deletion_duty_checked",
+            status="pass",
+            rationale="structure-adding proposal justifies net growth",
+            evidence_refs=refs,
+        )
+    refs.append("deletion_duty:missing_retirement_or_justification")
+    return InvariantCheck(
+        invariant="deletion_duty_checked",
+        status="fail",
+        rationale=(
+            "structure-adding proposal must name a retirement candidate or "
+            "justify net growth"
+        ),
+        evidence_refs=refs,
+    )
+
+
 def assess_evidence_sufficiency(
     *,
     source_refs: list[str],
     expected_behavior_change: str | None,
+    predicted_effect: dict[str, Any] | None = None,
     risk_summary: str | None,
     rollback_plan: str | None,
     invariant_checks: list[InvariantCheck],
@@ -266,7 +445,7 @@ def assess_evidence_sufficiency(
     clean_sources = _string_list(source_refs)
     if not clean_sources:
         missing.append("source_refs")
-    if not (expected_behavior_change or "").strip():
+    if not (expected_behavior_change or "").strip() and predicted_effect is None:
         missing.append("expected_behavior_change")
     if not (risk_summary or "").strip():
         missing.append("risk_summary")
@@ -307,6 +486,7 @@ def normalize_evidence_sufficiency(
     *,
     source_refs: list[str],
     expected_behavior_change: str | None,
+    predicted_effect: dict[str, Any] | None = None,
     risk_summary: str | None,
     rollback_plan: str | None,
     invariant_checks: list[InvariantCheck],
@@ -323,10 +503,19 @@ def normalize_evidence_sufficiency(
     return assess_evidence_sufficiency(
         source_refs=source_refs,
         expected_behavior_change=expected_behavior_change,
+        predicted_effect=predicted_effect,
         risk_summary=risk_summary,
         rollback_plan=rollback_plan,
         invariant_checks=invariant_checks,
     )
+
+
+def normalize_predicted_effect(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Validate and normalize an optional governance-change predicted effect."""
+
+    if payload is None:
+        return None
+    return predicted_effect_from_dict(payload).as_dict()
 
 
 def missing_required_invariants(checks: list[InvariantCheck]) -> list[str]:
@@ -393,6 +582,7 @@ def governance_change_resource(proposal: GovernanceChangeProposal) -> KernelReso
             "proposed_by": proposal.proposed_by,
             "source_refs": proposal.source_refs,
             "expected_behavior_change": proposal.expected_behavior_change,
+            "predicted_effect": proposal.predicted_effect,
             "risk_summary": proposal.risk_summary,
             "rollback_plan": proposal.rollback_plan,
             "owner_role": proposal.owner_role,
@@ -411,6 +601,94 @@ def governance_change_resource(proposal: GovernanceChangeProposal) -> KernelReso
         },
         links=links,
     )
+
+
+def governance_change_from_candidate(
+    candidate: Any,
+    *,
+    target_ref: str,
+    proposed_by: str,
+    change_kind: GovernanceChangeKind | str | None = None,
+    title: str | None = None,
+    expected_behavior_change: str | None = None,
+    predicted_effect: dict[str, Any] | None = None,
+    risk_summary: str | None = None,
+    rollback_plan: str | None = None,
+    owner_role: str | None = None,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    invariant_checks: list[InvariantCheck | dict[str, Any]] | None = None,
+    metadata: dict[str, Any] | None = None,
+    proposal_id: str | None = None,
+    log_path: Path | None = None,
+) -> GovernanceChangeProposal:
+    """Create a reviewable governance proposal from a learning candidate.
+
+    The candidate supplies evidence and rationale only. The caller must provide
+    a concrete target, risk summary, rollback plan, and invariant evidence; the
+    normal governance-change sufficiency gate decides whether the proposal is
+    review-ready or blocked.
+    """
+    payload = candidate.as_dict() if hasattr(candidate, "as_dict") else dict(candidate)
+    candidate_id = str(payload.get("candidate_id") or "").strip()
+    if not candidate_id:
+        raise ValueError("candidate_id is required")
+    transition_kind = str(payload.get("transition_kind") or "")
+    inferred_change_kind = change_kind or _change_kind_from_transition_kind(transition_kind)
+    rationale = str(payload.get("rationale") or "").strip()
+    review_question = str(payload.get("review_question") or "").strip()
+    source_refs = _string_list(payload.get("source_refs") or [])
+    object_ref = payload.get("object_ref")
+    if object_ref:
+        source_refs.append(str(object_ref))
+    source_refs.append(f"learning_transition_candidate:{candidate_id}")
+    source_refs = list(dict.fromkeys(source_refs))
+    next_metadata = {
+        **(metadata or {}),
+        "candidate_id": candidate_id,
+        "candidate_transition_kind": transition_kind,
+        "candidate_source_kind": payload.get("source_kind"),
+        "candidate_severity": payload.get("severity"),
+        "candidate_proposed_payload": payload.get("proposed_payload") or {},
+    }
+    return propose_governance_change(
+        change_kind=inferred_change_kind,
+        title=title
+        or f"Review {transition_kind or 'learning'} candidate {candidate_id}",
+        proposed_by=proposed_by,
+        target_ref=target_ref,
+        rationale=rationale or review_question or f"Promote learning candidate {candidate_id}.",
+        source_refs=source_refs,
+        expected_behavior_change=expected_behavior_change,
+        predicted_effect=predicted_effect,
+        risk_summary=risk_summary,
+        rollback_plan=rollback_plan,
+        owner_role=owner_role or payload.get("suggested_owner_role"),
+        tenant_id=tenant_id,
+        project_id=project_id,
+        invariant_checks=invariant_checks,
+        metadata=next_metadata,
+        proposal_id=proposal_id,
+        log_path=log_path,
+    )
+
+
+def _change_kind_from_transition_kind(transition_kind: str) -> str:
+    if transition_kind == "mandate_review":
+        return "mandate_change"
+    if transition_kind == "project_charter_update":
+        return "project_charter_change"
+    if transition_kind == "forecast_contract":
+        return "route_policy_change"
+    if transition_kind == "route_policy_change":
+        return "route_policy_change"
+    if transition_kind == "human_work_session":
+        return "route_policy_change"
+    if transition_kind == "evidence_gap":
+        return "learning_policy_change"
+    if transition_kind == "source_repair":
+        return "learning_policy_change"
+    return "role_change"
 
 
 def _checks_review_ready(checks: list[InvariantCheck]) -> bool:

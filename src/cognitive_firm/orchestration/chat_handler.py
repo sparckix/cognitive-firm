@@ -36,10 +36,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from cognitive_firm.common.paths import ORG_ROOT_DIR
+
 log = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SESSIONS_ROOT = REPO_ROOT / "org" / "sessions"
+SESSIONS_ROOT = ORG_ROOT_DIR / "sessions"
 
 # Cap chat history loaded into reply prompt — keep it fast + cheap.
 MAX_HISTORY_FOR_REPLY = 20
@@ -175,7 +176,7 @@ def generate_and_store_reply(role_id: str, max_pending: int = 5) -> Optional[dic
 
     # Try to load role mandate excerpt (first 1500 chars)
     mandate_excerpt = ""
-    mandate_path = REPO_ROOT / "org" / "mandates" / f"{role_id}_mandate.md"
+    mandate_path = ORG_ROOT_DIR / "mandates" / f"{role_id}_mandate.md"
     if mandate_path.is_file():
         try:
             mandate_excerpt = mandate_path.read_text(encoding="utf-8")[:1500]

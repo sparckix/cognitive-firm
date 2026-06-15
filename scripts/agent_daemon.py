@@ -32,7 +32,7 @@ engine.
 Prerequisites:
     1. python scripts/telegram_setup.py  (one-time)
     2. Agent CLI installed and authenticated (`COGNITIVE_FIRM_AGENT_CLI`, default: claude)
-    3. ANTHROPIC_API_KEY / OPENAI_API_KEY in environment
+    3. For Claude/Codex CLI work, subscription/local CLI auth should be active.
 
 Usage:
     python scripts/agent_daemon.py                    # run forever
@@ -57,6 +57,7 @@ import subprocess
 import sys
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -81,10 +82,23 @@ from cognitive_firm.orchestration.runtime_adapters import (
     RuntimeEvent,
     record_runtime_event,
 )
+from cognitive_firm.orchestration.action_attestation import (
+    create_action_attestation,
+    digest_text,
+)
 from cognitive_firm.signals.damage import emit as emit_damage, list_recent as recent_damage
 from cognitive_firm.sessions.enforce import ensure_session, require_no_conflict
 from cognitive_firm.signals.autoemit import check_mandate_drift
 from cognitive_firm.common.paths import WORKSPACE_DIR
+from cognitive_firm.orchestration.agent_runtime_invocation import (
+    AGENT_ADAPTERS,
+    agent_subprocess_env,
+    build_agent_command as build_agent_runtime_command,
+    build_agent_invocation,
+    build_agent_invocation_receipt,
+    infer_agent_adapter as infer_agent_runtime_adapter,
+    infer_subscription_runtime_from_adapter,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -102,13 +116,75 @@ DEFAULT_INTERVAL = 600  # 10 minutes (legacy default; kept for back-compat)
 # claimed work — see compute_next_interval().
 ACTIVE_TICK_INTERVAL = 270   # under 5-min cache TTL; ~13 ticks/hr
 IDLE_TICK_INTERVAL = 1200    # 20 min; ~3 ticks/hr
-MANDATE_PATH = REPO_ROOT / "org" / "mandates" / "manager_mandate.md"
+@dataclass(frozen=True)
+class DaemonRoots:
+    """Root bundle for running the daemon against an installed firm."""
+
+    kernel_repo_root: Path
+    project_root: Path
+    org_root: Path
+    workspace_root: Path
+
+
+def resolve_daemon_roots(
+    *,
+    project_root: Path | str | None = None,
+    org_root: Path | str | None = None,
+    workspace_root: Path | str | None = None,
+) -> DaemonRoots:
+    """Resolve daemon roots without assuming the kernel repo is the firm.
+
+    Defaults preserve historical behavior. Environment variables let a
+    starter-firm install or tenant overlay run this daemon without copying it:
+
+    - COGNITIVE_FIRM_PROJECT_ROOT: installed firm root / command cwd
+    - ORG_ROOT: installed firm's org directory
+    - COGNITIVE_FIRM_WORKSPACE: installed firm's runtime workspace
+    """
+
+    project = Path(
+        project_root
+        or os.environ.get("COGNITIVE_FIRM_PROJECT_ROOT")
+        or REPO_ROOT
+    ).expanduser().resolve()
+    org = Path(org_root or os.environ.get("ORG_ROOT") or project / "org").expanduser().resolve()
+    workspace = Path(
+        workspace_root
+        or os.environ.get("COGNITIVE_FIRM_WORKSPACE")
+        or project / "cognitive_firm_workspace"
+    ).expanduser().resolve()
+    return DaemonRoots(
+        kernel_repo_root=REPO_ROOT,
+        project_root=project,
+        org_root=org,
+        workspace_root=workspace,
+    )
+
+
+DAEMON_ROOTS = resolve_daemon_roots()
+MANDATE_PATH = DAEMON_ROOTS.org_root / "mandates" / "manager_mandate.md"
 MAX_TASK_DURATION = 3600  # 1 hour max per task
 PROPOSAL_TIMEOUT = 1800  # 30 min to wait for principal approval
-GATES_PENDING_DIR = WORKSPACE_DIR / "gates" / "pending"
-GATES_RESOLVED_DIR = WORKSPACE_DIR / "gates" / "resolved"
+GATES_PENDING_DIR = DAEMON_ROOTS.workspace_root / "gates" / "pending"
+GATES_RESOLVED_DIR = DAEMON_ROOTS.workspace_root / "gates" / "resolved"
 GATE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
-AGENT_ADAPTERS = ("claude_print", "codex_exec")
+
+
+def apply_daemon_roots(roots: DaemonRoots) -> None:
+    """Apply root bundle to daemon-local paths.
+
+    This intentionally does not mutate imported modules that captured their
+    own path constants before argument parsing. For full root isolation,
+    launch the daemon with ORG_ROOT and COGNITIVE_FIRM_WORKSPACE set in the
+    environment. CLI flags are still useful for command cwd, role/mandate
+    reads, gates, and local daemon logs.
+    """
+
+    global DAEMON_ROOTS, MANDATE_PATH, GATES_PENDING_DIR, GATES_RESOLVED_DIR
+    DAEMON_ROOTS = roots
+    MANDATE_PATH = roots.org_root / "mandates" / "manager_mandate.md"
+    GATES_PENDING_DIR = roots.workspace_root / "gates" / "pending"
+    GATES_RESOLVED_DIR = roots.workspace_root / "gates" / "resolved"
 
 
 def _env_first(*names: str, default: str | None = None) -> str | None:
@@ -130,6 +206,92 @@ def _record_daemon_runtime_event(event: RuntimeEvent) -> dict | None:
         return record_runtime_event(event)
     except Exception as exc:  # noqa: BLE001
         log.debug(f"daemon runtime projection failed (non-fatal): {exc}")
+        return None
+
+
+def _record_daemon_action_attestation(
+    *,
+    roots: DaemonRoots,
+    role_id: str,
+    candidate: Candidate,
+    session_id: str,
+    runtime_run_id: str | None,
+    agent_cli: str,
+    agent_adapter: str,
+    result: dict,
+    duration_s: float,
+) -> dict | None:
+    """Best-effort machine provenance for one daemon CLI dispatch."""
+    subject_ref = (
+        f"runtime:{COGNITIVE_FIRM_DAEMON_RUNTIME}:"
+        f"{_daemon_external_run_id(role_id, session_id, candidate)}:"
+        "dispatch_agent_cli"
+    )
+    payload = {
+        "role_id": role_id,
+        "candidate_source": candidate.source,
+        "candidate_subject": _candidate_subject(candidate),
+        "session_id": session_id,
+        "runtime_run_id": runtime_run_id,
+        "agent_cli": Path(agent_cli).name,
+        "agent_adapter": agent_adapter,
+        "returncode": result.get("returncode"),
+        "success": result.get("success"),
+        "duration_s": round(duration_s, 3),
+        "prompt_ref": result.get("prompt_ref"),
+        "stdout_tail": result.get("stdout", "")[-500:],
+        "stderr_tail": result.get("stderr", "")[-500:],
+        "error": result.get("error"),
+    }
+    invocation_receipt = result.get("invocation_receipt")
+    if isinstance(invocation_receipt, dict):
+        payload["agent_invocation_receipt"] = invocation_receipt
+    input_refs = [
+        str(candidate.origin_path) if candidate.origin_path else "candidate:runtime",
+    ]
+    output_refs = [
+        "workspace/agent_daemon_log.jsonl",
+    ]
+    if isinstance(invocation_receipt, dict):
+        prompt_digest = invocation_receipt.get("prompt_digest")
+        stdout_digest = invocation_receipt.get("stdout_digest")
+        stderr_digest = invocation_receipt.get("stderr_digest")
+        if isinstance(prompt_digest, str) and prompt_digest:
+            input_refs.append(f"prompt:{prompt_digest}")
+        if isinstance(stdout_digest, str) and stdout_digest:
+            output_refs.append(f"stdout:{stdout_digest}")
+        if isinstance(stderr_digest, str) and stderr_digest:
+            output_refs.append(f"stderr:{stderr_digest}")
+    try:
+        attestation = create_action_attestation(
+            subject_kind="runtime_event",
+            subject_ref=subject_ref,
+            subject_digest=digest_text(json.dumps(payload, sort_keys=True, default=str)),
+            producer=f"role.{role_id}",
+            action_type="agent_cli_dispatch",
+            runtime_ref=f"run:{runtime_run_id}" if runtime_run_id else None,
+            tool_ref=f"agent_cli:{Path(agent_cli).name}",
+            input_refs=input_refs,
+            output_refs=output_refs,
+            verification_status="verified" if result.get("success") else "failed",
+            verification_summary=(
+                "daemon dispatched configured role-bearing agent runtime"
+                if result.get("success")
+                else str(result.get("error") or result.get("stderr") or "agent CLI dispatch failed")[:500]
+            ),
+            project_id=(candidate.metadata or {}).get("project_slug"),
+            run_id=runtime_run_id,
+            metadata=payload,
+            log_path=roots.org_root / "attestations" / "action_attestations.jsonl",
+        )
+        return {
+            "attestation_id": attestation.attestation_id,
+            "subject_ref": attestation.subject_ref,
+            "verification_status": attestation.verification_status,
+            "run_id": attestation.run_id,
+        }
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"daemon action attestation failed (non-fatal): {exc}")
         return None
 
 
@@ -399,14 +561,7 @@ def _proactive_rd_candidates() -> list[Candidate]:
 
 def infer_agent_adapter(agent_cli: str, requested: str = "auto") -> str:
     """Resolve the runtime adapter for a CLI command."""
-    if requested != "auto":
-        if requested not in AGENT_ADAPTERS:
-            raise ValueError(f"unsupported agent adapter: {requested}")
-        return requested
-    name = Path(agent_cli).name.lower()
-    if name == "codex":
-        return "codex_exec"
-    return "claude_print"
+    return infer_agent_runtime_adapter(agent_cli, requested=requested)
 
 
 def build_agent_command(
@@ -415,6 +570,7 @@ def build_agent_command(
     adapter: str,
     prompt: str,
     project: str | None = None,
+    project_root: Path | str | None = None,
     claude_session_id: str | None = None,
     claude_session_is_new: bool = False,
 ) -> list[str]:
@@ -424,7 +580,8 @@ def build_agent_command(
     principal-authorized layer. The agent CLI inside a tick must NOT ask
     for human approval on tool calls — if it does, the tick hangs or
     returns early, breaking the cron-style cadence the daemon depends on.
-    Codex: `--ask-for-approval never` (already set). Claude Code:
+    Codex: `codex exec` runs noninteractively under the selected sandbox.
+    Claude Code:
     `--permission-mode acceptEdits` (auto-accepts file edits; risky ops
     still escalate via the org/signals/damage/ channel rather than via the
     CLI's permission prompt). Override via env
@@ -437,38 +594,22 @@ def build_agent_command(
     rebuild context every 5–20 minutes. Codex's `codex exec` does not
     support resume; the codex_exec branch ignores the session params.
     """
-    if adapter == "claude_print":
-        permission_mode = _env_first(
-            "COGNITIVE_FIRM_CLAUDE_PERMISSION_MODE",
-            default="acceptEdits",
-        )
-        cmd = [agent_cli, "--print", "--permission-mode", permission_mode]
-        if claude_session_id:
-            if claude_session_is_new:
-                cmd.extend(["--session-id", claude_session_id])
-            else:
-                cmd.extend(["--resume", claude_session_id])
-        if project:
-            cmd.extend(["--project", str(REPO_ROOT)])
-        cmd.extend(["-p", prompt])
-        return cmd
-    if adapter == "codex_exec":
-        cmd = [
-            agent_cli,
-            "exec",
-            "--cd",
-            str(REPO_ROOT),
-            "--sandbox",
-            "workspace-write",
-            "--ask-for-approval",
-            "never",
-        ]
-        cmd.append(prompt)
-        return cmd
-    raise ValueError(f"unsupported agent adapter: {adapter}")
+    return build_agent_runtime_command(
+        agent_cli=agent_cli,
+        adapter=adapter,
+        prompt=prompt,
+        project_root=project_root or DAEMON_ROOTS.project_root,
+        claude_session_id=claude_session_id,
+        claude_session_is_new=claude_session_is_new,
+    )
 
 
-def _format_bootstrap_chain_for_prompt(*, role_id: str) -> str:
+def _format_bootstrap_chain_for_prompt(
+    *,
+    role_id: str,
+    project_root: Path | None = None,
+    org_root: Path | None = None,
+) -> str:
     """Format the bootstrap-chain reads from `org/bootstrap_manifest.yaml`.
 
     Falls back to the historical hardcoded list if the manifest is missing
@@ -477,7 +618,10 @@ def _format_bootstrap_chain_for_prompt(*, role_id: str) -> str:
     Returns multi-line markdown with required and conditional reads, with
     `{role_id}` placeholders substituted.
     """
-    manifest_path = REPO_ROOT / "org" / "bootstrap_manifest.yaml"
+    roots = DAEMON_ROOTS
+    project_root = project_root or roots.project_root
+    org_root = org_root or roots.org_root
+    manifest_path = org_root / "bootstrap_manifest.yaml"
     fallback = (
         "First read AGENTS.md (start with §0–§5b — the MUST-READ subset).\n"
         f"Read org/roles/{role_id}.yaml for your durable role contract.\n"
@@ -514,8 +658,8 @@ def _format_bootstrap_chain_for_prompt(*, role_id: str) -> str:
         out_rel = entry.get("output_to")
         if not script_rel or not out_rel:
             continue
-        script_path = REPO_ROOT / script_rel
-        out_path = REPO_ROOT / out_rel
+        script_path = project_root / script_rel
+        out_path = project_root / out_rel
         extra_args = entry.get("args") or []
         if not isinstance(extra_args, list):
             extra_args = []
@@ -576,6 +720,7 @@ def execute_task(
     *,
     role_id: str = "manager",
     mandate_path: Path | None = None,
+    roots: DaemonRoots | None = None,
     agent_cli: str = "claude",
     agent_adapter: str = "auto",
     use_resume: bool = True,
@@ -598,9 +743,10 @@ def execute_task(
     except ValueError as exc:
         return {"success": False, "error": str(exc), "stdout": "", "stderr": ""}
 
-    role_path = REPO_ROOT / "org" / "roles" / f"{role_id}.yaml"
+    roots = roots or DAEMON_ROOTS
+    role_path = roots.org_root / "roles" / f"{role_id}.yaml"
     if mandate_path is None:
-        mandate_path = REPO_ROOT / "org" / "mandates" / f"{role_id}_mandate.md"
+        mandate_path = roots.org_root / "mandates" / f"{role_id}_mandate.md"
 
     # Cross-tick continuity: get-or-create the persistent Claude session
     # id for this role. Stale sessions (tick_count >= 100 OR age >= 24h)
@@ -622,7 +768,11 @@ def execute_task(
     # Build the prompt with governance context. Reads from the canonical
     # bootstrap manifest at org/bootstrap_manifest.yaml so adding a 7th
     # required-read file is a YAML edit not a Python source edit.
-    bootstrap_lines = _format_bootstrap_chain_for_prompt(role_id=role_id)
+    bootstrap_lines = _format_bootstrap_chain_for_prompt(
+        role_id=role_id,
+        project_root=roots.project_root,
+        org_root=roots.org_root,
+    )
 
     # Per-task checkpoint: surface prior-tick conclusion to the agent.
     prior_checkpoint_hint = ""
@@ -638,6 +788,19 @@ def execute_task(
                 f"- last task: {prior_intent[:200]}\n"
                 f"- last summary: {prior_summary[:400]}\n"
             )
+
+    optional_instructions = []
+    if (roots.project_root / "docs" / "field-validation-pilot.md").exists():
+        optional_instructions.append(
+            "- For experiment-style work, follow the project charter and `docs/field-validation-pilot.md`"
+        )
+    if (roots.project_root / "EXPERIMENT_TRACK_RECORD.md").exists():
+        optional_instructions.append("- Record all findings in EXPERIMENT_TRACK_RECORD.md")
+    if telegram_available():
+        optional_instructions.append("- Push-notify via telegram on completion or if you need a decision")
+    optional_instruction_block = (
+        "\n".join(optional_instructions) + "\n" if optional_instructions else ""
+    )
 
     prompt = f"""You are the autonomous {role_id} role for this repository.
 
@@ -657,52 +820,112 @@ IMPORTANT:
 - If the route is `artifact_build` and you are a director/reviewer role, write the artifact_build_spec.md and a handoff task for an authorized builder role; do not silently edit implementation artifacts.
 - If the route is `experiment_loop`, run the implementation-specific preflight substrate audit first; do not launch if the contract/gates are unstable.
 - Conflict resolution: canonical priority is in `org/bootstrap_manifest.yaml` under `conflict_resolution_priority`. When in doubt, the role yaml `forbidden_paths` typed contract wins; AGENTS.md §0–§5b controlling rules win over §6+ reference sections; role mandate wins over task description for SCOPE; task description wins for SUBJECT MATTER.
-- For experiment-style work, follow the project charter and `docs/field-validation-pilot.md`
 - Stay within the role's authorized paths and forbidden paths
-- Record all findings in EXPERIMENT_TRACK_RECORD.md
-- Push-notify via telegram on completion or if you need a decision
-"""
+{optional_instruction_block}"""
     prompt += "\nCOMMAND SURFACE:\n" + command_surface_hint(task_description) + "\n"
     if prior_checkpoint_hint:
         prompt += prior_checkpoint_hint
-    cmd = build_agent_command(
+    prompt_dir = roots.project_root / "workspace" / "agent_prompts"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    prompt_name = (
+        re.sub(r"[^A-Za-z0-9_.-]+", "_", role_id).strip("_") or "agent"
+    )
+    prompt_path = prompt_dir / (
+        f"{prompt_name}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.md"
+    )
+    prompt_path.write_text(prompt, encoding="utf-8")
+    prompt_ref = str(prompt_path.relative_to(roots.project_root))
+    invocation = build_agent_invocation(
         agent_cli=agent_cli,
         adapter=adapter,
         prompt=prompt,
-        project=project,
+        project_root=roots.project_root,
         claude_session_id=claude_session_id,
         claude_session_is_new=claude_session_is_new,
     )
+    cmd = invocation.argv
 
     log.info(f"Executing via {adapter}: {task_description[:80]}...")
-    # Subscription-auth split (per principal directive 2026-05-07):
-    # When invoking the agent CLI (claude/codex), strip ANTHROPIC_API_KEY +
-    # OPENAI_API_KEY from the subprocess env so the CLI falls through to
-    # subscription auth (claude setup-token / codex login). The substrate-
-    # layer LLMRuntime calls retain the keys via os.environ in the parent
-    # process — this scrub only affects subprocess invocations.
-    subprocess_env = {k: v for k, v in os.environ.items()
-                      if k not in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")}
+    # Runtime-auth split: spawned Claude/Codex CLIs prefer subscription/local
+    # auth by stripping the provider API key that would otherwise override it.
+    # Parent-process LLMRuntime API calls remain separate.
+    subprocess_env = agent_subprocess_env(
+        runtime=infer_subscription_runtime_from_adapter(adapter),
+    )
     try:
         result = subprocess.run(
             cmd,
+            input=invocation.stdin,
             capture_output=True,
             text=True,
             timeout=MAX_TASK_DURATION,
-            cwd=str(REPO_ROOT),
+            cwd=str(roots.project_root),
             env=subprocess_env,
+        )
+        invocation_receipt = build_agent_invocation_receipt(
+            command_argv=cmd,
+            prompt=prompt,
+            runtime=infer_subscription_runtime_from_adapter(adapter),
+            adapter=adapter,
+            prompt_transport=invocation.prompt_transport,
+            returncode=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            stdout_preview_chars=2000,
+            stderr_preview_chars=500,
         )
         out = {
             "success": result.returncode == 0,
-            "stdout": result.stdout[-2000:] if result.stdout else "",
-            "stderr": result.stderr[-500:] if result.stderr else "",
+            "stdout": invocation_receipt["stdout_preview"],
+            "stderr": invocation_receipt["stderr_preview"],
             "returncode": result.returncode,
             "claude_session_id": claude_session_id,
+            "prompt_ref": prompt_ref,
+            "prompt_transport": invocation.prompt_transport,
+            "command_argv": invocation_receipt["command_argv"],
+            "invocation_receipt": invocation_receipt,
         }
     except subprocess.TimeoutExpired:
-        out = {"success": False, "error": "timeout", "stdout": "", "stderr": "", "claude_session_id": claude_session_id}
+        invocation_receipt = build_agent_invocation_receipt(
+            command_argv=cmd,
+            prompt=prompt,
+            runtime=infer_subscription_runtime_from_adapter(adapter),
+            adapter=adapter,
+            prompt_transport=invocation.prompt_transport,
+            returncode=None,
+            timeout_seconds=MAX_TASK_DURATION,
+            error="timeout",
+        )
+        out = {
+            "success": False,
+            "error": "timeout",
+            "stdout": "",
+            "stderr": "",
+            "claude_session_id": claude_session_id,
+            "prompt_ref": prompt_ref,
+            "command_argv": invocation_receipt["command_argv"],
+            "invocation_receipt": invocation_receipt,
+        }
     except FileNotFoundError:
-        out = {"success": False, "error": f"{agent_cli} CLI not found", "stdout": "", "stderr": "", "claude_session_id": claude_session_id}
+        invocation_receipt = build_agent_invocation_receipt(
+            command_argv=cmd,
+            prompt=prompt,
+            runtime=infer_subscription_runtime_from_adapter(adapter),
+            adapter=adapter,
+            prompt_transport=invocation.prompt_transport,
+            returncode=None,
+            error=f"{agent_cli} CLI not found",
+        )
+        out = {
+            "success": False,
+            "error": f"{agent_cli} CLI not found",
+            "stdout": "",
+            "stderr": "",
+            "claude_session_id": claude_session_id,
+            "prompt_ref": prompt_ref,
+            "command_argv": invocation_receipt["command_argv"],
+            "invocation_receipt": invocation_receipt,
+        }
 
     # Continuity bookkeeping: update the per-role tick counter so the
     # session can be auto-rotated when stale.
@@ -721,9 +944,9 @@ IMPORTANT:
 
 # ── Governance checks ─────────────────────────────────────────────────
 
-def check_control_signal(role_id: str) -> str | None:
+def check_control_signal(role_id: str, *, org_root: Path | None = None) -> str | None:
     """Check org/controls/{role_id}.json for STOP/PAUSE/RESUME."""
-    control_path = REPO_ROOT / "org" / "controls" / f"{role_id}.json"
+    control_path = (org_root or DAEMON_ROOTS.org_root) / "controls" / f"{role_id}.json"
     if control_path.exists():
         try:
             data = json.loads(control_path.read_text())
@@ -733,9 +956,14 @@ def check_control_signal(role_id: str) -> str | None:
     return None
 
 
-def read_directives(role_id: str, *, consume: bool = True) -> list[str]:
+def read_directives(
+    role_id: str,
+    *,
+    consume: bool = True,
+    org_root: Path | None = None,
+) -> list[str]:
     """Read and consume pending directives for this role."""
-    directives_dir = REPO_ROOT / "org" / "directives"
+    directives_dir = (org_root or DAEMON_ROOTS.org_root) / "directives"
     results = []
     if not directives_dir.exists():
         return results
@@ -760,19 +988,21 @@ def pre_tick_checks(
     *,
     consume_directives: bool = True,
     poll_inbound: bool = True,
+    roots: DaemonRoots | None = None,
 ) -> list[str]:
     """Run governance checks before each tick. Returns warnings."""
+    roots = roots or DAEMON_ROOTS
     warnings = []
 
     # Check control signals (STOP/PAUSE/RESUME from dashboard)
-    control = check_control_signal(role_id)
+    control = check_control_signal(role_id, org_root=roots.org_root)
     if control == "STOP":
         warnings.append("STOP directive received from dashboard")
     elif control == "PAUSE":
         warnings.append("PAUSE directive received from dashboard")
 
     # Check directives
-    directives = read_directives(role_id, consume=consume_directives)
+    directives = read_directives(role_id, consume=consume_directives, org_root=roots.org_root)
     for d in directives:
         warnings.append(f"Inbound directive: {d[:200]}")
 
@@ -781,7 +1011,7 @@ def pre_tick_checks(
         if getattr(session, "directory", None) is not None:
             check_mandate_drift(
                 session_dir=session.directory,
-                mandate_path=REPO_ROOT / "org" / "mandates" / f"{role_id}_mandate.md",
+                mandate_path=roots.org_root / "mandates" / f"{role_id}_mandate.md",
                 role_id=role_id,
             )
     except Exception as e:
@@ -853,8 +1083,16 @@ def _session_id(session) -> str:
     return str(getattr(session, "session_id", "") or "unknown_session")
 
 
-def _execution_prompt(candidate: Candidate) -> str:
-    origin = str(candidate.origin_path.relative_to(REPO_ROOT)) if candidate.origin_path else "n/a"
+def _safe_relative(path: Path, root: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+
+def _execution_prompt(candidate: Candidate, *, roots: DaemonRoots | None = None) -> str:
+    roots = roots or DAEMON_ROOTS
+    origin = _safe_relative(candidate.origin_path, roots.project_root) if candidate.origin_path else "n/a"
     frontmatter = candidate.metadata.get("frontmatter")
     if not isinstance(frontmatter, dict):
         frontmatter = {}
@@ -878,8 +1116,15 @@ def _candidate_subject(candidate: Candidate) -> str:
     return str(candidate.metadata.get("goal_id") or candidate.intent[:80])
 
 
-def _proposal_card(candidate: Candidate, role_id: str, auth_reason: str) -> str:
-    origin = str(candidate.origin_path.relative_to(REPO_ROOT)) if candidate.origin_path else "n/a"
+def _proposal_card(
+    candidate: Candidate,
+    role_id: str,
+    auth_reason: str,
+    *,
+    roots: DaemonRoots | None = None,
+) -> str:
+    roots = roots or DAEMON_ROOTS
+    origin = _safe_relative(candidate.origin_path, roots.project_root) if candidate.origin_path else "n/a"
     route = candidate.metadata.get("execution_route")
     route_name = route.get("route", "unclassified") if isinstance(route, dict) else "unclassified"
     return (
@@ -928,6 +1173,7 @@ def _write_proposal_gate(
     role_id: str,
     session,
     auth_reason: str,
+    roots: DaemonRoots | None = None,
 ) -> tuple[str, bool]:
     """Returns (gate_id, was_freshly_opened).
 
@@ -944,7 +1190,7 @@ def _write_proposal_gate(
         "gate_id": gate_id,
         "kind": "daemon_proposal",
         "subject": _candidate_subject(candidate),
-        "summary": _proposal_card(candidate, role_id, auth_reason),
+        "summary": _proposal_card(candidate, role_id, auth_reason, roots=roots),
         "options": [
             {"id": "approve", "consequence": "Claim the task and execute the configured role agent."},
             {"id": "skip", "consequence": "Do not execute this candidate on this tick."},
@@ -1246,6 +1492,7 @@ def tick(
     agent_cli: str = "claude",
     agent_adapter: str = "auto",
     member_id: str = "claude",
+    roots: DaemonRoots | None = None,
 ) -> bool:
     """One governance tick: discover → propose → (approve) → execute → record.
 
@@ -1254,6 +1501,7 @@ def tick(
     gate_not_approved / claim_failed). Used by the main loop to switch
     between ACTIVE and IDLE tick intervals."""
 
+    roots = roots or DAEMON_ROOTS
     log.info(f"─── tick start ({role_id}) ───")
 
     # 1. Pre-tick governance checks
@@ -1262,6 +1510,7 @@ def tick(
         role_id=role_id,
         consume_directives=not dry_run,
         poll_inbound=not dry_run,
+        roots=roots,
     )
     for w in warnings:
         log.warning(w)
@@ -1344,7 +1593,7 @@ def tick(
     auth = authorize_dispatch(
         role_id=role_id,
         candidate_source=top.source,
-        candidate_text=_execution_prompt(top),
+        candidate_text=_execution_prompt(top, roots=roots),
         metadata=top.metadata,
         unattended=unattended,
     )
@@ -1392,6 +1641,7 @@ def tick(
             role_id=role_id,
             session=session,
             auth_reason=auth.reason,
+            roots=roots,
         )
         if not was_fresh:
             log.info(f"Proposal gate (reused): {gate_id} — Telegram NOT re-fired")
@@ -1460,7 +1710,7 @@ def tick(
 
     # 5. Execute
     start_ts = time.time()
-    mandate_path = REPO_ROOT / "org" / "mandates" / f"{role_id}_mandate.md"
+    mandate_path = roots.org_root / "mandates" / f"{role_id}_mandate.md"
     if role_id == "manager":
         mandate_path = MANDATE_PATH
     try:
@@ -1528,9 +1778,10 @@ def tick(
         )
     )
     result = execute_task(
-        _execution_prompt(top),
+        _execution_prompt(top, roots=roots),
         role_id=role_id,
         mandate_path=mandate_path,
+        roots=roots,
         agent_cli=agent_cli,
         agent_adapter=agent_adapter,
         org_session_id=_session_id(session),
@@ -1587,6 +1838,28 @@ def tick(
                 )
             except Exception as exc:  # noqa: BLE001
                 log.debug(f"failed to mark gate dispatched: {exc}")
+
+    runtime_run_id = str(runtime_start.get("cognitive_run_id")) if runtime_start else None
+    daemon_attestation = _record_daemon_action_attestation(
+        roots=roots,
+        role_id=role_id,
+        candidate=top,
+        session_id=_session_id(session),
+        runtime_run_id=runtime_run_id,
+        agent_cli=agent_cli,
+        agent_adapter=agent_adapter,
+        result=result,
+        duration_s=duration_s,
+    )
+    if daemon_attestation:
+        append_transition(
+            event="daemon.action.attested",
+            actor="agent_daemon",
+            role_id=role_id,
+            surface="action_attestation",
+            subject=str(daemon_attestation.get("attestation_id")),
+            payload=daemon_attestation,
+        )
 
     # 6. Record
     log.info(f"Task complete. Success: {result['success']}")
@@ -1647,9 +1920,14 @@ def tick(
         "duration_s": round(duration_s, 3),
         "session_id": _session_id(session),
         "returncode": result.get("returncode"),
+        "prompt_ref": result.get("prompt_ref"),
+        "stdout_tail": result.get("stdout", "")[-1000:],
+        "stderr_tail": result.get("stderr", "")[-1000:],
+        "error": result.get("error"),
+        "invocation_receipt": result.get("invocation_receipt"),
         "metadata": top.metadata,
     }
-    log_path = REPO_ROOT / "workspace" / "agent_daemon_log.jsonl"
+    log_path = roots.project_root / "workspace" / "agent_daemon_log.jsonl"
     log_path.parent.mkdir(exist_ok=True)
     with open(log_path, "a") as f:
         f.write(json.dumps(log_entry) + "\n")
@@ -1681,8 +1959,25 @@ def tick(
 def main():
     parser = argparse.ArgumentParser(description="Persistent Autonomous Agent Daemon")
     parser.add_argument("--role", type=str, default="manager",
-                        choices=["manager", "research_director", "self_recursive_orchestrator"],
                         help="Which role this daemon instance fills (default: manager)")
+    parser.add_argument(
+        "--project-root",
+        type=Path,
+        default=None,
+        help="Installed firm root / agent command cwd (default: COGNITIVE_FIRM_PROJECT_ROOT or repo root)",
+    )
+    parser.add_argument(
+        "--org-root",
+        type=Path,
+        default=None,
+        help="Installed firm's org directory (default: ORG_ROOT or <project-root>/org)",
+    )
+    parser.add_argument(
+        "--workspace-root",
+        type=Path,
+        default=None,
+        help="Installed firm's runtime workspace (default: COGNITIVE_FIRM_WORKSPACE or <project-root>/cognitive_firm_workspace)",
+    )
     parser.add_argument("--tick-once", action="store_true", help="Run one tick and exit")
     parser.add_argument("--dry-run", action="store_true", help="Discover and propose, don't execute")
     parser.add_argument("--unattended", action="store_true",
@@ -1731,16 +2026,25 @@ def main():
     parser.add_argument("--idle-interval", type=int, default=IDLE_TICK_INTERVAL,
                         help=f"Seconds between ticks when prior tick was idle (default: {IDLE_TICK_INTERVAL})")
     args = parser.parse_args()
+    roots = resolve_daemon_roots(
+        project_root=args.project_root,
+        org_root=args.org_root,
+        workspace_root=args.workspace_root,
+    )
+    apply_daemon_roots(roots)
 
     log.info("═══════════════════════════════════════")
     log.info("  Agent Daemon — GP-128 Level 2")
     log.info("═══════════════════════════════════════")
     role_id = args.role
-    mandate_path = REPO_ROOT / "org" / "mandates" / f"{role_id}_mandate.md"
+    mandate_path = roots.org_root / "mandates" / f"{role_id}_mandate.md"
     if role_id == "manager":
         mandate_path = MANDATE_PATH  # legacy path
 
     log.info(f"  Role: {role_id}")
+    log.info(f"  Project root: {roots.project_root}")
+    log.info(f"  Org root: {roots.org_root}")
+    log.info(f"  Workspace root: {roots.workspace_root}")
     log.info(f"  Interval: {args.interval}s")
     log.info(f"  Telegram: {'available' if telegram_available() else 'NOT configured (run scripts/telegram_setup.py)'}")
     log.info(f"  Mandate: {mandate_path}")
@@ -1769,6 +2073,7 @@ def main():
             agent_cli=args.agent_cli,
             agent_adapter=args.agent_adapter,
             member_id=args.member_id,
+            roots=roots,
         )
         return
 
@@ -1799,6 +2104,7 @@ def main():
                 agent_cli=args.agent_cli,
                 agent_adapter=args.agent_adapter,
                 member_id=args.member_id,
+                roots=roots,
             ))
         except KeyboardInterrupt:
             log.info("KeyboardInterrupt. Shutting down.")

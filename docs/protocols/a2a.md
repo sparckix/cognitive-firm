@@ -90,6 +90,20 @@ The legal-transitions table lives in `agent_channels.py:_OBLIGATION_TRANSITIONS`
 
 Every state change appends a `agent.obligation.<state>` row to `transitions.jsonl` carrying `from_state`, `to_state`, `parent_obligation_id`. The audit trail records the work-state evolution alongside the envelope-state evolution.
 
+### Loop Guards
+
+A2A is allowed to carry recursive delegation, but not unbounded invisible
+message growth. The local channel writer enforces configurable guardrails before
+it writes a new message:
+
+- maximum messages per thread;
+- maximum parent-obligation chain depth.
+
+The kernel service passes these limits from `KernelServiceConfig` so adopters can
+tune them for their deployment. Exceeding a limit fails closed with a 400 error
+and writes no new message. This keeps agent-to-agent coordination bounded at the
+kernel boundary instead of relying on a demo or runtime prompt to stop itself.
+
 ### Why this matters at T1
 
 Without obligation lifecycle, "B is blocked waiting on A" is only inferable from open messages. With it, the manager-role daemon and Orbit can render the structural view directly via `list_blocked_obligations()`.

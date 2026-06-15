@@ -24,6 +24,12 @@ This protocol adds that production layer without importing any domain policy.
 The kernel owns the contract and the claim discipline. The tenant owns the
 work kinds, the payload schema, and what a finished exit *means*.
 
+This is not a BPM or process-modeling layer. The protocol intentionally stops
+at claimable work, bounded exits, authority, provenance, retries, and
+dead-letter review. A tenant may run a workflow engine, BPM tool, or custom
+process scheduler beside it; cognitive-firm records the organizational facts
+around that execution instead of designing the process graph.
+
 ## Which Invariant It Serves
 
 Work items extend three existing kernel invariants into the production layer
@@ -232,6 +238,13 @@ whether an exit counts as value. It runs a generic company that does durable
 station work under authority and audit. Domain semantics — proof validation,
 ticket triage rules, scoring — stay in the tenant overlay. The kernel only
 requires that finished work names an exit the unit declared in advance.
+
+Do not add workflow-designer features here: stage diagrams, BPMN notation,
+tenant-specific routing logic, process optimization rules, escalation ladders,
+and domain-specific SLAs belong in tenant overlays or external workflow
+systems. Promote a new work-item feature into the kernel only when it protects
+a kernel invariant: typed authority, separation, human work as state, machine
+provenance, accountable closure, or durable learning.
 
 ## Research Anchor
 

@@ -492,6 +492,48 @@ def test_learning_event_replay_includes_global_events_for_tenant_context(tmp_pat
     assert [event.learning_event_id for event in rows] == ["learn_global"]
 
 
+def test_learning_event_replay_filters_by_exact_ref_and_tag(tmp_path: Path):
+    log_path = tmp_path / "learning_events.jsonl"
+    first = create_learning_event(
+        learning_event_id="learn_trace_gate",
+        learning_unit_kind="routine_change",
+        decision_use="Require attribution packet before changing the route.",
+        future_application_cue="trace attribution changes a route",
+        approved_by="role.manager",
+        approval_ref="review/trace-gate",
+        source_carrier_refs=["multi_agent_attribution:packet_1"],
+        metadata={"tags": ["trace_attribution", "demo"]},
+        log_path=log_path,
+    )
+    create_learning_event(
+        learning_event_id="learn_other_gate",
+        learning_unit_kind="routine_change",
+        decision_use="Require a separate review.",
+        future_application_cue="another queue stalls",
+        approved_by="role.manager",
+        approval_ref="review/other",
+        source_carrier_refs=["capability_signal:signal_1"],
+        metadata={"tags": ["capability"]},
+        log_path=log_path,
+    )
+
+    by_carrier = replay_learning_events(
+        source_ref="multi_agent_attribution:packet_1",
+        log_path=log_path,
+    )
+    by_learning_ref = replay_learning_events(
+        source_ref="learning_event:learn_trace_gate",
+        log_path=log_path,
+    )
+    by_tag = replay_learning_events(tag="trace_attribution", log_path=log_path)
+
+    assert [event.learning_event_id for event in by_carrier] == [first.learning_event_id]
+    assert [event.learning_event_id for event in by_learning_ref] == [first.learning_event_id]
+    assert [event.learning_event_id for event in by_tag] == [first.learning_event_id]
+    assert replay_learning_events(source_ref="packet_1", log_path=log_path) == []
+    assert replay_learning_events(tag="trace", log_path=log_path) == []
+
+
 def test_learning_event_lifecycle_requires_reason_or_replacement(tmp_path: Path):
     log_path = tmp_path / "learning_events.jsonl"
     event = create_learning_event(

@@ -47,7 +47,7 @@ for catching laundering, not for endorsing.
 Single-agent audit run AFTER another pattern produces a claim:
 
 1. Receive claim + claim's proof/argument
-2. List load-bearing steps (the inversion target)
+2. List critical steps (the inversion target)
 3. For each step: identify what could break it
    - Hidden hypothesis (what's silently assumed?)
    - Tautological reduction (does this rename the problem?)

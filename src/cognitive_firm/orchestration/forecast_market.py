@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import ORG_ROOT_DIR
 
 
 ForecastLayer = Literal["macro", "meso", "micro"]
@@ -40,7 +40,7 @@ ForecastLifecycleState = Literal[
     "unknown",
 ]
 
-DEFAULT_FORECAST_MARKET_ROOT = REPO_ROOT / "org" / "forecast_market"
+DEFAULT_FORECAST_MARKET_ROOT = ORG_ROOT_DIR / "forecast_market"
 
 
 @dataclass(frozen=True)

@@ -18,7 +18,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - bare Python product path.
     yaml = None
 
-from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import ORG_ROOT_DIR
 from cognitive_firm.common.paths import WORKSPACE_DIR
 
 
@@ -93,7 +93,7 @@ def _minimal_yaml_load(text: str) -> dict[str, Any]:
 
 
 def _load_role(role_id: str) -> dict[str, Any]:
-    path = REPO_ROOT / "org" / "roles" / f"{role_id}.yaml"
+    path = ORG_ROOT_DIR / "roles" / f"{role_id}.yaml"
     text = path.read_text(encoding="utf-8")
     data = yaml.safe_load(text) if yaml is not None else _minimal_yaml_load(text)
     if not isinstance(data, dict):

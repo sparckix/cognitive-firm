@@ -39,7 +39,7 @@ spawn:
       description: |
         Research-Director-direct cross-family LLM cold-shot via external
         model providers. Used when (a) no iterative research loop is active
-        on the substrate, or (b) the load-bearing question is at the
+        on the substrate, or (b) the decisive question is at the
         meta-architecture layer (e.g. "is this Lean encoding faithful?").
         Cost caps and provider policy are deployment choices.
       tools: [bash]
@@ -75,7 +75,7 @@ references:
 
 A **single-dispatch, cross-family, no-prior-context, de-anchored, alien-
 math-discipline** prompt to an LLM, used
-to attack a load-bearing eigenquestion when same-family agents have
+to attack a decisive eigenquestion when same-family agents have
 converged on a dead route or the question lives at the meta-architecture
 layer that same-family agent swarms cannot reach without bias.
 
@@ -98,7 +98,7 @@ Every cold-shot prompt MUST contain (verbatim or close paraphrase):
    literature has already tried."
 3. **Explicit de-anchoring**: "Do not anchor on [LIST: papers/ techniques
    the failing route used] even though those are cited below."
-4. **Drop non-load-bearing frames**: "If a frame is not load-bearing for
+4. **Drop non-critical frames**: "If a frame is not critical for
    the problem, drop it."
 5. **Alien-math tradition swap**: "Alien-math discipline: assume you are
    a mathematician from a different tradition than [the tradition that

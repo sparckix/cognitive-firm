@@ -120,6 +120,49 @@ The CLI can render the same compatibility shape:
 python -m cognitive_firm.orchestration.accountability_cases list --resource
 ```
 
+## Damage-Signal Escalation
+
+Damage signals are fast observations. They are not closure records and they do
+not decide remediation. When a signal needs accountable review, convert it into
+an accountability-case request and then create the normal case:
+
+```python
+from cognitive_firm.orchestration.accountability_cases import (
+    build_damage_signal_accountability_case_request,
+    create_accountability_case,
+)
+
+request = build_damage_signal_accountability_case_request(
+    damage_signal,
+    accountable_role="role.manager",
+    authority_envelope_ref="org/mandates/manager_mandate.md",
+)
+case = create_accountability_case(**request)
+```
+
+The helper maps the signal's source, kind, detail, severity, timestamp, and
+session id into:
+
+- a stable `damage_signal:<kind>:<digest>` trigger ref unless the caller
+  supplies a more precise ref;
+- a risk tier and recourse path derived from severity;
+- `externality_tags: ["damage:<kind>"]`;
+- metadata carrying the original signal and
+  `source_recipe: damage_signal_accountability_case_request.v1`.
+
+This is deliberately one-way composition. The helper does not clear the damage
+signal, close the accountability case, mutate routing, or retire a routine.
+Those remain explicit review actions.
+
+App surfaces can use the same composition through the kernel service:
+
+```text
+POST /kernel/accountability-cases/from-damage-signal
+```
+
+The route writes a normal accountability-case row after the usual service
+actor, membership, surface-policy, and lease checks.
+
 ## Boundary
 
 Use the accountability summary for visibility. Use accountability cases for

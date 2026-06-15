@@ -16,6 +16,7 @@ REQUIRED_DOCS = (
     "docs/abstraction-map.md",
     "docs/resource-event-catalog.md",
     "docs/blueprints/README.md",
+    "docs/examples/README.md",
     "docs/examples/app-service-integration-example.md",
     "docs/templates/field-pilot/README.md",
     "docs/reader-checklist.md",

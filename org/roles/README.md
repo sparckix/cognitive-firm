@@ -21,3 +21,4 @@ _Folder index. Prose may be added above the auto-index block._
 
 <sub>0 sub-folder(s), 6 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
 
+<!-- AUTO-INDEX:END -->

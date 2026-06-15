@@ -11,12 +11,14 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from cognitive_firm.orchestration.accountability_cases import (  # noqa: E402
     accountability_case_resource,
+    build_damage_signal_accountability_case_request,
     create_accountability_case,
     list_accountability_cases,
     main as accountability_cases_main,
     update_accountability_case_status,
 )
 from cognitive_firm.orchestration.resource_envelope import validate_resource  # noqa: E402
+from cognitive_firm.signals.damage import DamageSignal  # noqa: E402
 
 
 def test_create_and_list_accountability_case(tmp_path: Path):
@@ -247,3 +249,94 @@ def test_accountability_case_cli_can_render_resource_envelopes(tmp_path: Path, c
     assert payloads[0]["kind"] == "AccountabilityCase"
     assert payloads[0]["metadata"]["name"] == case.case_id
     assert validate_resource(payloads[0]) == []
+
+
+def test_damage_signal_builds_accountability_case_request(tmp_path: Path):
+    log = tmp_path / "accountability_cases.jsonl"
+    request = build_damage_signal_accountability_case_request(
+        {
+            "timestamp_utc": "2026-06-12T20:30:00+00:00",
+            "source": "runtime:codex",
+            "kind": "mandate_hash_mismatch",
+            "detail": "Mandate changed while the role session was active.",
+            "session_id": "sess_1",
+            "severity": "critical",
+        },
+        accountable_role="role.manager",
+        authority_envelope_ref="org/mandates/manager_mandate.md",
+        tenant_id="tenant-a",
+        project_id="project-a",
+        case_id="acct_damage_1",
+    )
+
+    assert request == {
+        "trigger_ref": "damage_signal:mandate_hash_mismatch:6bd58dfcd320",
+        "accountable_role": "role.manager",
+        "responsible_actor": "runtime:codex",
+        "decision_right_basis": "tenant_rule",
+        "authority_envelope_ref": "org/mandates/manager_mandate.md",
+        "risk_tier": "high",
+        "recourse_path": "escalate",
+        "review_sla": None,
+        "tenant_id": "tenant-a",
+        "project_id": "project-a",
+        "due_at_utc": None,
+        "externality_tags": ["damage:mandate_hash_mismatch"],
+        "operator_burden": "high",
+        "rationale": (
+            "Damage signal 'mandate_hash_mismatch' from runtime:codex: "
+            "Mandate changed while the role session was active."
+        ),
+        "metadata": {
+            "source_recipe": "damage_signal_accountability_case_request.v1",
+            "damage_signal": {
+                "timestamp_utc": "2026-06-12T20:30:00+00:00",
+                "source": "runtime:codex",
+                "kind": "mandate_hash_mismatch",
+                "detail": "Mandate changed while the role session was active.",
+                "session_id": "sess_1",
+                "severity": "critical",
+            },
+        },
+        "case_id": "acct_damage_1",
+    }
+
+    case = create_accountability_case(log_path=log, **request)
+
+    assert case.case_id == "acct_damage_1"
+    assert case.status == "open"
+    assert case.risk_tier == "high"
+    assert case.recourse_path == "escalate"
+    assert case.metadata["source_recipe"] == (
+        "damage_signal_accountability_case_request.v1"
+    )
+
+
+def test_damage_signal_request_accepts_dataclass_and_warning_defaults() -> None:
+    signal = DamageSignal(
+        timestamp_utc="2026-06-12T20:30:00+00:00",
+        source="agent_daemon",
+        kind="agent_returned_no_progress",
+        detail="Agent exited without closing or updating the task.",
+        session_id=None,
+        severity="warn",
+    )
+
+    request = build_damage_signal_accountability_case_request(
+        signal,
+        accountable_role="role.manager",
+        responsible_actor="role.manager",
+        decision_right_basis="mandate",
+        authority_envelope_ref="org/mandates/manager_mandate.md",
+        trigger_ref="damage_signal:agent_returned_no_progress:explicit",
+        metadata={"run_id": "run_1"},
+    )
+
+    assert request["trigger_ref"] == "damage_signal:agent_returned_no_progress:explicit"
+    assert request["responsible_actor"] == "role.manager"
+    assert request["decision_right_basis"] == "mandate"
+    assert request["risk_tier"] == "medium"
+    assert request["recourse_path"] == "reopen"
+    assert request["operator_burden"] == "medium"
+    assert request["metadata"]["run_id"] == "run_1"
+    assert request["metadata"]["damage_signal"]["severity"] == "warn"

@@ -15,8 +15,8 @@ decision from those logs:
 ```text
 action-impact rows
 -> business-function candidate proposer
--> conservative offline policy evaluation
--> governance review packet
+-> kernel-service offline policy evaluation route
+-> kernel-service governance review packet route
 ```
 
 The expected result is one review-ready packet and one blocked packet:
@@ -32,5 +32,6 @@ This is deliberately not an online optimizer. The reusable primitive is
 `cognitive_firm.orchestration.business_function_bandit.propose_business_function_policy`.
 It only emits a candidate context-to-arm map plus diagnostics. The existing
 `action_impact` evaluator and `PolicyPromotionPacket` turn that candidate into
-review evidence. A tenant still needs governance approval before any live
-routing policy changes.
+review evidence through `/kernel/action-impact/*` routes, so the demo exercises
+the same service boundary an adopter would use. A tenant still needs governance
+approval before any live routing policy changes.

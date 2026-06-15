@@ -2,7 +2,8 @@
 
 **Status:** local deterministic interface shipped.
 **Module:** `cognitive_firm.orchestration.policy_decisions`
-**Tests:** `tests/test_policy_decisions.py`
+**Tests:** `tests/test_policy_decisions.py`,
+`tests/test_kernel_service.py::test_kernel_service_evaluates_and_lists_policy_decisions`
 
 Policy decisions record one bounded allow/deny judgment with the request,
 matched rule, reason, evidence refs, and policy ref.
@@ -63,6 +64,20 @@ as a general workflow language.
 For existing authorization surfaces, prefer a wrapper such as
 `policy_decision_from_authorization(...)` so fields like `required_approval`,
 `terminal`, and `matched_paths` are preserved.
+
+## Service Boundary
+
+Policy decisions are available through the local kernel service:
+
+```text
+GET  /kernel/policy-decisions
+POST /kernel/policy-decisions/evaluate
+```
+
+The service route records the same append-only decision row as the Python
+primitive. It exists so adopter demos and runtime adapters do not write
+canonical policy rows directly when they are already crossing the kernel service
+boundary.
 
 ## Resource Projection
 

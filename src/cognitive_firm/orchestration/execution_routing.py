@@ -1,10 +1,13 @@
-"""Execution-route classifier for role-daemon tasks.
+"""Execution-route classifier for governed role-office work.
 
-The daemon should not rely on a spawned agent to intuit whether a work item
-belongs in direct work, expert review, artifact construction, or a repeatable
-experiment loop. This module is deliberately small: it turns task
-frontmatter + body into a typed routing contract the runtime must obey or
-explicitly override.
+The daemon should not rely on a spawned agent to intuit whether a work item is
+ordinary role work, expert review, artifact construction, or a repeatable
+experiment loop. This module is deliberately small: it turns task frontmatter
+and body text into a typed routing contract the runtime must obey or explicitly
+override.
+
+The route is not authority. Mandates, leases, policy decisions, and resource
+budgets still determine whether execution is allowed.
 """
 from __future__ import annotations
 
@@ -22,22 +25,16 @@ ROUTES = {
     "joint_work",
     "experiment_loop",
     "docs_records",
-    # RD-1.12 (2026-05-02): research_director's standard route. Live
-    # co-drive — RD reads iter outputs, mutates substrate (evidence /
-    # charter / rubric), forks successor projects, queues cold-shots, and
-    # writes Lean cages from verified axioms. Subject to per-action budget
-    # gates (spend_tracker + agent_utilization_tracker) and damage-signal
-    # audit. Does NOT bypass safety rails; bypasses only the prior policy
-    # ceiling that constrained RD to route_only handoff specs.
-    "frontier_co_drive",
 }
 ROUTE_ALIASES = {
-    # Backward-compatible / domain-specific local names. Product-facing org
-    # primitives should use the generic route names above.
+    # Compatibility aliases. New tenant-specific names belong in overlays or
+    # work-item frontmatter, not as public kernel routes.
     "manual_agent": "direct_work",
     "cold_shot": "expert_review",
-    "deanchored_synthesis": "synthesis_review",
+    "external_review": "expert_review",
+    "second_opinion": "expert_review",
     "big_picture": "synthesis_review",
+    "deanchored_synthesis": "synthesis_review",
     "script_or_gpu": "scripted_run",
     "substrate_build": "artifact_build",
     "tenant_loop": "experiment_loop",
@@ -45,9 +42,9 @@ ROUTE_ALIASES = {
     "human_work": "joint_work",
     "human_agent": "joint_work",
     "co_work": "joint_work",
-    "live_co_drive": "frontier_co_drive",
-    "live_codrive": "frontier_co_drive",
-    "rd_live": "frontier_co_drive",
+    "live_co_drive": "joint_work",
+    "live_codrive": "joint_work",
+    "rd_live": "joint_work",
 }
 
 
@@ -114,67 +111,80 @@ def infer_execution_route(
     """Infer the cheapest safe execution route for a task.
 
     Explicit frontmatter wins. Heuristics are intentionally conservative:
-    absent a stable contract, default to manual-agent routing rather than
-    launching a tenant loop or paid infrastructure.
+    absent a stable contract, default to direct role-office work rather than
+    launching a loop, paid API, or external compute.
     """
     fm = dict(frontmatter or {})
     text = f"{body}\n{fm}".lower()
     explicit = _explicit_route(fm)
-
-    # RD-1.12 (2026-05-02): research_director's STANDARD route is live
-    # co-drive (frontier_co_drive). The prior route_only ceiling was
-    # explicitly retired per principal authorization 2026-05-02
-    # ("WE DONT NEED TO RESTRICT CO DRIVE, THAT SHOULD BE STANDARD
-    # OPERATING WAY"). RD still respects budget gates + damage signals
-    # + audit trail at execution time; only the policy ceiling shifts.
-    rd_default_co_drive = (
-        role_id == "research_director"
-        and not explicit
-        and not _bool_frontmatter(fm, "rd_co_drive_disabled", False)
-    )
+    _ = role_id  # Kept for API compatibility; role authority is checked elsewhere.
 
     if explicit:
         route = explicit
         confidence = "frontmatter"
         rationale = f"task frontmatter selected {route}"
-    elif rd_default_co_drive:
-        route = "frontier_co_drive"
-        confidence = "role_default"
-        rationale = "RD-1.12: research_director defaults to live frontier co-drive"
     elif any(
         k in text
         for k in (
-            "de-anchor",
-            "deanchor",
+            "architecture review",
+            "compare approaches",
+            "design review",
             "big picture",
             "10k view",
             "10000-foot",
             "10,000-foot",
-            "alien math",
+            "literature review",
             "meta pattern",
-            "proof object",
-            "hiding in plain sight",
+            "root cause",
+            "synthesis",
         )
     ):
         route = "synthesis_review"
         confidence = "medium"
-        rationale = "task asks for RD-1.10 de-anchored synthesis before more local slicing"
-    elif "generate_substrate" in text or ("substrate" in text and "tenant loop" in text):
+        rationale = "task asks for synthesis or architectural review before execution"
+    elif any(k in text for k in ("artifact", "schema", "template", "contract", "harness")) and any(
+        k in text for k in ("build", "generate", "scaffold", "create", "author")
+    ):
         route = "artifact_build"
         confidence = "medium"
-        rationale = "task discusses building a reusable artifact/contract for a repeatable loop"
-    elif "tenant loop" in text and any(k in text for k in ("experiment-loop", "make loop", "mutator", "gate_harness", "many candidate")):
+        rationale = "task asks for a reusable artifact, schema, contract, or harness"
+    elif any(
+        k in text
+        for k in (
+            "experiment loop",
+            "experiment-loop",
+            "ab test",
+            "a/b test",
+            "many candidates",
+            "candidate search",
+            "mutator",
+            "gate_harness",
+            "bandit",
+        )
+    ):
         route = "experiment_loop"
         confidence = "medium"
-        rationale = "task names an inner tenant loop and repeatable gated candidate search"
+        rationale = "task names a repeatable gated experiment or candidate-search loop"
     elif any(k in text for k in ("gpu", "jax", "nohup", "ssh", "solver", "simulation", "batch")):
         route = "scripted_run"
         confidence = "medium"
         rationale = "task requires one-off scripted or external-compute orchestration"
-    elif any(k in text for k in ("cold-shot", "cold shot", "gemini", "gpt-5", "llm api")):
+    elif any(
+        k in text
+        for k in (
+            "expert review",
+            "adversarial review",
+            "second opinion",
+            "external model",
+            "external reviewer",
+            "gemini",
+            "gpt-5",
+            "llm api",
+        )
+    ):
         route = "expert_review"
         confidence = "medium"
-        rationale = "task calls for adversarial interpretation or expert review"
+        rationale = "task calls for expert, adversarial, or external-model review"
     elif any(k in text for k in ("human work", "joint work", "needs human", "human must")):
         route = "joint_work"
         confidence = "medium"
@@ -188,18 +198,14 @@ def infer_execution_route(
         confidence = "low"
         rationale = "no stable execution contract detected; use operator-agent/manual exploration first"
 
-    # Frontmatter can narrow permissions. Defaults are route-derived and
-    # intentionally conservative for paid or contaminating operations.
-    # frontier_co_drive (RD-1.12) authorizes the union of experiment_loop +
-    # artifact_build + expert_review + scripted_run, gated only by USD/agent-
-    # utilization budgets at execution time (not by the routing layer).
-    is_co_drive = route == "frontier_co_drive"
-    experiment_loop_allowed = (route == "experiment_loop") or is_co_drive
+    # Frontmatter can narrow permissions. Defaults are route-derived and remain
+    # intentionally conservative for paid, mutating, or contaminating work.
+    experiment_loop_allowed = route == "experiment_loop"
     tenant_loop_allowed = experiment_loop_allowed
-    artifact_build_allowed = (route == "artifact_build") or is_co_drive
+    artifact_build_allowed = route == "artifact_build"
     substrate_allowed = artifact_build_allowed
-    live_api_allowed = (route == "expert_review") or is_co_drive
-    gpu_allowed = (route == "scripted_run") or is_co_drive
+    live_api_allowed = route == "expert_review"
+    gpu_allowed = route == "scripted_run"
 
     experiment_loop_allowed = _bool_frontmatter(fm, "experiment_loop_allowed", experiment_loop_allowed)
     tenant_loop_allowed = _bool_frontmatter(fm, "tenant_loop_allowed", tenant_loop_allowed)
@@ -220,7 +226,6 @@ def infer_execution_route(
             "joint_work": "workspace/human_work_session.md",
             "experiment_loop": "workspace/preflight_substrate_audit.md",
             "docs_records": "workspace/doc_edit_plan.md",
-            "frontier_co_drive": "workspace/frontier_co_drive_log.md",
         }[route]
 
     escalation = str(fm.get("route_escalation") or "").strip()
@@ -228,18 +233,13 @@ def infer_execution_route(
         if route == "experiment_loop":
             escalation = "If preflight fails or no sealed gates exist, do not launch; write an artifact_build task."
         elif route == "artifact_build":
-            escalation = "Director roles may specify the artifact, but implementation must be assigned to an authorized builder role."
+            escalation = "Implementation must be assigned to an actor with mandate, lease, and policy authority for the artifact."
         elif route == "synthesis_review":
-            escalation = "Write the de-anchored synthesis checkpoint before recommending paid API/GPU or another tenant-loop iteration."
+            escalation = "Write the synthesis checkpoint before recommending paid API/GPU or another experiment-loop iteration."
         elif route in {"expert_review", "scripted_run"}:
             escalation = "Escalate before live spend above the task budget cap or if static replay can answer the question."
         else:
             escalation = "Escalate if the task requires paid API/GPU, substrate mutation, or tenant-loop launch not explicitly allowed."
-
-    # The Research Director is a reviewer/director by mandate, not the entity
-    # that silently edits substrates or runs the inner loop.
-    if role_id == "research_director" and route in {"artifact_build", "experiment_loop"}:
-        rationale += "; research_director must produce a handoff spec, not perform this route directly"
 
     return ExecutionRoute(
         route=route,

@@ -31,11 +31,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import ORG_ROOT_DIR
 
 log = logging.getLogger(__name__)
 
-SIGNALS_DIR = REPO_ROOT / "org" / "signals" / "damage"
+SIGNALS_DIR = ORG_ROOT_DIR / "signals" / "damage"
 
 
 @dataclass(frozen=True)

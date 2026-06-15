@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from cognitive_firm.orchestration.state_surface_inventory import (  # noqa: E402
     CAPABILITY_GROUPS,
     capability_inventory,
+    execution_boundary_for_surface,
     list_state_surfaces,
     render_capability_inventory_markdown,
     unregistered_stateful_modules,
@@ -84,6 +85,19 @@ def test_state_surface_inventory_classifies_source_of_truth_level():
     assert next(surface for surface in surfaces if surface.primitive == "forecast_market").state_class == "tenant_owned_ledger"
 
 
+def test_state_surface_inventory_classifies_execution_boundary():
+    surfaces = {surface.primitive: surface for surface in list_state_surfaces()}
+
+    assert execution_boundary_for_surface(surfaces["work_items"]) == "work substrate"
+    assert execution_boundary_for_surface(surfaces["phase_execution"]) == "first-party execution helper"
+    assert execution_boundary_for_surface(surfaces["business_function_bandit"]) == "first-party execution helper"
+    assert execution_boundary_for_surface(surfaces["runtime_adapters"]) == "runtime import/projection"
+    assert execution_boundary_for_surface(surfaces["multi_agent_trace_attribution"]) == "runtime import/projection"
+    assert execution_boundary_for_surface(surfaces["action_impact"]) == "tenant-owned input"
+    assert execution_boundary_for_surface(surfaces["action_attestation"]) == "audit/proof"
+    assert execution_boundary_for_surface(surfaces["governance_changes"]) == "kernel governance/state"
+
+
 def test_state_surface_inventory_registers_all_default_log_modules():
     assert unregistered_stateful_modules(ROOT / "src") == []
 
@@ -107,5 +121,15 @@ def test_capability_inventory_renders_markdown_from_registered_surfaces():
     assert inventory
     assert "# Capability Map" in rendered
     assert "## Authority and access" in rendered
+    assert "| Surface | Boundary | Class | Kind | Writer | Tests |" in rendered
     assert "`run_checkpoints`" in rendered
+    assert "runtime import/projection" in rendered
+    assert "first-party execution helper" in rendered
     assert "tests/test_run_checkpoints.py" in rendered
+
+
+def test_checked_in_capability_map_matches_inventory_renderer():
+    rendered = render_capability_inventory_markdown()
+    checked_in = (ROOT / "docs" / "capability-map.md").read_text()
+
+    assert checked_in == rendered

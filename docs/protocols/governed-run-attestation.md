@@ -147,6 +147,17 @@ portable shape and recomputes `bundle_digest` in Python. Passing validation
 means the packet has the expected interchange shape and digest; it does not
 upgrade the bundle's verdict or prove the run output correct.
 
+The local kernel service exposes the same build and validation path for app
+surfaces and demos that should not import Python internals:
+
+```text
+POST /kernel/governed-run-bundles/build
+POST /kernel/governed-run-bundles/validate
+```
+
+These routes are read-only projections even though they use POST for structured
+JSON bodies.
+
 ## Authority Snapshot
 
 The bundle includes a review snapshot for the run owner:

@@ -52,6 +52,31 @@ class ActionAttestation:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class AgentInvocationAudit:
+    """Read-model row for a local/subscription agent invocation receipt."""
+
+    attestation_id: str
+    created_at_utc: str
+    producer: str
+    run_id: str | None
+    tenant_id: str | None
+    project_id: str | None
+    subject_ref: str
+    verification_status: VerificationStatus
+    runtime: str | None
+    adapter: str | None
+    prompt_transport: str | None
+    returncode: int | None
+    agent_session_id: str | None
+    prompt_digest: str | None
+    stdout_digest: str | None
+    stderr_digest: str | None
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -199,6 +224,79 @@ def action_attestation_summary(attestation: ActionAttestation) -> dict[str, Any]
     return asdict(attestation)
 
 
+def agent_invocation_audit_row(
+    attestation: ActionAttestation,
+) -> AgentInvocationAudit | None:
+    """Project an agent CLI dispatch attestation into an invocation audit row.
+
+    This is a read model over action attestation metadata. It does not assert
+    that the agent output was correct, only that the invocation receipt was
+    captured and linked to a role/run provenance row.
+    """
+
+    if attestation.action_type != "agent_cli_dispatch":
+        return None
+    receipt = attestation.metadata.get("agent_invocation_receipt")
+    if not isinstance(receipt, dict):
+        return None
+    if receipt.get("schema_version") != "agent_invocation_receipt.v1":
+        return None
+    return AgentInvocationAudit(
+        attestation_id=attestation.attestation_id,
+        created_at_utc=attestation.created_at_utc,
+        producer=attestation.producer,
+        run_id=attestation.run_id,
+        tenant_id=attestation.tenant_id,
+        project_id=attestation.project_id,
+        subject_ref=attestation.subject_ref,
+        verification_status=attestation.verification_status,
+        runtime=_optional_str(receipt.get("runtime")),
+        adapter=_optional_str(receipt.get("adapter")),
+        prompt_transport=_optional_str(receipt.get("prompt_transport")),
+        returncode=_optional_int(receipt.get("returncode")),
+        agent_session_id=_optional_str(receipt.get("agent_session_id")),
+        prompt_digest=_optional_str(receipt.get("prompt_digest")),
+        stdout_digest=_optional_str(receipt.get("stdout_digest")),
+        stderr_digest=_optional_str(receipt.get("stderr_digest")),
+    )
+
+
+def list_agent_invocation_audits(
+    *,
+    producer: str | None = None,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    run_id: str | None = None,
+    verification_status: VerificationStatus | str | None = None,
+    limit: int | None = None,
+    log_path: Path | None = None,
+) -> list[AgentInvocationAudit]:
+    rows = [
+        row
+        for attestation in list_action_attestations(
+            producer=producer,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            run_id=run_id,
+            verification_status=verification_status,
+            log_path=log_path,
+        )
+        if (row := agent_invocation_audit_row(attestation)) is not None
+    ]
+    rows = list(reversed(rows))
+    if limit is not None:
+        return rows[: max(0, limit)]
+    return rows
+
+
+def _optional_str(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _optional_int(value: Any) -> int | None:
+    return value if isinstance(value, int) else None
+
+
 def action_attestation_resource(attestation: ActionAttestation) -> KernelResource:
     """Project an action attestation into the common resource envelope.
 
@@ -259,6 +357,7 @@ def action_attestation_resource(attestation: ActionAttestation) -> KernelResourc
             "input_refs": attestation.input_refs,
             "output_refs": attestation.output_refs,
             "run_id": attestation.run_id,
+            "metadata": attestation.metadata,
         },
         status={
             "verification_status": attestation.verification_status,

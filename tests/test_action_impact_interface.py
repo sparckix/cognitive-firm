@@ -10,9 +10,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from cognitive_firm.orchestration.action_impact import (  # noqa: E402
     append_policy_evaluation,
     append_policy_promotion_packet,
+    build_policy_promotion_governance_change_request,
     build_policy_promotion_packet,
     context_signature,
     evaluate_offline_policy_candidate,
+    get_policy_promotion_packet,
     list_policy_evaluations,
     list_policy_promotion_packets,
     load_summary_from_json,
@@ -325,6 +327,13 @@ def test_builds_policy_promotion_packet_without_applying_policy():
         authority_diff_ref="authority-diff://policy-enterprise-review",
         formal_verification_refs=["formal-verification:fver_policy_boundary"],
         learning_event_refs=["learning-event:learn_route_review"],
+        predicted_effect={
+            "metric_name": "resolution_quality",
+            "metric_unit": "reward",
+            "direction": "higher_is_better",
+            "threshold": 0.1,
+            "review_horizon": "after_next_20_matched_cases",
+        },
     )
 
     assert packet.status == "review_ready"
@@ -334,6 +343,42 @@ def test_builds_policy_promotion_packet_without_applying_policy():
     assert "authority-diff://policy-enterprise-review" in packet.evidence_refs
     assert packet.guardrail_summary["has_guardrail_metrics"] is True
     assert packet.evaluation_report.evaluation_id == report.evaluation_id
+    assert packet.governance_change_candidate["predicted_effect"] == {
+        "metric_name": "resolution_quality",
+        "metric_unit": "reward",
+        "direction": "higher_is_better",
+        "threshold": 0.1,
+        "review_horizon": "after_next_20_matched_cases",
+        "expected_verdict": "improved",
+        "rationale": None,
+    }
+
+    request = build_policy_promotion_governance_change_request(
+        packet,
+        proposal_id="gcp_policy_enterprise_review",
+        owner_role="role.governance_reviewer",
+        invariant_checks=[
+            {
+                "invariant": "tenant_boundary_preserved",
+                "status": "pass",
+                "rationale": "policy target remains inside tenant route adapter",
+                "evidence_refs": ["authority-diff://policy-enterprise-review"],
+            }
+        ],
+        metadata={"requested_from": "test"},
+    )
+
+    assert request["change_kind"] == "route_policy_change"
+    assert request["proposal_id"] == "gcp_policy_enterprise_review"
+    assert request["owner_role"] == "role.governance_reviewer"
+    assert request["target_ref"] == "policy://support/enterprise-review"
+    assert f"policy_promotion_packet:{packet.packet_id}" in request["source_refs"]
+    assert request["metadata"]["source_policy_promotion_packet_id"] == packet.packet_id
+    assert request["metadata"]["source_recipe"] == (
+        "policy_promotion_packet_governance_change_request.v1"
+    )
+    assert request["metadata"]["requested_from"] == "test"
+    assert request["predicted_effect"]["metric_name"] == "resolution_quality"
 
 
 def test_policy_promotion_packet_is_advisory_without_authority_diff(tmp_path: Path):
@@ -373,11 +418,20 @@ def test_policy_promotion_packet_is_advisory_without_authority_diff(tmp_path: Pa
 
     append_policy_promotion_packet(packet, log_path=log_path)
     loaded = list_policy_promotion_packets(log_path=log_path, candidate_policy_id="policy.gold-review")
+    found = get_policy_promotion_packet(packet.packet_id, log_path=log_path)
 
     assert packet.status == "advisory"
     assert "authority diff not attached" in packet.review_blockers
     assert loaded[0].packet_id == packet.packet_id
     assert loaded[0].evaluation_report.evaluation_id == report.evaluation_id
+    assert found.packet_id == packet.packet_id
+
+    try:
+        build_policy_promotion_governance_change_request(packet)
+    except ValueError as exc:
+        assert "must be review_ready" in str(exc)
+    else:
+        raise AssertionError("advisory packet unexpectedly opened governance request")
 
 
 def test_cli_builds_and_records_policy_promotion_packet(tmp_path: Path, capsys):

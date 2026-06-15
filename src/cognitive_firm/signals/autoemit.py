@@ -29,12 +29,12 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import ORG_ROOT_DIR
 from cognitive_firm.signals import damage
 
 log = logging.getLogger(__name__)
 
-SESSIONS_ROOT = REPO_ROOT / "org" / "sessions"
+SESSIONS_ROOT = ORG_ROOT_DIR / "sessions"
 
 
 def _hash_file(path: Path) -> Optional[str]:
@@ -94,8 +94,8 @@ def check_mandate_drift(
     if stored_hash is None:
         # First baseline — write it, no drift to report.
         meta["mandate_hash"] = current_hash
-        meta["mandate_path"] = str(mandate_path.relative_to(REPO_ROOT)) \
-            if mandate_path.is_relative_to(REPO_ROOT) else str(mandate_path)
+        meta["mandate_path"] = str(mandate_path.relative_to(ORG_ROOT_DIR)) \
+            if mandate_path.is_relative_to(ORG_ROOT_DIR) else str(mandate_path)
         try:
             meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
         except Exception as exc:                                 # noqa: BLE001

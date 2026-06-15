@@ -35,6 +35,8 @@ def _assert_governed_run_summary(payload: dict):
     assert summary["run_id"].startswith("run_")
     assert summary["owner_role"].startswith("role.")
     assert summary["project_id"]
+    assert summary["authority_snapshot"]["status"] == "resolved"
+    assert summary["authority_snapshot"]["mandate_hash"]
 
     counts = summary["counts"]
     assert counts["action_attestations"] >= 1

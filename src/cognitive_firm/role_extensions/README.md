@@ -8,8 +8,7 @@ _Folder index. Prose may be added above the auto-index block._
 
 **Sub-folders**
 
-- [`mcp_bridge/`](mcp_bridge/) - 8 file(s)
-- [`tests/`](tests/) - 1 file(s)
+- [`mcp_bridge/`](mcp_bridge/) - 7 file(s)
 
 **Documents**
 
@@ -21,5 +20,6 @@ _Folder index. Prose may be added above the auto-index block._
 - [iter_action_policy.yaml](iter_action_policy.yaml)
 - [research_director.py](research_director.py)
 
-<sub>2 sub-folder(s), 7 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
+<sub>1 sub-folder(s), 7 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
 
+<!-- AUTO-INDEX:END -->

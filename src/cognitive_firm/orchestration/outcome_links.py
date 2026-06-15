@@ -54,6 +54,13 @@ from cognitive_firm.orchestration.resource_envelope import KernelResource, make_
 OutcomeLinkStatus = Literal["open", "measuring", "verdict_recorded", "voided"]
 OutcomeVerdict = Literal["improved", "no_change", "regressed", "inconclusive"]
 SnapshotKind = Literal["baseline", "post"]
+PredictionReviewStatus = Literal[
+    "awaiting_verdict",
+    "prediction_met",
+    "prediction_failed",
+    "prediction_inconclusive",
+    "not_predicted",
+]
 
 VALID_OUTCOME_LINK_STATUSES = {"open", "measuring", "verdict_recorded", "voided"}
 VALID_OUTCOME_VERDICTS = {"improved", "no_change", "regressed", "inconclusive"}
@@ -62,6 +69,28 @@ VALID_SNAPSHOT_KINDS = {"baseline", "post"}
 TERMINAL_STATES = {"verdict_recorded", "voided"}
 
 DEFAULT_OUTCOME_LINKS_LOG = ORG_ROOT_DIR / "outcome_links" / "outcome_links.jsonl"
+
+
+@dataclass(frozen=True)
+class PredictedEffect:
+    """Typed predicted effect for a governed mutation.
+
+    The kernel validates and stores the prediction contract. It still does not
+    compute tenant metrics or decide whether the measured values meet the
+    threshold. The tenant supplies snapshots and a verdict; the kernel can then
+    derive whether the prediction needs routine review.
+    """
+
+    metric_name: str
+    metric_unit: str
+    direction: str
+    threshold: float
+    review_horizon: str
+    expected_verdict: OutcomeVerdict | str = "improved"
+    rationale: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -210,6 +239,108 @@ def _coerce_value(value: Any) -> float:
         raise ValueError("metric snapshot value must be a number") from None
 
 
+def predicted_effect_from_dict(value: PredictedEffect | dict[str, Any]) -> PredictedEffect:
+    """Parse and validate a predicted effect payload.
+
+    This helper is intentionally metric-agnostic. It validates required fields
+    and numeric threshold shape, but not whether the tenant's metric values
+    satisfy the prediction.
+    """
+
+    if isinstance(value, PredictedEffect):
+        effect = value
+    elif isinstance(value, dict):
+        try:
+            effect = PredictedEffect(
+                metric_name=str(value.get("metric_name") or "").strip(),
+                metric_unit=str(value.get("metric_unit") or "").strip(),
+                direction=str(value.get("direction") or "").strip(),
+                threshold=_coerce_value(value.get("threshold")),
+                review_horizon=str(value.get("review_horizon") or "").strip(),
+                expected_verdict=str(value.get("expected_verdict") or "improved").strip(),
+                rationale=(
+                    str(value.get("rationale")).strip()
+                    if value.get("rationale") is not None
+                    else None
+                ),
+            )
+        except TypeError as exc:
+            raise ValueError(f"invalid predicted_effect payload: {exc}") from exc
+    else:
+        raise ValueError("predicted_effect must be a mapping")
+    if not effect.metric_name:
+        raise ValueError("predicted_effect.metric_name is required")
+    if not effect.metric_unit:
+        raise ValueError("predicted_effect.metric_unit is required")
+    if not effect.direction:
+        raise ValueError("predicted_effect.direction is required")
+    if not effect.review_horizon:
+        raise ValueError("predicted_effect.review_horizon is required")
+    _validate(str(effect.expected_verdict), VALID_OUTCOME_VERDICTS, "predicted_effect.expected_verdict")
+    return effect
+
+
+def prediction_review_for_outcome_link(link: OutcomeLink) -> dict[str, Any]:
+    """Return the review implication of a predicted-effect outcome link.
+
+    The mapping is deliberately conservative. A non-improving tenant verdict on
+    a predicted structural improvement becomes a reversal-candidate signal for
+    routine review. It does not apply or queue a reversal by itself.
+    """
+
+    predicted = (link.metadata or {}).get("predicted_effect")
+    if not predicted:
+        return {
+            "schema": "prediction_review.v1",
+            "status": "not_predicted",
+            "recommended_action": "none",
+            "evidence_refs": [f"outcome_link:{link.outcome_link_id}"],
+        }
+    effect = predicted_effect_from_dict(predicted)
+    if link.verdict is None:
+        status: PredictionReviewStatus = "awaiting_verdict"
+        action = "continue_measuring"
+    elif link.verdict == effect.expected_verdict:
+        status = "prediction_met"
+        action = "reaffirm_or_continue"
+    elif link.verdict == "inconclusive":
+        status = "prediction_inconclusive"
+        action = "escalate_or_extend_review"
+    else:
+        status = "prediction_failed"
+        action = "file_reversal_candidate_at_routine_review"
+    return {
+        "schema": "prediction_review.v1",
+        "status": status,
+        "recommended_action": action,
+        "predicted_effect": effect.as_dict(),
+        "actual_verdict": link.verdict,
+        "review_horizon": effect.review_horizon,
+        "evidence_refs": [f"outcome_link:{link.outcome_link_id}", link.change_ref],
+    }
+
+
+def _normalize_metadata_with_prediction(
+    *,
+    metadata: dict[str, Any] | None,
+    metric_name: str,
+    metric_unit: str,
+    direction: str | None,
+) -> dict[str, Any]:
+    normalized = dict(metadata or {})
+    if "predicted_effect" not in normalized:
+        return normalized
+    effect = predicted_effect_from_dict(normalized["predicted_effect"])
+    if effect.metric_name != metric_name.strip():
+        raise ValueError("predicted_effect.metric_name must match outcome metric_name")
+    if effect.metric_unit != metric_unit.strip():
+        raise ValueError("predicted_effect.metric_unit must match outcome metric_unit")
+    if direction is not None and effect.direction != direction.strip():
+        raise ValueError("predicted_effect.direction must match outcome direction")
+    normalized["predicted_effect"] = effect.as_dict()
+    return normalized
+
+
 def _emit(
     link: OutcomeLink,
     *,
@@ -311,6 +442,12 @@ def create_outcome_link(
         raise ValueError("metric_unit is required")
     if not created_by.strip():
         raise ValueError("created_by is required")
+    normalized_metadata = _normalize_metadata_with_prediction(
+        metadata=metadata,
+        metric_name=metric_name,
+        metric_unit=metric_unit,
+        direction=direction,
+    )
     now = _now_iso()
     link = OutcomeLink(
         outcome_link_id=outcome_link_id or f"olink_{uuid.uuid4().hex[:12]}",
@@ -327,7 +464,7 @@ def create_outcome_link(
         project_id=project_id,
         owner_role=owner_role,
         direction=direction,
-        metadata=dict(metadata or {}),
+        metadata=normalized_metadata,
     )
     _append_jsonl(log_path or DEFAULT_OUTCOME_LINKS_LOG, link.as_dict())
     _emit(link, verb="outcome_link.created", actor=actor, kernel_events_log=kernel_events_log)
@@ -451,6 +588,10 @@ def record_verdict(
         row["verdict_rationale"] = rationale.strip()
         row["verdict_recorded_at_utc"] = now
         row["updated_at_utc"] = now
+        link_for_review = OutcomeLink(**row)
+        metadata = dict(row.get("metadata") or {})
+        metadata["prediction_review"] = prediction_review_for_outcome_link(link_for_review)
+        row["metadata"] = metadata
         return row
 
     link = _mutate(path, outcome_link_id, mutate)

@@ -25,6 +25,31 @@ signals, failed runs, forecast-market state, action-impact state, and invalid
 project charters. The compiler consumes that joined surface rather than
 inventing a second source of truth.
 
+The kernel service also exposes execution-evidence projections as learning
+transition candidates:
+
+- review-ready failure-attribution packets from multi-agent traces;
+- open capability signals, including abstentions, evidence gaps, authority
+  gaps, tool gaps, budget pressure, overload, and unsafe-request signals.
+- blocked/failed phase-execution plans from bounded Strategy -> Execution ->
+  Verification loops.
+- review-ready protocol-experiment reports for route-policy changes.
+
+Use:
+
+```text
+GET /kernel/learning-transition-candidates
+GET /kernel/learning-transition-candidates?source=execution
+GET /kernel/learning-transition-candidates?source=phase_execution
+GET /kernel/learning-transition-candidates?source=protocol_experiment
+GET /kernel/learning-transition-candidates?source=capability&include_closed=true
+```
+
+`source=all` combines org-surface candidates with execution-evidence
+candidates. `source=execution` returns attribution, capability-signal, and
+phase-execution, and protocol-experiment candidates. Closed capability signals
+are excluded unless `include_closed=true` is set.
+
 ## What It Emits
 
 Each `LearningTransitionCandidate` includes:
@@ -48,11 +73,31 @@ Supported transition kinds are:
 - `mandate_review`;
 - `human_work_session`;
 - `forecast_contract`;
+- `route_policy_change`;
+- `action_impact_repair`;
 - `source_repair`;
 - `role_review`.
 
 These are candidate kinds, not direct writes. A tenant may bind candidates to a
 manager inbox, review queue, issue tracker, or private workflow.
+
+## Governance Proposal Promotion
+
+The kernel service can create a governance-change proposal from one candidate:
+
+```text
+POST /kernel/learning-transition-candidates/{candidate_id}/governance-change
+```
+
+The request must still provide the concrete `target_ref`, expected behavior
+change, risk summary, rollback plan, and invariant checks. The candidate
+supplies rationale and source refs; it does not make the proposal review-ready
+by itself. The normal governance-change evidence sufficiency gate decides
+whether the result is `review_ready` or `blocked`.
+
+This route is useful for live agents and review UIs because it preserves the
+candidate's source refs and metadata while still forcing the proposal through
+the same governance path as any other self-modification request.
 
 ## Why This Exists
 

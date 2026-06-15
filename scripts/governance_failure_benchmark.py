@@ -36,8 +36,17 @@ from cognitive_firm.orchestration.governance_changes import (
     InvariantCheck,
     propose_governance_change,
 )
+from cognitive_firm.orchestration.governed_run_recipes import (
+    PredictedMutationReversalReviewInput,
+    build_predicted_mutation_reversal_review_request,
+)
 from cognitive_firm.orchestration.human_work import create_human_work_session
-from cognitive_firm.orchestration.outcome_links import create_outcome_link
+from cognitive_firm.orchestration.outcome_links import (
+    create_outcome_link,
+    record_metric_snapshot,
+    record_verdict,
+)
+from cognitive_firm.orchestration.routine_reviews import schedule_routine_review
 from cognitive_firm.orchestration.run_checkpoints import set_run_state, start_run
 from cognitive_firm.orchestration.task_authorization import authorize_dispatch
 
@@ -245,6 +254,105 @@ def fixture_unresolved_outcome(root: Path) -> BenchmarkResult:
         expected_substring="outcome links awaiting verdict",
         root=root,
         setup=setup,
+    )
+
+
+def fixture_failed_prediction_routes_to_reversal_review(root: Path) -> BenchmarkResult:
+    logs = _logs(root)
+    link = create_outcome_link(
+        change_ref="governance_change:gcp_failed_prediction",
+        change_kind="governance_change",
+        metric_name="open_gaps",
+        metric_unit="count",
+        direction="lower_is_better",
+        created_by="role.evaluator",
+        metadata={
+            "predicted_effect": {
+                "metric_name": "open_gaps",
+                "metric_unit": "count",
+                "direction": "lower_is_better",
+                "threshold": 1,
+                "review_horizon": "next_routine_review",
+            }
+        },
+        tenant_id="tenant-benchmark",
+        project_id="project-governance-fixtures",
+        log_path=logs["outcomes"],
+        kernel_events_log=logs["events"],
+    )
+    record_metric_snapshot(
+        link.outcome_link_id,
+        kind="baseline",
+        value=3.0,
+        captured_by="role.evaluator",
+        log_path=logs["outcomes"],
+        kernel_events_log=logs["events"],
+    )
+    record_metric_snapshot(
+        link.outcome_link_id,
+        kind="post",
+        value=3.0,
+        captured_by="role.evaluator",
+        log_path=logs["outcomes"],
+        kernel_events_log=logs["events"],
+    )
+    final = record_verdict(
+        link.outcome_link_id,
+        verdict="no_change",
+        recorded_by="role.evaluator",
+        rationale="Open gaps did not decrease after the governed mutation.",
+        log_path=logs["outcomes"],
+        kernel_events_log=logs["events"],
+    )
+    request = build_predicted_mutation_reversal_review_request(
+        PredictedMutationReversalReviewInput(
+            outcome_link=final.as_dict(),
+            review_due_utc="2030-01-02T00:00:00+00:00",
+            scheduled_by="role.evaluator",
+        )
+    )
+    review = schedule_routine_review(
+        routine_ref=request["routine_ref"],
+        routine_kind=request["routine_kind"],
+        review_due_utc=request["review_due_utc"],
+        scheduled_by=request["scheduled_by"],
+        tenant_id=request.get("tenant_id"),
+        project_id=request.get("project_id"),
+        reason=request.get("reason"),
+        review_cadence=request.get("review_cadence"),
+        metadata=request.get("metadata") or {},
+        log_path=root / "routine_reviews.jsonl",
+        kernel_events_log=logs["events"],
+    )
+    prediction_review = final.metadata.get("prediction_review") or {}
+    expected = "prediction_failed"
+    observed = "; ".join(
+        [
+            str(prediction_review.get("status")),
+            str(prediction_review.get("recommended_action")),
+            f"reversal_candidate={review.metadata.get('reversal_candidate')}",
+        ]
+    )
+    return BenchmarkResult(
+        fixture_id="failed_prediction_reversal_review",
+        failure_mode="structural mutation fails its predicted effect",
+        plain_runtime_gap=(
+            "a self-improving runtime can approve and apply a structural change, "
+            "then leave the failed prediction as an unacted-on metric note"
+        ),
+        kernel_surface="outcome_links + routine_reviews prediction review",
+        expected_signal=expected,
+        observed_signal=observed,
+        passed=(
+            prediction_review.get("status") == "prediction_failed"
+            and prediction_review.get("recommended_action")
+            == "file_reversal_candidate_at_routine_review"
+            and review.metadata.get("reversal_candidate") is True
+        ),
+        details={
+            "outcome_link": final.as_dict(),
+            "routine_review": review.as_dict(),
+        },
     )
 
 
@@ -490,6 +598,9 @@ def run_benchmark() -> dict[str, Any]:
             fixture_failed_attestation(root / "failed-attestation"),
             fixture_missing_human_receipt(root / "missing-human-receipt"),
             fixture_unresolved_outcome(root / "unresolved-outcome"),
+            fixture_failed_prediction_routes_to_reversal_review(
+                root / "failed-prediction-reversal-review"
+            ),
             fixture_open_accountability_case(root / "open-accountability-case"),
             fixture_formal_refutation(root / "formal-refutation"),
             fixture_missing_referenced_lease(root / "missing-referenced-lease"),

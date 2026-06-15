@@ -63,6 +63,7 @@ def main(argv: list[str] | None = None) -> int:
 
     with tempfile.TemporaryDirectory(prefix="cf-native-e2e-") as raw:
         root = Path(raw)
+        _seed_demo_authority(root)
         logs = {
             "actors": root / "identity" / "actor_identities.jsonl",
             "memberships": root / "identity" / "actor_memberships.jsonl",
@@ -189,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
             producer="role.analyst",
             action_type="write_product_claim_brief",
             runtime_ref=f"native_stub:{run.run_id}",
-            policy_ref="org/mandates/analyst.yaml",
+            policy_ref="org/mandates/analyst_mandate.md",
             input_refs=[
                 "stub://lab/run-17",
                 "stub://field-notes/batch-c",
@@ -340,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
             outcome_links_log_path=logs["outcomes"],
             accountability_cases_log_path=logs["accountability"],
             work_items_log_path=logs["work"],
+            authority_root=root,
         )
         summary = governed_run_bundle_summary(bundle)
         bundle_payload = governed_run_bundle_to_dict(bundle)
@@ -377,6 +379,40 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
+
+
+def _seed_demo_authority(root: Path) -> None:
+    roles_dir = root / "org" / "roles"
+    mandates_dir = root / "org" / "mandates"
+    roles_dir.mkdir(parents=True, exist_ok=True)
+    mandates_dir.mkdir(parents=True, exist_ok=True)
+
+    roles = {
+        "analyst": (
+            "Analyze source packets, produce verified claim briefs, and request "
+            "bounded reviewer work before publication."
+        ),
+        "reviewer": "Review bounded human-work requests and return receipts.",
+        "manager": "Own the claim-review desk and accountable closure.",
+    }
+    for role, purpose in roles.items():
+        (roles_dir / f"{role}.yaml").write_text(
+            (
+                f"role_id: role.{role}\n"
+                f"display_name: {role.title()}\n"
+                f"mandate_path: org/mandates/{role}_mandate.md\n"
+                f"purpose: {purpose}\n"
+            ),
+            encoding="utf-8",
+        )
+        (mandates_dir / f"{role}_mandate.md").write_text(
+            (
+                f"# {role.title()} Mandate\n\n"
+                f"{purpose} Actions must carry source refs, provenance, outcome "
+                "evidence, and accountable closure when they affect external claims.\n"
+            ),
+            encoding="utf-8",
+        )
 
 
 if __name__ == "__main__":

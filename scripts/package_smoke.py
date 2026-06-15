@@ -20,18 +20,24 @@ ROOT = Path(__file__).resolve().parents[1]
 def main() -> int:
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     scripts = pyproject.get("project", {}).get("scripts", {})
-    required = {
+    baseline_required = {
         "cognitive-firm-kernel-service",
         "cognitive-firm-actor-membership",
         "cognitive-firm-identity-provisioning",
+        "cognitive-firm-userland",
         "cognitive-firm-governed-run-bundle",
         "cognitive-firm-formal-verification",
         "cognitive-firm-adapter-conformance",
         "cognitive-firm-authority-domains",
         "cognitive-firm-action-impact",
+        "cognitive-firm-multi-agent-traces",
+        "cognitive-firm-phase-execution",
+        "cognitive-firm-protocol-experiments",
+        "cognitive-firm-capability-signals",
         "cognitive-firm-distro",
     }
-    missing_scripts = sorted(required - set(scripts))
+    required = set(scripts)
+    missing_scripts = sorted(baseline_required - required)
     if missing_scripts:
         raise SystemExit(f"missing console entry points in pyproject.toml: {missing_scripts}")
     if not (ROOT / "src" / "cognitive_firm" / "py.typed").exists():
@@ -114,7 +120,7 @@ def main() -> int:
                 name for name in names if name.endswith(".dist-info/entry_points.txt")
             )
             entry_text = archive.read(entry_points).decode("utf-8")
-            missing = [entry for entry in required if entry not in entry_text]
+            missing = [entry for entry in sorted(required) if entry not in entry_text]
             if missing:
                 raise SystemExit(f"missing console entry points: {missing}")
             if "cognitive_firm/py.typed" not in names:
@@ -125,7 +131,7 @@ def main() -> int:
                 raise SystemExit("wheel is missing actor_membership module")
             if "cognitive_firm/identity_provisioning.py" not in names:
                 raise SystemExit("wheel is missing identity_provisioning module")
-        installed_checks = run_installed_wheel_checks(raw, wheel)
+        installed_checks = run_installed_wheel_checks(raw, wheel, required)
         print(
             json.dumps(
                 {
@@ -142,7 +148,7 @@ def main() -> int:
     return 0
 
 
-def run_installed_wheel_checks(raw: str, wheel: Path) -> list[str]:
+def run_installed_wheel_checks(raw: str, wheel: Path, scripts: set[str]) -> list[str]:
     install_root = Path(raw) / "install-venv"
     venv.EnvBuilder(with_pip=True, system_site_packages=True).create(install_root)
     bin_dir = "Scripts" if sys.platform == "win32" else "bin"
@@ -153,16 +159,8 @@ def run_installed_wheel_checks(raw: str, wheel: Path) -> list[str]:
     checks = [
         [str(python), "-m", "cognitive_firm.orchestration.org_surface"],
         [str(python), "-c", "import cognitive_firm.common.llm_runtime"],
-        [str(install_root / bin_dir / "cognitive-firm-kernel-service"), "--help"],
-        [str(install_root / bin_dir / "cognitive-firm-actor-membership"), "--help"],
-        [str(install_root / bin_dir / "cognitive-firm-identity-provisioning"), "--help"],
-        [str(install_root / bin_dir / "cognitive-firm-governed-run-bundle"), "--help"],
-        [str(install_root / bin_dir / "cognitive-firm-formal-verification"), "--help"],
-        [str(install_root / bin_dir / "cognitive-firm-adapter-conformance"), "--help"],
-        [str(install_root / bin_dir / "cognitive-firm-authority-domains"), "--help"],
-        [str(install_root / bin_dir / "cognitive-firm-action-impact"), "--help"],
-        [str(install_root / bin_dir / "cognitive-firm-distro"), "--help"],
     ]
+    checks.extend([[str(install_root / bin_dir / script), "--help"] for script in sorted(scripts)])
     labels: list[str] = []
     for command in checks:
         subprocess_run(command)

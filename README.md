@@ -57,7 +57,7 @@ Use the simpler stack when the job is simpler:
 | Model calls, tools, prompts, middleware, and a configurable agent loop | LangChain or another agent SDK |
 | Stateful graph execution, persistence, interrupts, replay, and runtime observability | LangGraph or another workflow runtime |
 | Traces, evals, debugging, and deployment monitoring | LangSmith or another observability/eval platform |
-| SaaS triggers and API glue | n8n, Zapier, or a workflow automation tool |
+| SaaS triggers, API glue, process modeling, and workflow-stage automation | n8n, Zapier, BPM, or another workflow automation tool |
 | Role authority, claimable production work, bounded human work, action provenance, formal-verification records, outcome links, accountability cases, and approved learning records around those systems | cognitive-firm |
 
 The adoption test is concrete:
@@ -82,21 +82,55 @@ work item or goal, runtime checkpoints, action attestations, formal
 verification records, human-work receipts, outcome links, accountability cases,
 and approved learning records.
 
-To inspect that boundary locally:
+To inspect the shortest no-cost governed action locally:
+
+```bash
+make first-gated-action
+```
+
+That command runs one fictional Kettle & Compass workflow: a role-bearing
+service actor claims work, opens a run, writes an attested artifact, receives a
+bounded human-work receipt, completes a governed exit, records outcome and
+accountability closure, and emits a governed-run bundle summary.
+
+For the broader demo suite:
 
 ```bash
 make adoption-demo
 ```
 
-The demo runs two no-cost paths: first a fictional Kettle & Compass native
-kernel workflow, then governance failure fixtures, then a LangGraph-style
-adapter workflow. Together they show role authority, claimable work, run
-checkpoints, human work, action attestation, outcome linkage, accountable
-closure, a governed-run attestation summary with work-item and observability
-refs plus derived evidence hashes, and the failures the kernel blocks or
-flags. See
+The demo runs a no-cost suite: a fictional Kettle & Compass native kernel
+workflow, an agent-fleet audit trail fixture, governance failure fixtures,
+decision-log replay, action-impact and formal-provider examples, a
+LangGraph-style adapter workflow, a bounded governed org-evolution proof
+fixture, a daemon-native starter-firm dispatch smoke, a multi-agent
+trace-attribution carrier demo, phase-execution overlay, protocol experiment
+carrier, and capability signal carrier. Together they show role authority,
+claimable work, run checkpoints, local agent invocation receipts, human work,
+action attestation, outcome linkage, accountable closure, governed-run
+attestation summaries with work-item and observability refs plus derived
+evidence hashes, the failures the kernel blocks or flags, a governed
+structural-change loop over a fresh starter firm, actual daemon dispatch
+against an installed starter firm, recursive-runtime trace evidence becoming
+an observer-only learning carrier, verifier feedback with retry budget decay,
+coordination-pattern evidence becoming a review-ready route-policy candidate,
+and abstention or authority gaps routing without being treated as task
+failure. The live self-evolving path is
+`make self-evolving-org-agent-demo` with `AGENT_PLANNER_COMMAND` set to a
+subscription/local agent planner that emits JSON; `make self-evolving-org-api-demo`
+is the portable API model-call fallback. In both live paths, the worker proposes
+structural changes while the kernel keeps the same governance and proof path.
+Use `make self-evolving-org-view` when you want persistent reports and the
+human-first company-state view plus the proof timeline for that org-evolution
+fixture.
+See
+[`docs/examples/README.md`](docs/examples/README.md) for the example index,
 [`docs/examples/governance-failure-benchmark.md`](docs/examples/governance-failure-benchmark.md)
-for the fixture list.
+for the failure fixture list and
+[`docs/examples/agent-fleet-audit-demo.md`](docs/examples/agent-fleet-audit-demo.md)
+for the local agent-invocation audit path, and
+[`docs/examples/self-evolving-org-demo.md`](docs/examples/self-evolving-org-demo.md)
+for the organization-evolution path.
 
 ### Who should adopt this
 
@@ -109,6 +143,7 @@ for the fixture list.
 | Out of scope | Why |
 |---|---|
 | Enterprise RBAC / SSO | Lean multi-actor role membership is supported. Full enterprise IAM administration, SSO provisioning, and tenant isolation remain deployment work. |
+| Production compliance certification | The repo ships local audit, evidence, and deploy-gate primitives. It does not certify a regulated deployment or replace tenant legal, compliance, or external-audit work. |
 | A model/graph engine | The daemon executes governed role-office work by discovering tasks, dispatching configured CLIs and MCP tools, recording checkpoints, and routing interrupts. It deliberately leaves model inference, graph replay, and node scheduling to the runtime best suited for that job. |
 | A chat UI | The system of record is the filesystem + git. UIs (Orbit, Telegram) are projections, not the truth. |
 | Agentic prompt engineering | Mandates and roles are typed contracts, not prompt templates. |
@@ -116,9 +151,17 @@ for the fixture list.
 
 ### Alternatives, briefly
 
-- **LangGraph / AutoGen / CrewAI**: better fit if your unit of work is one graph, crew, or chat run. cognitive-firm is for orgs that persist; those runtimes can project lifecycle events into it.
-- **Letta / MemGPT**: better fit if your problem is agent memory. cognitive-firm assumes the filesystem + git is the memory.
-- **n8n / Zapier**: better fit if your problem is glue between SaaS APIs. cognitive-firm gates *which* role may invoke which MCP tool under what mandate.
+| System family | Best fit | cognitive-firm boundary |
+|---|---|---|
+| LangGraph, AutoGen, CrewAI, OpenAI Agents SDK, and similar runtimes | Build and run agent graphs, crews, tool loops, handoffs, and interrupts. | Wrap them with durable role authority, human-work receipts, action provenance, outcome links, and governed learning. |
+| ReDel-style recursive delegation systems | Let agents choose delegation structures and expose recursion traces. | Import delegation graphs and traces as evidence; use mandates, budgets, depth bounds, and approvals before structural mutation. |
+| Self-organizing team systems such as Meta-Team or TheBotCompany-style research prototypes | Explore emergent roles, team evolution, and dynamic task allocation. | Preserve the useful emergence while separating proposal, evaluation, approval, execution, audit, and durable state change. |
+| Letta / MemGPT-style memory systems | Maintain agent memory and continuity. | Treat durable organizational memory as reviewed filesystem/git state, not just agent memory. |
+| n8n, Zapier, BPM, and SaaS workflow automation | Connect APIs, model process stages, and trigger routine workflows. | Let them execute the process. Gate which role may invoke which capability, under which mandate, with what evidence, outcome, learning, and closure record. |
+
+The intended integration posture is additive: external runtimes execute work;
+cognitive-firm records the organizational contract and governed state
+transitions around that work.
 
 ---
 
@@ -237,14 +280,30 @@ Read in this order if you are new:
 | 33 | `src/cognitive_firm/` | The kernel implementation |
 | 34 | `tests/` | The validation surface — shipped behavior is backed here |
 
+### Canonical code boundary
+
+`src/cognitive_firm/` is the source of truth for reusable kernel behavior:
+primitives, invariants, schemas, state transitions, adapters, projections,
+service routes, and importable helpers. If another program should be able to
+rely on the behavior, or if a rule affects authority, auditability, learning,
+or state mutation, it belongs in `src/cognitive_firm/` with tests.
+
+`scripts/` is the executable surface around the kernel: CLIs, demos, smoke
+harnesses, migrations, and operator workflows. Scripts may seed fixtures,
+parse command-line arguments, call external tools, and compose primitives from
+`src/cognitive_firm/`, but they should not become a second source of truth for
+kernel rules. When script logic becomes reusable, policy-bearing, or shared by
+more than one workflow, promote it into `src/cognitive_firm/` and keep the
+script as a thin entrypoint.
+
 | Directory | Role |
 |---|---|
-| `src/cognitive_firm/` | Kernel: orchestration daemon, signals, notifications, role extensions, the distribution layer, the userland, common runtime helpers |
+| `src/cognitive_firm/` | Kernel source of truth: primitives, invariants, schemas, state transitions, adapters, projections, service routes, distribution, userland, and common runtime helpers |
 | `org/` | System-of-record skeleton: roles, mandates, sessions, signals, channels, transitions. Treat as a template. |
 | `tenants/` | Multi-tenant overlay slot. Reserved for `<tenant_id>/` subdirectories with overlay scripts; real tenants live in private repos. |
 | `distro/` | Installable distribution packages. The `starter-firm` distro brings up a runnable governed organization in one action with `cognitive-firm-distro install`. |
 | `schemas/` | Typed contracts for mandates, roles, gate payloads, transitions |
-| `scripts/` | `agent_daemon.py` (entrypoint), `org_role_preflight.py` (preflight), `setup_vps.sh`, `telegram_setup.py`, `operator_console.sh` |
+| `scripts/` | Thin executable entrypoints, demos, smoke harnesses, migrations, and operator workflows that compose `src/cognitive_firm/`; examples include `agent_daemon.py`, `org_role_preflight.py`, `setup_vps.sh`, `telegram_setup.py`, `operator_console.sh` |
 | `deploy/` | systemd units (`agent-daemon.service`, `orbit-sync.service`) for VPS deployment |
 | `docs/` | Architecture, protocol specs, concept docs |
 | `orbit/` | Desktop dashboard (TLDraw-based pace-layered UI) |
@@ -285,6 +344,19 @@ pip install -e .
 # Public verification path
 make smoke-public
 make smoke-docker
+make release-hygiene-check
+
+# Full tag-candidate gate
+make release-candidate-check
+
+# Optional bounded live-agent proof, outside the public release gate
+make self-evolving-agent-preflight AGENT_RUNTIME=codex AGENT_ADAPTER=codex_exec
+make self-evolving-org-agent-demo \
+  AGENT_RUNTIME=codex \
+  AGENT_ADAPTER=codex_exec \
+  SELF_EVOLVING_DEMO_ITERATIONS=1 \
+  SELF_EVOLVING_DEMO_BUDGET_UNITS=1 \
+  SELF_EVOLVING_PLANNER_PROMPT_MODE=compact
 
 # Configure default authority preferences
 cp org/preferences/templates/principal.yaml org/preferences/principal.yaml
@@ -313,9 +385,17 @@ make docs-surface-check
 
 The dry-run tick discovers candidate work, prints what it would dispatch, and exits without spending budget. If preflight fails, it tells you which mandate or preference file is missing and how to create it.
 
+The public release gate is deterministic and network-free except for the
+explicit Docker/container path. Live agent targets are opt-in: they use a local
+subscription CLI such as Codex or Claude, write run state under
+`.cognitive-firm-runs/`, and route accepted changes through the same governed
+mutation, proof, replay, and runbook surfaces as fixture mode.
+
 `.env.example` documents every environment variable the kernel and Orbit
-dashboard read. Most variables are optional. At least one LLM API key is needed
-for model calls made by the kernel itself.
+dashboard read. Most variables are optional. Provider API keys are needed only
+for model calls made by the kernel itself or by API-backed demos. Subscription
+or local agent CLI paths, such as Claude Code or Codex, use their own local auth
+unless you explicitly opt into API-key auth for spawned agents.
 
 ### Managing organizations and packages
 
@@ -402,9 +482,21 @@ Adopters who read the protocol specs can rely on every "shipped" claim being
 backed by tests in `tests/` and by the public verification commands:
 
 ```bash
+make release-candidate-check
+
+# Split form:
 make smoke-public
 make smoke-docker
+make public-claims-check
+make release-hygiene-check
+make release-diff-audit
 ```
+
+`smoke-public` uses deterministic fixtures. Optional live-agent demos are
+validated separately because they depend on a local subscription CLI, current
+login state, and model behavior. A bounded live proof should use a small budget
+and inspect the emitted planner receipt, mutation proof, report JSON, and
+operator runbook before treating it as release evidence.
 
 ### Shipped (T1 tested)
 
@@ -420,7 +512,8 @@ make smoke-docker
 | Evidence gap state | `src/cognitive_firm/orchestration/evidence_gaps.py` | `tests/test_evidence_gaps.py` |
 | Human work sessions + A2H helper | `src/cognitive_firm/orchestration/human_work.py` | `tests/test_human_work.py` |
 | Action attestations | `src/cognitive_firm/orchestration/action_attestation.py` | `tests/test_action_attestation.py` |
-| Governed-run attestation bundle | `src/cognitive_firm/orchestration/artifact_bundle.py` | `tests/test_governed_run_attestation_bundle.py`, `schemas/governed-run-attestation.v1.schema.json` |
+| Governed-run attestation bundle + validation route | `src/cognitive_firm/orchestration/artifact_bundle.py`, `src/cognitive_firm/kernel_service.py` | `tests/test_governed_run_attestation_bundle.py`, `tests/test_kernel_service.py`, `schemas/governed-run-attestation.v1.schema.json` |
+| Governed mutation proof chain + validation route | `src/cognitive_firm/orchestration/mutation_proofs.py`, `src/cognitive_firm/kernel_service.py` | `tests/test_mutation_proofs.py`, `tests/test_kernel_service.py`, `tests/test_self_evolving_org_demo.py` |
 | Audit integrity manifests | `src/cognitive_firm/orchestration/audit_integrity.py` | `tests/test_audit_integrity.py` |
 | Accountability cases | `src/cognitive_firm/orchestration/accountability_cases.py` | `tests/test_accountability_cases.py` |
 | Forecast market interface | `src/cognitive_firm/orchestration/forecast_market.py` | `tests/test_forecast_market_interface.py` |
@@ -428,8 +521,14 @@ make smoke-docker
 | Intelligence-source coverage | `src/cognitive_firm/orchestration/intelligence_sources.py` | `tests/test_intelligence_sources.py`, `scripts/source_coverage_walkthrough.py` |
 | Accountability summary | `src/cognitive_firm/orchestration/accountability.py` | `tests/test_accountability.py` |
 | Organization surface read model | `src/cognitive_firm/orchestration/org_surface.py` | `tests/test_org_surface.py` |
+| Execution routing contracts | `src/cognitive_firm/orchestration/execution_routing.py` | `tests/test_execution_routing.py`, `tests/test_human_work.py` |
 | Run checkpoint interface | `src/cognitive_firm/orchestration/run_checkpoints.py` | `tests/test_run_checkpoints.py` |
 | Runtime adapter interface | `src/cognitive_firm/orchestration/runtime_adapters.py` | `tests/test_runtime_adapters.py` |
+| Agent runtime invocation receipts and readiness summaries | `src/cognitive_firm/orchestration/agent_runtime_invocation.py` | `tests/test_agent_runtime_invocation.py`, `tests/test_llm_runtime_providers.py`, `tests/test_self_evolving_agent_preflight.py` |
+| Multi-agent trace attribution and failure packets | `src/cognitive_firm/orchestration/multi_agent_trace_attribution.py` | `tests/test_multi_agent_trace_attribution.py`, `tests/test_multi_agent_trace_attribution_demo.py`, `tests/test_kernel_service.py` |
+| Phase execution overlay | `src/cognitive_firm/orchestration/phase_execution.py` | `tests/test_phase_execution.py`, `tests/test_phase_execution_demo.py`, `tests/test_kernel_service.py` |
+| Protocol experiment reports | `src/cognitive_firm/orchestration/protocol_experiments.py` | `tests/test_protocol_experiments.py`, `tests/test_protocol_experiment_demo.py`, `tests/test_kernel_service.py` |
+| Capability signals | `src/cognitive_firm/orchestration/capability_signals.py` | `tests/test_capability_signals.py`, `tests/test_capability_signal_demo.py`, `tests/test_kernel_service.py` |
 | Adapter conformance reports and manifests | `src/cognitive_firm/orchestration/adapter_conformance.py` | `tests/test_adapter_conformance.py` |
 | OpenTelemetry projection | `src/cognitive_firm/orchestration/otel_export.py` | `tests/test_otel_export.py` |
 | State backend connectors | `src/cognitive_firm/orchestration/state_backends.py` | `tests/test_state_backends.py` |
@@ -445,6 +544,7 @@ make smoke-docker
 | Kernel event envelope | `src/cognitive_firm/orchestration/kernel_events.py` | `tests/test_kernel_events.py` |
 | Resource envelope | `src/cognitive_firm/orchestration/resource_envelope.py` | `tests/test_resource_envelope.py` |
 | Policy decisions | `src/cognitive_firm/orchestration/policy_decisions.py` | `tests/test_policy_decisions.py` |
+| Decision aggregation cases | `src/cognitive_firm/orchestration/decision_aggregation.py` | `tests/test_decision_aggregation.py`, `tests/test_kernel_service.py` |
 | Migration records | `src/cognitive_firm/orchestration/migrations.py` | `tests/test_migrations.py` |
 | State surface inventory | `src/cognitive_firm/orchestration/state_surface_inventory.py` | `tests/test_state_surface_inventory.py` |
 | Governance change proposals | `src/cognitive_firm/orchestration/governance_changes.py` | `tests/test_governance_changes.py` |

@@ -15,8 +15,8 @@ def test_governance_failure_benchmark_passes_all_fixtures():
     payload = run_benchmark()
 
     assert payload["summary"] == {
-        "passed": 10,
-        "total": 10,
+        "passed": 11,
+        "total": 11,
         "verdict": "passed",
     }
     fixture_ids = {row["fixture_id"] for row in payload["fixtures"]}
@@ -25,6 +25,7 @@ def test_governance_failure_benchmark_passes_all_fixtures():
         "failed_attestation",
         "missing_human_receipt",
         "unresolved_outcome",
+        "failed_prediction_reversal_review",
         "open_accountability_case",
         "formal_refutation",
         "missing_referenced_lease",
@@ -46,6 +47,7 @@ def test_governance_failure_benchmark_cli_compact(capsys):
         "action_attestation + governed-run bundle",
         "human_work + governed-run bundle",
         "outcome_links + governed-run bundle",
+        "outcome_links + routine_reviews prediction review",
         "accountability_cases + governed-run bundle",
         "formal_verification + governed-run bundle",
         "lease evidence + governed-run bundle",
@@ -71,6 +73,20 @@ def test_governance_failure_benchmark_cli_full_json(capsys):
     )
     assert downgrade["details"]["report"]["delta_mean_reward"] > 0
     assert downgrade["details"]["packet"]["status"] == "blocked"
+    failed_prediction = next(
+        row for row in payload["fixtures"]
+        if row["fixture_id"] == "failed_prediction_reversal_review"
+    )
+    assert (
+        failed_prediction["details"]["outcome_link"]["metadata"]["prediction_review"][
+            "status"
+        ]
+        == "prediction_failed"
+    )
+    assert (
+        failed_prediction["details"]["routine_review"]["metadata"]["reversal_candidate"]
+        is True
+    )
     weak_proposal = next(
         row for row in payload["fixtures"]
         if row["fixture_id"] == "weakly_evidenced_governance_change"

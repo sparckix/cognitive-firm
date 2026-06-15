@@ -16,13 +16,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from cognitive_firm.orchestration.action_impact import (
-    append_policy_evaluation,
-    append_policy_promotion_packet,
-    build_policy_promotion_packet,
-    evaluate_offline_policy_candidate,
-    load_summary_from_json,
-)
+from cognitive_firm.kernel_service import KernelServiceConfig, dispatch_kernel_request
+from cognitive_firm.orchestration.action_impact import load_summary_from_json
 from cognitive_firm.orchestration.business_function_bandit import propose_business_function_policy
 
 from field_pilot_validate import validate_pilot
@@ -146,6 +141,18 @@ def _has_blank_table_cells(line: str) -> bool:
 
 def run_demo(root: Path) -> dict[str, Any]:
     logs = _scaffold_completed_pilot(root)
+    config = KernelServiceConfig(
+        action_impact_summary=logs["action_impact"],
+        policy_evaluations_log=logs["evaluations"],
+        policy_promotion_packets_log=logs["packets"],
+        org_dir=logs["pilot"] / "org",
+    )
+    actor_context = {
+        "actor_id": "role.product_governance",
+        "actor_kind": "service",
+        "role_id": "role.product_governance",
+        "surface": "field_pilot_action_impact_demo",
+    }
     validation = validate_pilot(
         logs["pilot"],
         require_action_impact=True,
@@ -162,27 +169,40 @@ def run_demo(root: Path) -> dict[str, Any]:
         evidence_refs=[str(logs["action_impact"])],
         metadata={"demo": "field_pilot_action_impact"},
     )
-    safe_report = evaluate_offline_policy_candidate(
-        summary.records,
-        candidate_policy_id=proposal.candidate_policy_id,
-        candidate_policy_ref="policy://field-pilot/specialist-requirement-review",
-        candidate_action_by_context=proposal.candidate_action_by_context,
-        context_keys=proposal.context_keys,
-        objective_metric=proposal.objective_metric,
-        min_matched=10,
-        min_support_coverage=0.4,
-        evidence_refs=[str(logs["action_impact"])],
-        metadata={"demo": "field_pilot_action_impact"},
+    evaluated = dispatch_kernel_request(
+        "POST",
+        "/kernel/action-impact/policy-evaluations/evaluate",
+        {
+            "candidate_policy_id": proposal.candidate_policy_id,
+            "candidate_policy_ref": "policy://field-pilot/specialist-requirement-review",
+            "candidate_action_by_context": proposal.candidate_action_by_context,
+            "context_keys": proposal.context_keys,
+            "objective_metric": proposal.objective_metric,
+            "min_matched": 10,
+            "min_support_coverage": 0.4,
+            "evidence_refs": [str(logs["action_impact"])],
+            "metadata": {"demo": "field_pilot_action_impact"},
+            "actor_context": actor_context,
+        },
+        config=config,
     )
-    append_policy_evaluation(safe_report, log_path=logs["evaluations"])
-    packet = build_policy_promotion_packet(
-        safe_report,
-        proposed_by="role.product_governance",
-        authority_diff_ref=str(logs["authority_diff"]),
-        title="Review field-pilot specialist-review routing policy",
-        evidence_refs=[str(logs["pilot"] / "metrics-table.md")],
+    _assert_status(evaluated.status, 201, "field-pilot policy evaluation")
+    safe_report = evaluated.payload["policy_evaluation"]
+    packet_response = dispatch_kernel_request(
+        "POST",
+        "/kernel/action-impact/policy-promotion-packets",
+        {
+            "evaluation_id": safe_report["evaluation_id"],
+            "proposed_by": "role.product_governance",
+            "authority_diff_ref": str(logs["authority_diff"]),
+            "title": "Review field-pilot specialist-review routing policy",
+            "evidence_refs": [str(logs["pilot"] / "metrics-table.md")],
+            "actor_context": actor_context,
+        },
+        config=config,
     )
-    append_policy_promotion_packet(packet, log_path=logs["packets"])
+    _assert_status(packet_response.status, 201, "field-pilot promotion packet")
+    packet = packet_response.payload["policy_promotion_packet"]
     return {
         "demo": "field_pilot_action_impact",
         "fictional_firm": "Kettle & Compass Field Kits",
@@ -195,29 +215,34 @@ def run_demo(root: Path) -> dict[str, Any]:
             "rejected_contexts": len(proposal.rejected_contexts),
         },
         "policy_evaluation": {
-            "status": safe_report.status,
-            "delta_mean_reward": safe_report.delta_mean_reward,
-            "support_coverage": safe_report.support_coverage,
-            "promotion_allowed": safe_report.promotion_allowed,
+            "status": safe_report["status"],
+            "delta_mean_reward": safe_report["delta_mean_reward"],
+            "support_coverage": safe_report["support_coverage"],
+            "promotion_allowed": safe_report["promotion_allowed"],
         },
         "promotion_packet": {
-            "status": packet.status,
-            "review_blockers": packet.review_blockers,
-            "candidate_policy_id": packet.candidate_policy_id,
+            "status": packet["status"],
+            "review_blockers": packet["review_blockers"],
+            "candidate_policy_id": packet["candidate_policy_id"],
         },
         "summary": {
             "action_impact_records": len(summary.records),
             "validation_ok": bool(validation["ok"]),
-            "packet_status": packet.status,
+            "packet_status": packet["status"],
             "verdict": "passed"
             if validation["ok"]
             and proposal.status == "candidate"
-            and safe_report.status == "promotable"
-            and packet.status == "review_ready"
+            and safe_report["status"] == "promotable"
+            and packet["status"] == "review_ready"
             else "failed",
         },
         "log_paths": {name: str(path) for name, path in logs.items()},
     }
+
+
+def _assert_status(actual: int, expected: int, label: str) -> None:
+    if actual != expected:
+        raise AssertionError(f"{label} returned {actual}, expected {expected}")
 
 
 def _compact(payload: dict[str, Any]) -> dict[str, Any]:

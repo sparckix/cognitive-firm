@@ -199,6 +199,18 @@ cognitive-firm-formal-verification create-from-provider-payload \
   --authority-root /path/to/org
 ```
 
+Kernel-service clients use the same ingestion boundary:
+
+```text
+POST /kernel/formal-verifications/provider-payload
+GET  /kernel/formal-verifications?run_id=run_123
+```
+
+The service records the formal-verification row and, by default, the linked
+action attestation. It does not run the provider or decide trust by provider
+name; installed org policy and governed-run bundle export still decide whether
+a provider-backed verified row is clean evidence or caveated.
+
 No-cost end-to-end demo:
 
 ```bash

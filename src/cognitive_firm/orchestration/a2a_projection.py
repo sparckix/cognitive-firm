@@ -18,11 +18,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - product smoke path.
     yaml = None
 
-from cognitive_firm.common.paths import REPO_ROOT, WORKSPACE_DIR
+from cognitive_firm.common.paths import ORG_ROOT_DIR, WORKSPACE_DIR
 
 
-ROLES_DIR = REPO_ROOT / "org" / "roles"
-CHANNELS_DIR = REPO_ROOT / "org" / "channels"
+ROLES_DIR = ORG_ROOT_DIR / "roles"
+CHANNELS_DIR = ORG_ROOT_DIR / "channels"
 CARD_DIR = WORKSPACE_DIR / "a2a" / "agent_cards"
 LOGICAL_CHANNELS_DIR = Path("org") / "channels"
 

@@ -22,7 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import ORG_ROOT_DIR
+from cognitive_firm.orchestration.outcome_links import predicted_effect_from_dict
 
 
 ImpactStatus = Literal["planned", "measured", "abandoned", "void"]
@@ -31,9 +32,9 @@ AttributionConfidence = Literal["low", "medium", "high"]
 PolicyEvaluationStatus = Literal["blocked", "advisory", "promotable"]
 PolicyEvaluationMethod = Literal["replay_match_conservative", "ips_ready", "doubly_robust_ready"]
 
-DEFAULT_ACTION_IMPACT_SUMMARY = REPO_ROOT / "org" / "action_impact" / "action_impact_summary.json"
-DEFAULT_POLICY_EVALUATIONS_LOG = REPO_ROOT / "org" / "action_impact" / "policy_evaluations.jsonl"
-DEFAULT_POLICY_PROMOTION_PACKETS_LOG = REPO_ROOT / "org" / "action_impact" / "policy_promotion_packets.jsonl"
+DEFAULT_ACTION_IMPACT_SUMMARY = ORG_ROOT_DIR / "action_impact" / "action_impact_summary.json"
+DEFAULT_POLICY_EVALUATIONS_LOG = ORG_ROOT_DIR / "action_impact" / "policy_evaluations.jsonl"
+DEFAULT_POLICY_PROMOTION_PACKETS_LOG = ORG_ROOT_DIR / "action_impact" / "policy_promotion_packets.jsonl"
 
 
 @dataclass(frozen=True)
@@ -584,6 +585,7 @@ def build_policy_promotion_packet(
     rationale: str | None = None,
     expected_behavior_change: str | None = None,
     rollback_plan: str | None = None,
+    predicted_effect: dict[str, Any] | None = None,
     authority_diff_ref: str | None = None,
     formal_verification_refs: list[str] | None = None,
     learning_event_refs: list[str] | None = None,
@@ -653,6 +655,10 @@ def build_policy_promotion_packet(
             "policy_evaluation_id": report.evaluation_id,
         },
     }
+    if predicted_effect is not None:
+        governance_change_candidate["predicted_effect"] = predicted_effect_from_dict(
+            predicted_effect
+        ).as_dict()
 
     return PolicyPromotionPacket(
         packet_id=f"ppp_{uuid.uuid4().hex[:12]}",
@@ -684,6 +690,83 @@ def append_policy_promotion_packet(
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(packet.as_dict(), sort_keys=True) + "\n")
     return packet
+
+
+def get_policy_promotion_packet(
+    packet_id: str,
+    *,
+    log_path: Path | None = None,
+) -> PolicyPromotionPacket:
+    for packet in list_policy_promotion_packets(log_path=log_path):
+        if packet.packet_id == packet_id:
+            return packet
+    raise ValueError(f"policy promotion packet not found: {packet_id}")
+
+
+def build_policy_promotion_governance_change_request(
+    packet: PolicyPromotionPacket,
+    *,
+    proposal_id: str | None = None,
+    owner_role: str | None = None,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    invariant_checks: list[dict[str, Any]] | None = None,
+    metadata: dict[str, Any] | None = None,
+    require_review_ready: bool = True,
+) -> dict[str, Any]:
+    """Project a policy-promotion packet into a governance-change request.
+
+    This is a composition helper, not an approval or policy writer. It preserves
+    the packet as evidence and lets the governance-change protocol decide
+    whether the resulting proposal is review-ready.
+    """
+    if require_review_ready and packet.status != "review_ready":
+        raise ValueError(
+            "policy promotion packet must be review_ready before opening a "
+            f"governance change; got {packet.status!r}"
+        )
+    candidate = dict(packet.governance_change_candidate)
+    packet_ref = f"policy_promotion_packet:{packet.packet_id}"
+    source_refs = _string_list(candidate.get("source_refs"))
+    if packet_ref not in source_refs:
+        source_refs.append(packet_ref)
+    candidate_metadata = dict(candidate.get("metadata") or {})
+    request_metadata = {
+        **candidate_metadata,
+        "source_recipe": "policy_promotion_packet_governance_change_request.v1",
+        "source_policy_promotion_packet_id": packet.packet_id,
+        "source_policy_promotion_packet_ref": packet_ref,
+        "candidate_policy_id": packet.candidate_policy_id,
+        "policy_evaluation_id": packet.evaluation_report.evaluation_id,
+        **(metadata or {}),
+    }
+    request = {
+        "change_kind": candidate.get("change_kind") or "route_policy_change",
+        "title": candidate.get("title") or f"Review candidate policy {packet.candidate_policy_id}",
+        "proposed_by": candidate.get("proposed_by") or packet.proposed_by,
+        "target_ref": candidate.get("target_ref") or packet.target_ref,
+        "rationale": candidate.get("rationale") or (
+            f"Policy promotion packet {packet.packet_id} requests governance review "
+            f"for candidate policy {packet.candidate_policy_id}."
+        ),
+        "source_refs": source_refs,
+        "expected_behavior_change": candidate.get("expected_behavior_change"),
+        "predicted_effect": candidate.get("predicted_effect"),
+        "risk_summary": candidate.get("risk_summary"),
+        "rollback_plan": candidate.get("rollback_plan"),
+        "metadata": request_metadata,
+    }
+    if proposal_id:
+        request["proposal_id"] = proposal_id
+    if owner_role:
+        request["owner_role"] = owner_role
+    if tenant_id:
+        request["tenant_id"] = tenant_id
+    if project_id:
+        request["project_id"] = project_id
+    if invariant_checks is not None:
+        request["invariant_checks"] = invariant_checks
+    return request
 
 
 def list_policy_promotion_packets(

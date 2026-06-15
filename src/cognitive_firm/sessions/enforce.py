@@ -8,10 +8,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import ORG_ROOT_DIR
 
 
-SESSIONS_DIR = REPO_ROOT / "org" / "sessions"
+SESSIONS_DIR = ORG_ROOT_DIR / "sessions"
 
 
 @dataclass(frozen=True)

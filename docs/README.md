@@ -8,6 +8,7 @@ Start with:
 - [Resource And Event Catalog](resource-event-catalog.md)
 - [Capability Map](capability-map.md)
 - [Blueprints](blueprints/README.md)
+- [Examples](examples/README.md)
 - [Kernel Invariants](kernel-invariants.md)
 - [Recursive Organization](recursive-organization.md)
 - [System Positioning](system-positioning.md)
@@ -40,6 +41,7 @@ Start with:
 - [Intelligence Sources](protocols/intelligence-sources.md)
 - [Approved Learning Events](protocols/learning-events.md)
 - [Governed Run Attestation Bundle](protocols/governed-run-attestation.md)
+- [Governed Run Recipes](protocols/governed-run-recipes.md)
 - [Formal Verification](protocols/formal-verification.md)
 - [EU AI Act Deploy Gate](protocols/eu-ai-act-deploy-gate.md)
 - [Kernel Service](protocols/kernel-service.md)
@@ -58,10 +60,13 @@ Start with:
 - [Field Validation Pilot Example](examples/field-validation-pilot-example.md)
 - [Learning Event Replay Example](examples/learning-event-replay.md)
 - [LangGraph Runtime Adapter Example](examples/langgraph-runtime-adapter.md)
+- [Agent Runtime Invocation Policy](protocols/agent-runtime-invocation.md)
+- [Agent-Fleet Audit Demo](examples/agent-fleet-audit-demo.md)
 - [Governance Failure Benchmark](examples/governance-failure-benchmark.md)
 - [Decision-Log Replay Demo](examples/decision-log-replay-demo.md)
 - [Field-Pilot Action-Impact Demo](examples/field-pilot-action-impact-demo.md)
 - [Formal Provider Bundle Demo](examples/formal-provider-bundle-demo.md)
+- [Self-Evolving Organization Demo](examples/self-evolving-org-demo.md)
 - [App-Service Integration Example](examples/app-service-integration-example.md)
 - [Learning Loop Demo](examples/learning-loop-demo.md)
 - [A2H Workflow Demo](examples/a2h-workflow-demo.md)
@@ -73,8 +78,8 @@ Start with:
 **Sub-folders**
 
 - [`blueprints/`](blueprints/) - 2 file(s)
-- [`examples/`](examples/) - 12 file(s)
-- [`protocols/`](protocols/) - 50 file(s)
+- [`examples/`](examples/) - 17 file(s)
+- [`protocols/`](protocols/) - 59 file(s)
 - [`templates/`](templates/) - 2 file(s)
 
 **Documents**
@@ -104,3 +109,5 @@ Start with:
 - [theory.md](theory.md)
 
 <sub>4 sub-folder(s), 23 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
+
+<!-- AUTO-INDEX:END -->

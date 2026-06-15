@@ -19,23 +19,21 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from cognitive_firm.kernel_service import KernelServiceConfig, dispatch_kernel_request
 from cognitive_firm.distribution.signing import generate_keypair
 from cognitive_firm.orchestration.action_attestation import digest_text
-from cognitive_firm.orchestration.artifact_bundle import (
-    build_governed_run_attestation_bundle,
-    governed_run_bundle_summary,
-    governed_run_bundle_to_dict,
-    validate_governed_run_bundle_payload,
-)
 from cognitive_firm.orchestration.formal_verification import (
     FORMAL_VERIFICATION_PROVIDER_SCHEMA_VERSION,
     FORMAL_VERIFICATION_TRUST_POLICY_VERSION,
     TRUSTED_FORMAL_VERIFICATION_PROVIDERS_RELATIVE_PATH,
     configure_trusted_provider,
-    create_formal_verification_from_provider_payload,
     sign_provider_payload,
 )
-from cognitive_firm.orchestration.runtime_adapters import RuntimeEvent, record_runtime_event
+
+
+def _assert_status(actual: int, expected: int, label: str) -> None:
+    if actual != expected:
+        raise RuntimeError(f"{label} failed with status {actual}; expected {expected}")
 
 
 def _logs(root: Path) -> dict[str, Path]:
@@ -53,48 +51,103 @@ def _logs(root: Path) -> dict[str, Path]:
     }
 
 
-def _start_and_complete_run(*, transition_log: Path, external_run_id: str, objective: str) -> str:
-    transition_log.parent.mkdir(parents=True, exist_ok=True)
-    started = record_runtime_event(
-        RuntimeEvent(
-            runtime_name="native",
-            external_run_id=external_run_id,
-            kind="started",
-            owner_role="role.release_manager",
-            actor="role.release_manager",
-            objective=objective,
-            tenant_id="tenant-formal-demo",
-            project_id="project-provider-attestation",
-        ),
-        log_path=transition_log,
+def _service_config(
+    *,
+    transition_log: Path,
+    action_attestation_log: Path,
+    formal_verification_log: Path,
+    authority_root: Path,
+    ingestion_org_dir: Path | None = None,
+) -> KernelServiceConfig:
+    return KernelServiceConfig(
+        project_root=authority_root,
+        org_dir=ingestion_org_dir or authority_root,
+        transition_log=transition_log,
+        action_attestation_log=action_attestation_log,
+        formal_verification_log=formal_verification_log,
     )
-    run_id = str(started["cognitive_run_id"])
-    record_runtime_event(
-        RuntimeEvent(
-            runtime_name="native",
-            external_run_id=external_run_id,
-            kind="checkpointed",
-            owner_role="role.release_manager",
-            actor="role.release_manager",
-            step_id="formal-provider-check",
-            checkpoint_status="completed",
-            summary="recorded provider-backed formal-verification evidence",
-            payload_ref=f"formal-provider-demo://{external_run_id}/payload",
-        ),
-        log_path=transition_log,
+
+
+def _actor_context() -> dict[str, str]:
+    return {
+        "actor_id": "role.release_manager",
+        "actor_kind": "service",
+        "role_id": "role.release_manager",
+        "surface": "formal_provider_bundle_demo",
+    }
+
+
+def _start_and_complete_run(*, config: KernelServiceConfig, external_run_id: str, objective: str) -> str:
+    actor_context = _actor_context()
+    started = dispatch_kernel_request(
+        "POST",
+        "/kernel/runs",
+        {
+            "owner_role": "role.release_manager",
+            "objective": objective,
+            "tenant_id": "tenant-formal-demo",
+            "project_id": "project-provider-attestation",
+            "idempotency_key": f"formal-provider-demo:{external_run_id}",
+            "actor_context": actor_context,
+        },
+        config=config,
     )
-    record_runtime_event(
-        RuntimeEvent(
-            runtime_name="native",
-            external_run_id=external_run_id,
-            kind="state_changed",
-            owner_role="role.release_manager",
-            actor="role.release_manager",
-            state="completed",
-        ),
-        log_path=transition_log,
+    _assert_status(started.status, 201, f"{external_run_id} run start")
+    run_id = started.payload["run"]["run_id"]
+    checkpoint = dispatch_kernel_request(
+        "POST",
+        f"/kernel/runs/{run_id}/checkpoints",
+        {
+            "actor": "role.release_manager",
+            "step_id": "formal-provider-check",
+            "status": "completed",
+            "summary": "recorded provider-backed formal-verification evidence",
+            "payload_ref": f"formal-provider-demo://{external_run_id}/payload",
+            "side_effect_key": f"formal-provider-demo:{external_run_id}:payload",
+            "actor_context": actor_context,
+        },
+        config=config,
     )
+    _assert_status(checkpoint.status, 201, f"{external_run_id} checkpoint")
+    completed = dispatch_kernel_request(
+        "POST",
+        f"/kernel/runs/{run_id}/state",
+        {
+            "actor": "role.release_manager",
+            "state": "completed",
+            "actor_context": actor_context,
+        },
+        config=config,
+    )
+    _assert_status(completed.status, 200, f"{external_run_id} run completion")
     return run_id
+
+
+def _record_provider_payload(
+    config: KernelServiceConfig,
+    payload: dict[str, Any],
+    *,
+    label: str,
+) -> dict[str, Any]:
+    response = dispatch_kernel_request(
+        "POST",
+        "/kernel/formal-verifications/provider-payload",
+        {"payload": payload, "actor_context": _actor_context()},
+        config=config,
+    )
+    _assert_status(response.status, 201, f"{label} formal provider payload")
+    return response.payload["formal_verification"]
+
+
+def _build_bundle(config: KernelServiceConfig, run_id: str, *, label: str) -> dict[str, Any]:
+    response = dispatch_kernel_request(
+        "POST",
+        "/kernel/governed-run-bundles/build",
+        {"run_id": run_id, "actor_context": _actor_context()},
+        config=config,
+    )
+    _assert_status(response.status, 200, f"{label} governed-run bundle")
+    return response.payload
 
 
 def _provider_payload(*, run_id: str, include_refs: bool) -> dict[str, Any]:
@@ -167,9 +220,22 @@ def run_demo(root: Path) -> dict[str, Any]:
         trust_basis="Fixture LeanMill key for formal-provider bundle demo.",
     )
     _write_unconfigured_provider_policy(paths["missing_authority"])
+    trusted_config = _service_config(
+        transition_log=paths["trusted_transitions"],
+        action_attestation_log=paths["trusted_attestations"],
+        formal_verification_log=paths["trusted_formal"],
+        authority_root=paths["trusted_authority"],
+    )
+    missing_config = _service_config(
+        transition_log=paths["missing_transitions"],
+        action_attestation_log=paths["missing_attestations"],
+        formal_verification_log=paths["missing_formal"],
+        authority_root=paths["missing_authority"],
+        ingestion_org_dir=paths["missing_authority"].parent / "no_trust_policy_for_ingestion",
+    )
 
     trusted_run_id = _start_and_complete_run(
-        transition_log=paths["trusted_transitions"],
+        config=trusted_config,
         external_run_id="formal-provider-trusted",
         objective="verify release workflow evidence through a signed provider payload",
     )
@@ -182,22 +248,15 @@ def run_demo(root: Path) -> dict[str, Any]:
         json.dumps(trusted_payload, indent=2, sort_keys=True),
         encoding="utf-8",
     )
-    trusted_record = create_formal_verification_from_provider_payload(
+    trusted_record = _record_provider_payload(
+        trusted_config,
         trusted_payload,
-        log_path=paths["trusted_formal"],
-        action_attestation_log_path=paths["trusted_attestations"],
-        authority_root=paths["trusted_authority"],
+        label="trusted",
     )
-    trusted_bundle = build_governed_run_attestation_bundle(
-        trusted_run_id,
-        transition_log_path=paths["trusted_transitions"],
-        action_attestation_log_path=paths["trusted_attestations"],
-        formal_verification_log_path=paths["trusted_formal"],
-        authority_root=paths["trusted_authority"],
-    )
+    trusted_bundle_response = _build_bundle(trusted_config, trusted_run_id, label="trusted")
 
     missing_run_id = _start_and_complete_run(
-        transition_log=paths["missing_transitions"],
+        config=missing_config,
         external_run_id="formal-provider-missing-evidence",
         objective="show provider evidence stays caveated when trust requirements are missing",
     )
@@ -206,25 +265,19 @@ def run_demo(root: Path) -> dict[str, Any]:
         json.dumps(missing_payload, indent=2, sort_keys=True),
         encoding="utf-8",
     )
-    missing_record = create_formal_verification_from_provider_payload(
+    missing_record = _record_provider_payload(
+        missing_config,
         missing_payload,
-        log_path=paths["missing_formal"],
-        action_attestation_log_path=paths["missing_attestations"],
+        label="missing-evidence",
     )
-    missing_bundle = build_governed_run_attestation_bundle(
-        missing_run_id,
-        transition_log_path=paths["missing_transitions"],
-        action_attestation_log_path=paths["missing_attestations"],
-        formal_verification_log_path=paths["missing_formal"],
-        authority_root=paths["missing_authority"],
-    )
+    missing_bundle_response = _build_bundle(missing_config, missing_run_id, label="missing-evidence")
 
-    trusted_payload_bundle = governed_run_bundle_to_dict(trusted_bundle)
-    missing_payload_bundle = governed_run_bundle_to_dict(missing_bundle)
-    trusted_validation_errors = validate_governed_run_bundle_payload(trusted_payload_bundle)
-    missing_validation_errors = validate_governed_run_bundle_payload(missing_payload_bundle)
-    trusted_summary = governed_run_bundle_summary(trusted_bundle)
-    missing_summary = governed_run_bundle_summary(missing_bundle)
+    trusted_bundle = trusted_bundle_response["bundle"]
+    missing_bundle = missing_bundle_response["bundle"]
+    trusted_validation_errors = trusted_bundle_response["validation"]["errors"]
+    missing_validation_errors = missing_bundle_response["validation"]["errors"]
+    trusted_summary = trusted_bundle_response["summary"]
+    missing_summary = missing_bundle_response["summary"]
 
     return {
         "demo": "formal_provider_bundle",
@@ -232,35 +285,35 @@ def run_demo(root: Path) -> dict[str, Any]:
         "no_external_calls": True,
         "trusted_provider": {
             "run_id": trusted_run_id,
-            "verification_id": trusted_record.verification_id,
-            "bundle_verdict": trusted_bundle.verdict,
-            "bundle_caveats": trusted_bundle.caveats,
+            "verification_id": trusted_record["verification_id"],
+            "bundle_verdict": trusted_bundle["verdict"],
+            "bundle_caveats": trusted_bundle["caveats"],
             "signature_verified": bool(
-                trusted_record.metadata.get("provider_payload_signature_verified")
+                trusted_record["metadata"].get("provider_payload_signature_verified")
             ),
             "formal_verifications": trusted_summary["counts"]["formal_verifications"],
             "bundle_schema_valid": not trusted_validation_errors,
         },
         "missing_provider_evidence": {
             "run_id": missing_run_id,
-            "verification_id": missing_record.verification_id,
-            "bundle_verdict": missing_bundle.verdict,
-            "bundle_caveats": missing_bundle.caveats,
+            "verification_id": missing_record["verification_id"],
+            "bundle_verdict": missing_bundle["verdict"],
+            "bundle_caveats": missing_bundle["caveats"],
             "formal_verifications": missing_summary["counts"]["formal_verifications"],
             "bundle_schema_valid": not missing_validation_errors,
         },
         "summary": {
-            "trusted_bundle": trusted_bundle.verdict,
-            "missing_evidence_bundle": missing_bundle.verdict,
+            "trusted_bundle": trusted_bundle["verdict"],
+            "missing_evidence_bundle": missing_bundle["verdict"],
             "trusted_schema_errors": trusted_validation_errors,
             "missing_schema_errors": missing_validation_errors,
             "verdict": "passed"
             if (
-                trusted_bundle.verdict == "passed"
-                and not trusted_bundle.caveats
-                and bool(trusted_record.metadata.get("provider_payload_signature_verified"))
-                and missing_bundle.verdict == "incomplete"
-                and bool(missing_bundle.caveats)
+                trusted_bundle["verdict"] == "passed"
+                and not trusted_bundle["caveats"]
+                and bool(trusted_record["metadata"].get("provider_payload_signature_verified"))
+                and missing_bundle["verdict"] == "incomplete"
+                and bool(missing_bundle["caveats"])
                 and not trusted_validation_errors
                 and not missing_validation_errors
             )

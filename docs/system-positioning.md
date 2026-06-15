@@ -38,7 +38,7 @@ organization boundary when their outputs affect accountable work.
 | Graph and workflow runtimes | LangGraph, Google ADK, Microsoft Agent Framework | Stateful execution, graph replay, interrupts, deployment, runtime observability. | Use them to run work. Project lifecycle events into cognitive-firm through runtime adapters. |
 | Multi-agent orchestration frameworks | CrewAI, AutoGen, Microsoft Agent Framework | Agent roles, crews, conversational collaboration, task routing, tool use. | Keep their orchestration semantics. Record role authority, obligations, side effects, and closure in cognitive-firm. |
 | Stateful-agent and memory platforms | Letta / MemGPT | Persistent agent memory, messages, tools, memory blocks, agent context. | Let memory platforms manage agent context. cognitive-firm keeps organizational memory as files, events, receipts, and approved learning records. |
-| SaaS automation and integration tools | n8n, Zapier, workflow builders | App triggers, API glue, business-process automation. | Use them as connector surfaces. cognitive-firm governs which role may invoke which external capability and records what happened. |
+| SaaS automation, workflow, and BPM tools | n8n, Zapier, workflow builders, BPM engines | App triggers, API glue, process modeling, business-process automation, stage routing. | Use them as execution and connector surfaces. cognitive-firm governs authority, evidence, receipts, outcomes, and learning around the process; it does not become the process designer. |
 | Observability and evaluation platforms | LangSmith, runtime traces, eval suites | Traces, evals, debugging, model-output inspection. | Consume summaries or links. Do not make trace systems the source of organizational authority. |
 | Governance and compliance layers | Enterprise IAM, GRC, audit systems, internal policy engines | Identity, access, compliance reporting, external audit workflows. | T2 integrations may connect to them. The T1 kernel stays small and keeps tenant-specific compliance policy outside the public kernel. |
 
@@ -84,6 +84,7 @@ Keep framework-native capabilities in the systems that already provide them:
 - native long-term agent memory;
 - tracing and eval dashboards;
 - SaaS connector catalogs;
+- process modeling, BPMN-style design, and workflow-stage optimization;
 - enterprise IAM administration;
 - hosted multi-tenant isolation as a public-kernel default.
 

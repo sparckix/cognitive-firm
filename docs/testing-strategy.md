@@ -10,7 +10,11 @@ checks. Each layer asks a different question.
 |---|---|---|
 | Primitive tests | Does one kernel primitive enforce its local contract? | `tests/test_work_items.py`, `tests/test_formal_verification.py` |
 | Property tests | Does a contract hold across generated inputs? | `tests/test_invariants_property_based.py` |
-| Command-path selftests | Does the public command exercise the shipped path? | `make a2h-command-conformance`, `make adoption-demo`, `make smoke-public` |
+| Command-path selftests | Does the public command exercise the shipped path and expose the intended operator knobs? | `make a2h-command-conformance`, `make adoption-demo`, `make smoke-public`, `tests/test_self_evolving_make_targets.py` |
+| Public claim discipline | Do public docs avoid production/compliance/enterprise overclaims and keep required caveats visible? | `make public-claims-check`, `tests/test_public_claims_check.py` |
+| Release hygiene | Is private, generated, or local runtime state absent from tracked, staged, and unignored release state? | `make release-hygiene-check`, `tests/test_release_hygiene_check.py` |
+| Release diff audit | Is the current broad worktree diff classified into reviewable buckets, with unknown paths visible? | `make release-diff-audit`, `tests/test_release_diff_audit.py` |
+| Release candidate gate | Do the public deterministic suite, clean-container boot, and diff audit compose into one tag-candidate command? | `make release-candidate-check` |
 | Governance fault fixtures | Does the kernel block, flag, or route expected bad states? | `make governance-failure-benchmark` |
 | Decision-log replay | Can saved action-impact logs reconstruct a candidate proposal, evaluation, and review packet? | `make decision-log-replay-demo` |
 | Field-pilot action-impact | Can a pilot folder carry measured action-impact rows and produce a review packet? | `make field-pilot-action-impact-demo` |
@@ -21,6 +25,34 @@ checks. Each layer asks a different question.
 | Evidence hashes | Does a governed-run packet carry portable record-set, subject, input/output, provider, and authority-contract hashes without making them a new source of authority? | governed-run bundle tests, `schemas/governed-run-attestation.v1.schema.json` |
 | Observability references | Can runtime checkpoints and action attestations expose reviewable trace refs without making traces the source of truth? | `otel_export`, governed-run bundle tests |
 | Interchange validation | Can a governed-run packet be validated by schema and digest before another runtime or provider consumes it? | `schemas/governed-run-attestation.v1.schema.json`, governed-run bundle tests |
+
+## Release Checks
+
+`make release-candidate-check` is the tag-candidate command. It composes the
+deterministic public suite (`make smoke-public`), the clean-container boot
+fixture (`make smoke-docker`), and the broad-diff classifier
+(`make release-diff-audit`). Passing it means the public kernel paths still
+boot, exercise their documented command surfaces, and expose the changed-path
+review buckets; it does not replace a final human review of the diff, release
+notes, and generated artifacts.
+
+`make public-claims-check` is a narrow overclaim guard. It scans public docs for
+phrases that would imply unsupported production, enterprise, legal, or
+compliance guarantees, and it requires the main caveat surfaces to stay present.
+It is intentionally not a prose style checker.
+
+`make release-hygiene-check` protects the public/private boundary. It fails when
+private tenant paths, local credentials, generated run state, or other
+release-inappropriate files are tracked, staged, or unignored. Ignored local
+files may still exist on disk during development; the check asks whether the
+release state could accidentally carry them.
+
+`make release-diff-audit` classifies the current changed paths into release
+review buckets: kernel code, demos/examples, protocol docs, tests, operator
+scripts, org examples, generated indexes, release gates, and repo config. It
+fails on unclassified paths so a broad release diff cannot silently introduce a
+new surface. It does not decide whether a change is good; it makes the review
+surface explicit before staging.
 
 ## Governance Fault Fixtures
 
@@ -46,8 +78,9 @@ inspectable record. A fake score table is not enough.
 
 `make decision-log-replay-demo` checks the learned-policy path without an
 online learner or external calls. It reconstructs a candidate route from
-action-impact rows, evaluates it by conservative replay, and packages the
-result for governance review.
+action-impact rows, evaluates it by conservative replay through the kernel
+service, and packages the result for governance review through the same service
+boundary.
 
 The test is useful only if it keeps both sides:
 

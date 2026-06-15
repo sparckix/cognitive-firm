@@ -240,6 +240,33 @@ def test_I5_decision_idempotency(role: dict, path: str):
     assert d1.required_approval == d2.required_approval
 
 
+def test_authorize_dispatch_uses_declared_paths_metadata_without_text_path():
+    """Typed task frontmatter should drive authorization without prose parsing."""
+    role = {
+        "authorized_paths": ["org/mandates/"],
+        "forbidden_paths": [".env"],
+        "budget": {"single_action_cap_usd": 1.0},
+    }
+    with patch(
+        "cognitive_firm.orchestration.task_authorization._load_role",
+        return_value=role,
+    ):
+        decision = authorize_dispatch(
+            role_id="org_evolver",
+            candidate_source="principal-goal",
+            candidate_text="Review the current mandate and report one bounded next improvement.",
+            metadata={
+                "declared_paths": ["org/mandates/org_evolver_mandate.md"],
+                "estimated_cost_usd": 0.0,
+                "autonomous_scope_ok": True,
+            },
+            unattended=True,
+        )
+
+    assert decision.allowed is True
+    assert decision.matched_paths == ("org/mandates/org_evolver_mandate.md",)
+
+
 @given(
     server=st.text(alphabet="abcdefghijklmnopqrstuvwxyz_", min_size=1, max_size=12),
     tool=st.text(alphabet="abcdefghijklmnopqrstuvwxyz_", min_size=1, max_size=12),

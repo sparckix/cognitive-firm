@@ -27,6 +27,7 @@ except Exception:  # pragma: no cover - exercised in minimal environments.
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+ORG_ROOT = Path(os.environ.get("ORG_ROOT") or REPO_ROOT / "org")
 ROLE_SCHEMA_PATH = REPO_ROOT / "schemas" / "role.v1.schema.json"
 
 
@@ -96,7 +97,10 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def _check_exists(report: dict[str, Any], key: str, path: Path) -> None:
-    rel = str(path.relative_to(REPO_ROOT))
+    try:
+        rel = str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        rel = str(path)
     if path.exists():
         report["checks"].append({"key": key, "ok": True, "path": rel})
     else:
@@ -119,7 +123,7 @@ def preflight(
         "errors": [],
     }
 
-    role_path = REPO_ROOT / "org" / "roles" / f"{role_id}.yaml"
+    role_path = ORG_ROOT / "roles" / f"{role_id}.yaml"
     _check_exists(report, "repo_agent_instructions", REPO_ROOT / "AGENTS.md")
     _check_exists(report, "role_yaml", role_path)
     if not role_path.exists():
@@ -163,13 +167,17 @@ def preflight(
         )
     else:
         mandate_raw = role.get("mandate_path") or f"org/mandates/{role_id}_mandate.md"
-        mandate_path = REPO_ROOT / str(mandate_raw)
+        mandate_path = (
+            ORG_ROOT / str(mandate_raw).removeprefix("org/")
+            if str(mandate_raw).startswith("org/")
+            else REPO_ROOT / str(mandate_raw)
+        )
         _check_exists(report, "mandate", mandate_path)
     _check_exists(report, "first_30_minutes", REPO_ROOT / "docs" / "first-30-minutes.md")
     _check_exists(report, "mandate_protocol", REPO_ROOT / "docs" / "protocols" / "mandate.md")
     _check_exists(report, "runtime_adapter_protocol", REPO_ROOT / "docs" / "protocols" / "runtime-adapters.md")
 
-    prefs_path = REPO_ROOT / "org" / "preferences" / "principal.yaml"
+    prefs_path = ORG_ROOT / "preferences" / "principal.yaml"
     _check_exists(report, "principal_preferences", prefs_path)
     if prefs_path.exists():
         try:

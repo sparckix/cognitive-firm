@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.3.0 - 2026-06-14
+
+This release candidate makes the kernel materially more executable while
+keeping runtime orchestration, tenant policy, and workflow/BPM concerns outside
+the reusable core.
+
+Highlights:
+
+- Release gates now include public smoke, clean-container smoke, release
+  hygiene, public-claim discipline, and broad diff classification.
+- Self-evolving organization proof paths now emit readable report JSON,
+  operator runbooks, HTML timelines, mutation proofs, future replay proofs,
+  planner receipts, and git receipts under gitignored run directories.
+- A bounded live Codex planner proof was run outside the deterministic release
+  gate: one subscription/local planner call, one governed approval, one valid
+  mutation proof, and one replay-valid proof chain.
+- Kernel service adoption was hardened so adopter-facing demos route durable
+  rows through service routes instead of writing primitive state directly where
+  a route exists.
+- New service surfaces cover policy decisions, formal-verification provider
+  payload ingestion/listing, and accountability-case status updates.
+- First-party governance carriers and thin recipes expanded for agent runtime
+  invocation receipts, capability signals, decision aggregation,
+  multi-agent trace attribution, mutation proofs, phase execution, protocol
+  experiments, and governed-run request shaping.
+- Deterministic examples now cover agent-fleet audit trail, decision-log
+  replay, field-pilot action impact, formal provider bundles, LangGraph-style
+  governance projection, multi-actor authority, and governance failure
+  fixtures.
+- Public docs clarify the T1/T2 boundary: cognitive-firm governs authority,
+  evidence, receipts, outcomes, learning, and bounded mutation around runtimes;
+  it is not a replacement agent runtime, BPM product, compliance
+  certification, or tenant strategy store.
+- Public schema and dashboard shell text were cleaned of legacy
+  project-specific naming so the reusable kernel stays tenant-neutral.
+
+Verification before release:
+
+- `make smoke-public`
+- `make smoke-docker`
+- `make release-diff-audit`
+
 ## v0.2.0 - 2026-06-11
 
 This release candidate turns the repository from a protocol-heavy kernel into

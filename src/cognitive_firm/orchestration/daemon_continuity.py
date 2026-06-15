@@ -43,8 +43,9 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SESSIONS_ROOT = REPO_ROOT / "org" / "sessions"
+from cognitive_firm.common.paths import ORG_ROOT_DIR
+
+SESSIONS_ROOT = ORG_ROOT_DIR / "sessions"
 DAEMON_SESSION_DIRNAME = "daemon"
 
 

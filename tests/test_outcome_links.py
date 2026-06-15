@@ -16,6 +16,8 @@ from cognitive_firm.orchestration.outcome_links import (  # noqa: E402
     list_outcome_links,
     main as outcome_links_main,
     outcome_link_resource,
+    prediction_review_for_outcome_link,
+    predicted_effect_from_dict,
     record_metric_snapshot,
     record_verdict,
     summarize_outcome_links,
@@ -92,6 +94,52 @@ def test_create_validates_required_fields(logs: _Logs):
         _create(logs, change_ref="")
 
 
+def test_create_validates_predicted_effect_contract(logs: _Logs):
+    link = _create(
+        logs,
+        metric_name="open_gaps",
+        metric_unit="count",
+        direction="lower_is_better",
+        metadata={
+            "predicted_effect": {
+                "metric_name": "open_gaps",
+                "metric_unit": "count",
+                "direction": "lower_is_better",
+                "threshold": 1,
+                "review_horizon": "next_routine_review",
+                "expected_verdict": "improved",
+            }
+        },
+    )
+
+    assert link.metadata["predicted_effect"] == {
+        "metric_name": "open_gaps",
+        "metric_unit": "count",
+        "direction": "lower_is_better",
+        "threshold": 1.0,
+        "review_horizon": "next_routine_review",
+        "expected_verdict": "improved",
+        "rationale": None,
+    }
+    assert predicted_effect_from_dict(link.metadata["predicted_effect"]).threshold == 1.0
+
+    with pytest.raises(ValueError, match="metric_name must match"):
+        _create(
+            logs,
+            metric_name="open_gaps",
+            metric_unit="count",
+            metadata={
+                "predicted_effect": {
+                    "metric_name": "other_metric",
+                    "metric_unit": "count",
+                    "direction": "lower_is_better",
+                    "threshold": 1,
+                    "review_horizon": "next_routine_review",
+                }
+            },
+        )
+
+
 def test_baseline_snapshot_moves_link_to_measuring(logs: _Logs):
     link = _create(logs)
     measured = _baseline(logs, link)
@@ -139,6 +187,41 @@ def test_verdict_lifecycle_terminates_the_link(logs: _Logs):
     assert final.verdict == "improved"
     assert final.verdict_recorded_by == "role.quality_office"
     assert final.verdict_recorded_at_utc is not None
+
+
+def test_verdict_records_prediction_review_and_reversal_candidate(logs: _Logs):
+    link = _create(
+        logs,
+        metric_name="open_gaps",
+        metric_unit="count",
+        direction="lower_is_better",
+        metadata={
+            "predicted_effect": {
+                "metric_name": "open_gaps",
+                "metric_unit": "count",
+                "direction": "lower_is_better",
+                "threshold": 1,
+                "review_horizon": "next_routine_review",
+            }
+        },
+    )
+    _baseline(logs, link, value=3)
+    _post(logs, link, value=3)
+
+    final = record_verdict(
+        link.outcome_link_id,
+        verdict="no_change",
+        recorded_by="role.quality_office",
+        rationale="the tracked gap count did not move",
+        log_path=logs.links,
+        kernel_events_log=logs.events,
+    )
+
+    review = final.metadata["prediction_review"]
+    assert review["status"] == "prediction_failed"
+    assert review["recommended_action"] == "file_reversal_candidate_at_routine_review"
+    assert review["actual_verdict"] == "no_change"
+    assert prediction_review_for_outcome_link(final) == review
 
 
 def test_verdict_requires_a_baseline_and_post_snapshot(logs: _Logs):

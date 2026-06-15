@@ -112,11 +112,30 @@ The projection includes:
 - `metadata`: attestation id, tenant/project scope, labels for subject kind,
   producer, action type, verification status, and run id when present;
 - `spec`: subject ref/digest, producer, action type, runtime/tool/policy refs,
-  input refs, output refs, and run id;
+  input refs, output refs, run id, and the original structured attestation
+  metadata;
 - `status`: verification status, verification summary, signature ref,
   transparency ref, and creation time;
 - `links`: subject, producer, runtime, tool, policy, signature, transparency,
   input, and output refs.
+
+Structured metadata is kept in `spec.metadata` because some evidence carriers,
+such as `agent_invocation_receipt.v1`, are nested objects. Lightweight string
+annotations remain available for dashboard filters, but dashboards and
+adapters that need the full receipt should read `spec.metadata`.
+
+## Agent Invocation Audit Read Model
+
+`list_agent_invocation_audits(...)` projects action attestations whose
+`action_type` is `agent_cli_dispatch` and whose metadata contains
+`agent_invocation_receipt.v1`. It returns recent invocation rows with producer,
+run id, runtime, adapter, return code, session id, verification status, and
+prompt/stdout/stderr digests.
+
+This is a read model over action attestations, not another ledger. The org
+surface uses it to show recent local/subscription agent executions without
+requiring operators to inspect raw JSONL. The kernel service exposes the same
+projection at `GET /kernel/agent-invocations` for dashboards and demos.
 
 ## Boundary
 

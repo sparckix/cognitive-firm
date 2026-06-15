@@ -11,10 +11,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import ORG_ROOT_DIR
 
 
-CLAIMS_DIR = REPO_ROOT / "org" / "sessions" / "_claims"
+CLAIMS_DIR = ORG_ROOT_DIR / "sessions" / "_claims"
 
 
 @dataclass(frozen=True)

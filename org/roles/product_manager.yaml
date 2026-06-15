@@ -17,7 +17,7 @@ description: >
     - miner_roi_report.json (P30D)
 
   Disposes catalog entries on the four-way axis:
-    - alive / load-bearing → leave
+    - alive / decisive → leave
     - dead / decorative → retire (move to archived/ + add closure rationale)
     - implemented_unmarked → promote to shipped
     - re-seam candidates → merge or distinguish with explicit rationale
@@ -57,7 +57,7 @@ escalates_to:
   - role.principal                      # any retirement of a primitive that
                                          # the principal authored
   - role.research_director               # questions about whether a flagged
-                                         # primitive is scientifically load-bearing
+                                         # primitive is scientifically decisive
 
 # Same context-budget profile as research_director — PM is review-cadence,
 # not iteration-cadence. Quarterly default.

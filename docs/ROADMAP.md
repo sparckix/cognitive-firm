@@ -59,7 +59,7 @@ tenant-specific research policy, scoring systems, and optimizer rules.
   `make smoke-public`.
 - LangGraph-style governance demo included in `make smoke-public`: runtime
   lifecycle projection, interrupt-to-A2H human work, action attestation, and a
-  governed-run attestation bundle over the existing logs.
+  governed-run attestation bundle through kernel-service routes.
 - Governance failure benchmark included in `make smoke-public`: deterministic
   fixtures for forbidden-path dispatch, failed provenance, missing human
   receipts, unresolved outcome verdicts, unclosed accountability cases, and
@@ -81,19 +81,23 @@ tenant-specific research policy, scoring systems, and optimizer rules.
   `build-promotion-packet` packages a promotable/advisory candidate with
   guardrail summary, authority-diff refs, optional formal-verification refs,
   and a draft governance-change payload. The packet is review evidence; it
-  does not mutate live policy.
+  does not mutate live policy. The kernel service can project a review-ready
+  packet into a `route_policy_change` governance proposal while still refusing
+  to approve governance, apply the policy, choose actions, or execute a
+  runtime.
 - Decision-log replay demo included in `make smoke-public`: deterministic
   action-impact logs are replayed into a business-function candidate proposal,
-  conservative offline evaluation, and governance review packet. The fixture
-  shows both a review-ready route and a high-reward route rejected because
-  externality and review-burden guardrails fail.
+  conservative offline evaluation, and governance review packet through the
+  kernel service. The fixture shows both a review-ready route and a high-reward
+  route rejected because externality and review-burden guardrails fail.
 - Field-pilot action-impact demo included in `make smoke-public`: a pilot
   folder can carry `action-impact-summary.json`, pass strict pilot validation,
   and produce a policy-promotion packet from measured pilot rows.
 - Formal-provider bundle demo included in `make smoke-public`: a signed
-  LeanMill-style provider payload becomes clean governed-run evidence when org
-  trust policy, signature verification, checker evidence, and faithfulness refs
-  are present; a missing-evidence provider row keeps the bundle incomplete.
+  LeanMill-style provider payload is ingested through the kernel service and
+  becomes clean governed-run evidence when org trust policy, signature
+  verification, checker evidence, and faithfulness refs are present; a
+  missing-evidence provider row keeps the bundle incomplete.
 - Runtime adapter-policy package: the bundled `langgraph-runtime-adapter`
   overlay installs governance-side adapter and conformance declarations for a
   LangGraph-style runtime. It does not install executable adapter code and
@@ -235,6 +239,16 @@ What this MVP is not:
 
 ## Next Public-Grade Pull-Forwards
 
+Current focus: make the self-evolving organization demo kernel-native by
+feeding live runtime evidence through service routes, then routing structural
+changes through existing proposal, approval, learning, outcome, review,
+bundle, proof, and git receipts.
+The demo now routes accepted structural changes through capability signals,
+learning-transition candidates, candidate-promoted governance proposals,
+approval, mutation, learning, proof, and git receipts. It also includes a
+blocked unsafe structural proposal fixture so the same path demonstrates
+rejection without mutation.
+
 1. Resource/event model consolidation: keep the resource envelope, kernel event
    envelope, transition rows, JSONL state rows, and mutation events aligned
    under one documented compatibility contract. Accountability cases, actor
@@ -297,7 +311,7 @@ should extend the current primitives rather than create parallel subsystems.
 |---|---|---|
 | Guardrail-constrained policy promotion | action-impact rows, offline policy-evaluation reports, governance-change proposals, approved learning events | Thin slice shipped: policy-promotion packets join the offline report, guardrails, authority diff, optional formal-verification refs, and a draft governance-change payload. |
 | Risk-adjusted action learning | action-impact, externality tags, accountability cases, outcome links | Thin slice shipped in the governance failure benchmark: a locally better action is blocked because externality and review-burden guardrails dominate. |
-| Organizational immune response | damage signals, accountability cases, routine reviews, approved learning-event retirement | Surface repeated harm patterns as quarantine/review candidates without giving the detector authority to mutate policy. |
+| Organizational immune response | damage signals, accountability cases, routine reviews, approved learning-event retirement | Thin slice shipped: damage signals can be shaped into accountability-case requests for accountable review without giving the detector authority to mutate policy. Next, surface repeated harm patterns as review candidates only when there are concrete consumers. |
 | Policy proof obligations | formal-verification records, governed-run attestation bundles, package authority diffs | Allow a governance-change proposal to cite formal-verification records before a high-risk policy adapter is approved. |
 | Attention allocation learning | userland attention router, human-work sessions, action-impact, authority domains | Learn candidate attention-routing improvements from reviewed rows, but route them through governance before activation. |
 | Replayable decision log | run checkpoints, policy decisions, action attestations, outcome links, governed-run bundles | Add a demo that rebuilds a candidate policy report and bundle from logs alone. |

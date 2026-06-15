@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/ztare/schemas/role.v1.schema.json",
+  "$id": "https://example.com/cognitive-firm/schemas/role.v1.schema.json",
   "title": "Role Definition (Org Kernel — schema_version 1)",
-  "description": "Domain-neutral schema for org/roles/<role_id>.yaml. The org kernel is substrate-agnostic per GP-191; this schema defines structural invariants only. Domain-specific extensions (e.g., ZTARE research_taste_axes) layer on top via per-adapter extension schemas, NOT by modifying this file.",
+  "description": "Domain-neutral schema for org/roles/<role_id>.yaml. The org kernel is substrate-agnostic and defines structural invariants only. Domain-specific extensions layer on top via per-adapter extension schemas, not by modifying this file.",
   "type": "object",
   "required": [
     "schema_version",
@@ -126,7 +126,7 @@
     },
     "agent_utilization": {
       "type": "object",
-      "description": "Optional agent-CLI utilization caps (capacity dimension, separate from USD spend). Tracks Claude-Code / Codex / Gemini-CLI session-window usage per role per UTC day. Consumed by src/ztare/supervisor/agent_utilization_tracker.py. Warn-threshold trip emits a Telegram push (GP-128b) AND a damage signal at org/signals/damage/. Absent block → module defaults apply (3h/day, 500k tokens, 200 turns). Warn threshold is jittered by ±10% per (role, agent_cli, UTC-date) for detection-independent gaming defense (gp168 v3 run-2 finding F2, 2026-05-02).",
+      "description": "Optional agent-CLI utilization caps as a capacity dimension separate from spend. Tracks session-window usage per role and UTC day so adapters can emit warnings, damage signals, or review work before a role exhausts bounded agent capacity. Absent block means the deployment may apply its own defaults.",
       "properties": {
         "daily_cap_seconds": {
           "type": "number",

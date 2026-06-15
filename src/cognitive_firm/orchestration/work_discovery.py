@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
-from cognitive_firm.common.paths import REPO_ROOT, WORKSPACE_DIR
+from cognitive_firm.common.paths import ORG_ROOT_DIR, REPO_ROOT, WORKSPACE_DIR
 from cognitive_firm.orchestration.execution_routing import infer_execution_route
 from cognitive_firm.signals import damage
 
@@ -215,6 +215,7 @@ def discover_principal_goals(
                 "estimated_cost_usd": g.estimated_cost_usd,
                 "assigned_to": g.assigned_to,
                 "autonomous_scope_ok": g.autonomous_scope_ok,
+                "declared_paths": g.raw_frontmatter.get("declared_paths") or (),
                 "execution_route": route.as_dict(),
                 "frontmatter": g.raw_frontmatter,
             },
@@ -603,7 +604,7 @@ def discover_substrate_portfolio_opportunities(
         ):
             return []
 
-    registry_path = REPO_ROOT / "org" / "runtime" / "substrate_portfolio.yaml"
+    registry_path = ORG_ROOT_DIR / "runtime" / "substrate_portfolio.yaml"
     if not registry_path.exists():
         return []
 
@@ -689,6 +690,7 @@ def discover_relevant_learning_events(
     project_id: str | None = None,
     cue: str | None = None,
     max_per_source: int = 5,
+    log_path: Path | None = None,
 ) -> list[Candidate]:
     """Surface active approved learning events for a future work surface.
 
@@ -707,6 +709,7 @@ def discover_relevant_learning_events(
             tenant_id=tenant_id,
             project_id=project_id,
             cue=cue,
+            log_path=log_path,
         )
     except Exception:  # noqa: BLE001
         return []

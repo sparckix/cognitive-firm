@@ -16,12 +16,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import ORG_ROOT_DIR
 from cognitive_firm.orchestration.transition_log import append_transition
 
 
-CHANNELS_DIR = REPO_ROOT / "org" / "channels"
-ROLES_DIR = REPO_ROOT / "org" / "roles"
+CHANNELS_DIR = ORG_ROOT_DIR / "channels"
+ROLES_DIR = ORG_ROOT_DIR / "roles"
+DEFAULT_MAX_THREAD_MESSAGES = 25
+DEFAULT_MAX_PARENT_OBLIGATION_DEPTH = 8
 
 MessageKind = Literal[
     "inform",
@@ -164,16 +166,16 @@ def _extract_yaml_list(text: str, key: str) -> list[str]:
     return out
 
 
-def _role_path(role_id: str) -> Path:
-    return ROLES_DIR / f"{_safe_role(role_id)}.yaml"
+def _role_path(role_id: str, *, roles_dir: Path | None = None) -> Path:
+    return (roles_dir or ROLES_DIR) / f"{_safe_role(role_id)}.yaml"
 
 
-def _role_exists(role_id: str) -> bool:
-    return _role_path(role_id).exists()
+def _role_exists(role_id: str, *, roles_dir: Path | None = None) -> bool:
+    return _role_path(role_id, roles_dir=roles_dir).exists()
 
 
-def _role_links(role_id: str) -> set[str]:
-    path = _role_path(role_id)
+def _role_links(role_id: str, *, roles_dir: Path | None = None) -> set[str]:
+    path = _role_path(role_id, roles_dir=roles_dir)
     if not path.exists():
         return set()
     text = path.read_text(encoding="utf-8")
@@ -183,7 +185,12 @@ def _role_links(role_id: str) -> set[str]:
     return links
 
 
-def channel_allowed(from_role: str, to_role: str) -> tuple[bool, str]:
+def channel_allowed(
+    from_role: str,
+    to_role: str,
+    *,
+    roles_dir: Path | None = None,
+) -> tuple[bool, str]:
     """Conservative local channel policy.
 
     This is not enterprise RBAC. It prevents obvious side-channel drift until
@@ -191,9 +198,9 @@ def channel_allowed(from_role: str, to_role: str) -> tuple[bool, str]:
     """
     sender = _safe_role(from_role)
     receiver = _safe_role(to_role)
-    if not _role_exists(sender):
+    if not _role_exists(sender, roles_dir=roles_dir):
         return False, f"sender role does not exist: {sender}"
-    if not _role_exists(receiver):
+    if not _role_exists(receiver, roles_dir=roles_dir):
         return False, f"receiver role does not exist: {receiver}"
     if sender == receiver:
         return True, "self-message"
@@ -201,28 +208,101 @@ def channel_allowed(from_role: str, to_role: str) -> tuple[bool, str]:
         return True, "manager coordination channel"
     if receiver in {"manager", "principal"}:
         return True, "manager/principal escalation channel"
-    if receiver in _role_links(sender):
+    if receiver in _role_links(sender, roles_dir=roles_dir):
         return True, "receiver is in sender delegates_to/escalates_to"
-    if sender in _role_links(receiver):
+    if sender in _role_links(receiver, roles_dir=roles_dir):
         return True, "sender is in receiver delegates_to/escalates_to"
     return False, "roles are not linked by delegation/escalation policy"
 
 
-def _role_inbox(role_id: str) -> Path:
-    return CHANNELS_DIR / _safe_role(role_id) / "inbox"
+def _role_inbox(role_id: str, *, channels_dir: Path | None = None) -> Path:
+    return (channels_dir or CHANNELS_DIR) / _safe_role(role_id) / "inbox"
 
 
-def _role_sent(role_id: str) -> Path:
-    return CHANNELS_DIR / _safe_role(role_id) / "sent"
+def _role_sent(role_id: str, *, channels_dir: Path | None = None) -> Path:
+    return (channels_dir or CHANNELS_DIR) / _safe_role(role_id) / "sent"
 
 
-def _message_path(role_id: str, message_id: str) -> Path:
-    return _role_inbox(role_id) / f"{message_id}.json"
+def _message_path(role_id: str, message_id: str, *, channels_dir: Path | None = None) -> Path:
+    return _role_inbox(role_id, channels_dir=channels_dir) / f"{message_id}.json"
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _iter_channel_messages(*, channels_dir: Path | None = None) -> list[dict[str, Any]]:
+    root = channels_dir or CHANNELS_DIR
+    if not root.exists():
+        return []
+    seen: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    for path in root.glob("*/*/*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        message_id = str(data.get("message_id") or "")
+        if not message_id or message_id in seen:
+            continue
+        seen.add(message_id)
+        rows.append(data)
+    return rows
+
+
+def _message_by_id(message_id: str, *, channels_dir: Path | None = None) -> dict[str, Any] | None:
+    for data in _iter_channel_messages(channels_dir=channels_dir):
+        if data.get("message_id") == message_id:
+            return data
+    return None
+
+
+def _parent_obligation_depth(parent_obligation_id: str, *, channels_dir: Path | None = None) -> int:
+    depth = 0
+    current = parent_obligation_id
+    seen: set[str] = set()
+    while current:
+        if current in seen:
+            return depth + 1
+        seen.add(current)
+        depth += 1
+        parent = _message_by_id(current, channels_dir=channels_dir)
+        if parent is None:
+            break
+        current = str(parent.get("parent_obligation_id") or "")
+    return depth
+
+
+def enforce_a2a_loop_guard(
+    *,
+    thread_id: str,
+    parent_obligation_id: str | None,
+    channels_dir: Path | None = None,
+    max_thread_messages: int = DEFAULT_MAX_THREAD_MESSAGES,
+    max_parent_depth: int = DEFAULT_MAX_PARENT_OBLIGATION_DEPTH,
+) -> None:
+    """Reject obviously unbounded local A2A chains before writing a message."""
+    if max_thread_messages < 1:
+        raise ValueError("max_thread_messages must be >= 1")
+    if max_parent_depth < 1:
+        raise ValueError("max_parent_depth must be >= 1")
+    thread_count = sum(
+        1
+        for data in _iter_channel_messages(channels_dir=channels_dir)
+        if data.get("thread_id") == thread_id
+    )
+    if thread_count >= max_thread_messages:
+        raise ValueError(
+            f"A2A thread {thread_id!r} has {thread_count} messages; "
+            f"limit is {max_thread_messages}"
+        )
+    if parent_obligation_id:
+        depth = _parent_obligation_depth(parent_obligation_id, channels_dir=channels_dir)
+        if depth >= max_parent_depth:
+            raise ValueError(
+                f"A2A parent obligation chain depth {depth} reaches limit {max_parent_depth}"
+            )
 
 
 def send_agent_message(
@@ -241,6 +321,11 @@ def send_agent_message(
     metadata: dict[str, Any] | None = None,
     enforce_policy: bool = True,
     parent_obligation_id: str | None = None,
+    channels_dir: Path | None = None,
+    roles_dir: Path | None = None,
+    transition_log_path: Path | None = None,
+    max_thread_messages: int = DEFAULT_MAX_THREAD_MESSAGES,
+    max_parent_depth: int = DEFAULT_MAX_PARENT_OBLIGATION_DEPTH,
 ) -> AgentMessage:
     """Append one durable A2A-style message to the receiver inbox.
 
@@ -248,16 +333,24 @@ def send_agent_message(
     inspectability. Coordination authority still lives in gates/claims; this
     channel is for typed communication and handoff context.
     """
-    allowed, policy_reason = channel_allowed(from_role, to_role)
+    allowed, policy_reason = channel_allowed(from_role, to_role, roles_dir=roles_dir)
     if enforce_policy and not allowed:
         raise ChannelPolicyError(policy_reason)
 
     now = datetime.now(timezone.utc).isoformat()
     message_id = f"msg_{uuid.uuid4().hex}"
+    resolved_thread_id = thread_id or message_id
+    enforce_a2a_loop_guard(
+        thread_id=resolved_thread_id,
+        parent_obligation_id=parent_obligation_id,
+        channels_dir=channels_dir,
+        max_thread_messages=max_thread_messages,
+        max_parent_depth=max_parent_depth,
+    )
     message = AgentMessage(
         schema_version=1,
         message_id=message_id,
-        thread_id=thread_id or message_id,
+        thread_id=resolved_thread_id,
         kind=kind,
         from_role=_safe_role(from_role),
         to_role=_safe_role(to_role),
@@ -277,8 +370,14 @@ def send_agent_message(
         parent_obligation_id=parent_obligation_id,
     )
     payload = asdict(message)
-    _write_json(_role_inbox(message.to_role) / f"{message_id}.json", payload)
-    _write_json(_role_sent(message.from_role) / f"{message_id}.json", payload)
+    _write_json(
+        _role_inbox(message.to_role, channels_dir=channels_dir) / f"{message_id}.json",
+        payload,
+    )
+    _write_json(
+        _role_sent(message.from_role, channels_dir=channels_dir) / f"{message_id}.json",
+        payload,
+    )
     append_transition(
         event="agent.message.sent",
         actor=message.from_role,
@@ -294,6 +393,7 @@ def send_agent_message(
             "references": message.references,
             "artifacts": message.artifacts,
         },
+        log_path=transition_log_path,
     )
     return message
 
@@ -335,8 +435,10 @@ def update_agent_message_status(
     status: MessageStatus,
     actor: str,
     note: str = "",
+    channels_dir: Path | None = None,
+    transition_log_path: Path | None = None,
 ) -> AgentMessage:
-    path = _message_path(role_id, message_id)
+    path = _message_path(role_id, message_id, channels_dir=channels_dir)
     if not path.exists():
         raise FileNotFoundError(f"agent message not found: {message_id}")
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -346,7 +448,10 @@ def update_agent_message_status(
     data["metadata"]["last_status_actor"] = actor
     data["metadata"]["last_status_utc"] = datetime.now(timezone.utc).isoformat()
     _write_json(path, data)
-    sender_mirror = _role_sent(str(data.get("from_role", ""))) / f"{message_id}.json"
+    sender_mirror = (
+        _role_sent(str(data.get("from_role", "")), channels_dir=channels_dir)
+        / f"{message_id}.json"
+    )
     if sender_mirror.exists():
         _write_json(sender_mirror, data)
     append_transition(
@@ -357,6 +462,7 @@ def update_agent_message_status(
         subject=message_id,
         causality_id=data.get("causality_id") or data.get("thread_id"),
         payload={"note": note, "from_role": data.get("from_role"), "to_role": data.get("to_role")},
+        log_path=transition_log_path,
     )
     return AgentMessage(**data)
 
@@ -371,6 +477,8 @@ def update_obligation_state(
     new_state: ObligationState,
     actor: str,
     note: str = "",
+    channels_dir: Path | None = None,
+    transition_log_path: Path | None = None,
 ) -> AgentMessage:
     """Transition the message's obligation_state. Validates the transition
     against the legal-transitions table; raises ValueError on illegal moves.
@@ -379,7 +487,7 @@ def update_obligation_state(
     `acknowledged` (envelope read) while its obligation is still `pending`
     (work not yet accepted).
     """
-    path = _message_path(role_id, message_id)
+    path = _message_path(role_id, message_id, channels_dir=channels_dir)
     if not path.exists():
         raise FileNotFoundError(f"agent message not found: {message_id}")
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -398,7 +506,10 @@ def update_obligation_state(
     data["metadata"]["last_obligation_actor"] = actor
     data["metadata"]["last_obligation_utc"] = datetime.now(timezone.utc).isoformat()
     _write_json(path, data)
-    sender_mirror = _role_sent(str(data.get("from_role", ""))) / f"{message_id}.json"
+    sender_mirror = (
+        _role_sent(str(data.get("from_role", "")), channels_dir=channels_dir)
+        / f"{message_id}.json"
+    )
     if sender_mirror.exists():
         _write_json(sender_mirror, data)
     append_transition(
@@ -416,6 +527,7 @@ def update_obligation_state(
             "to_role": data.get("to_role"),
             "parent_obligation_id": data.get("parent_obligation_id"),
         },
+        log_path=transition_log_path,
     )
     return AgentMessage(**data)
 

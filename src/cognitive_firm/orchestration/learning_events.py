@@ -342,6 +342,8 @@ def replay_learning_events(
     tenant_id: str | None = None,
     project_id: str | None = None,
     cue: str | None = None,
+    source_ref: str | None = None,
+    tag: str | None = None,
     log_path: Path | None = None,
 ) -> list[ApprovedLearningEvent]:
     """Return active events relevant to a future work surface.
@@ -363,6 +365,10 @@ def replay_learning_events(
             continue
         if role and event.owner_role and event.owner_role != role:
             continue
+        if source_ref is not None and source_ref not in _learning_event_exact_refs(event):
+            continue
+        if tag is not None and tag not in _learning_event_tags(event):
+            continue
         if cue_text:
             haystack = " ".join(
                 [
@@ -382,6 +388,28 @@ def replay_learning_events(
                 continue
         out.append(event)
     return out
+
+
+def _learning_event_exact_refs(event: ApprovedLearningEvent) -> set[str]:
+    refs = {
+        event.learning_event_id,
+        f"learning_event:{event.learning_event_id}",
+        event.approval_ref,
+    }
+    refs.update(event.source_carrier_refs)
+    refs.update(f"learning_event:{event_id}" for event_id in event.derived_from_learning_event_ids)
+    if event.candidate_ref:
+        refs.add(event.candidate_ref)
+    if event.externality_review_ref:
+        refs.add(event.externality_review_ref)
+    return {ref for ref in refs if ref}
+
+
+def _learning_event_tags(event: ApprovedLearningEvent) -> set[str]:
+    tags: set[str] = set()
+    for key in ("tag", "tags", "labels", "capability_tags"):
+        tags.update(_string_list(event.metadata.get(key)))
+    return tags
 
 
 def record_learning_event_encounter(
@@ -891,6 +919,8 @@ def main(argv: list[str] | None = None) -> int:
     replay_parser.add_argument("--tenant-id")
     replay_parser.add_argument("--project-id")
     replay_parser.add_argument("--cue")
+    replay_parser.add_argument("--source-ref")
+    replay_parser.add_argument("--tag")
     replay_parser.add_argument("--log-path", type=Path)
 
     retire_parser = sub.add_parser("retire")
@@ -932,6 +962,8 @@ def main(argv: list[str] | None = None) -> int:
             tenant_id=args.tenant_id,
             project_id=args.project_id,
             cue=args.cue,
+            source_ref=args.source_ref,
+            tag=args.tag,
             log_path=args.log_path,
         )
         print(json.dumps([event.as_dict() for event in events], indent=2, sort_keys=True))

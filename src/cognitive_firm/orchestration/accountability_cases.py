@@ -13,7 +13,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
 from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
@@ -158,6 +158,76 @@ def create_accountability_case(
     return case
 
 
+def build_damage_signal_accountability_case_request(
+    signal: Mapping[str, Any] | Any,
+    *,
+    accountable_role: str,
+    authority_envelope_ref: str,
+    responsible_actor: str | None = None,
+    decision_right_basis: str = "tenant_rule",
+    recourse_path: RecoursePath | str | None = None,
+    risk_tier: RiskTier | str | None = None,
+    review_sla: str | None = None,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    due_at_utc: str | None = None,
+    operator_burden: OperatorBurden | str | None = None,
+    case_id: str | None = None,
+    trigger_ref: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build `create_accountability_case` kwargs from a damage signal.
+
+    Damage signals are fast, cheap observations. Accountability cases are the
+    reviewed closure path. This helper bridges them without making the signal
+    channel authoritative and without automatically closing or remediating
+    anything.
+    """
+
+    row = _damage_signal_row(signal)
+    source = str(row.get("source") or "").strip()
+    kind = str(row.get("kind") or "").strip()
+    detail = str(row.get("detail") or "").strip()
+    severity = str(row.get("severity") or "warn").strip().lower()
+    if not source:
+        raise ValueError("damage signal source is required")
+    if not kind:
+        raise ValueError("damage signal kind is required")
+    if not detail:
+        raise ValueError("damage signal detail is required")
+
+    request_metadata = {
+        **dict(metadata or {}),
+        "source_recipe": "damage_signal_accountability_case_request.v1",
+        "damage_signal": {
+            "timestamp_utc": row.get("timestamp_utc"),
+            "source": source,
+            "kind": kind,
+            "detail": detail,
+            "session_id": row.get("session_id"),
+            "severity": severity,
+        },
+    }
+    return {
+        "trigger_ref": trigger_ref or _damage_signal_trigger_ref(row),
+        "accountable_role": accountable_role,
+        "responsible_actor": responsible_actor or source,
+        "decision_right_basis": decision_right_basis,
+        "authority_envelope_ref": authority_envelope_ref,
+        "risk_tier": risk_tier or _risk_tier_for_damage_severity(severity),
+        "recourse_path": recourse_path or _recourse_for_damage_severity(severity),
+        "review_sla": review_sla,
+        "tenant_id": tenant_id,
+        "project_id": project_id,
+        "due_at_utc": due_at_utc,
+        "externality_tags": [f"damage:{kind}"],
+        "operator_burden": operator_burden or _operator_burden_for_damage_severity(severity),
+        "rationale": f"Damage signal {kind!r} from {source}: {detail}",
+        "metadata": request_metadata,
+        "case_id": case_id,
+    }
+
+
 def list_accountability_cases(
     *,
     status: AccountabilityStatus | str | None = None,
@@ -186,6 +256,57 @@ def list_accountability_cases(
             continue
         out.append(case)
     return out
+
+
+def _damage_signal_row(signal: Mapping[str, Any] | Any) -> dict[str, Any]:
+    if isinstance(signal, Mapping):
+        return dict(signal)
+    if hasattr(signal, "__dataclass_fields__"):
+        return asdict(signal)
+    if hasattr(signal, "__dict__"):
+        return dict(vars(signal))
+    raise TypeError("damage signal must be a mapping or dataclass-like object")
+
+
+def _damage_signal_trigger_ref(row: dict[str, Any]) -> str:
+    kind = str(row.get("kind") or "unknown").strip() or "unknown"
+    timestamp = str(row.get("timestamp_utc") or "").strip()
+    session = str(row.get("session_id") or "").strip()
+    basis = "|".join(
+        [
+            str(row.get("source") or ""),
+            kind,
+            str(row.get("detail") or ""),
+            timestamp,
+            session,
+        ]
+    )
+    digest = uuid.uuid5(uuid.NAMESPACE_URL, basis).hex[:12]
+    return f"damage_signal:{kind}:{digest}"
+
+
+def _risk_tier_for_damage_severity(severity: str) -> RiskTier:
+    if severity == "critical":
+        return "high"
+    if severity in {"warn", "warning", "blocking"}:
+        return "medium"
+    return "low"
+
+
+def _recourse_for_damage_severity(severity: str) -> RecoursePath:
+    if severity == "critical":
+        return "escalate"
+    if severity in {"warn", "warning", "blocking"}:
+        return "reopen"
+    return "none"
+
+
+def _operator_burden_for_damage_severity(severity: str) -> OperatorBurden:
+    if severity == "critical":
+        return "high"
+    if severity in {"warn", "warning", "blocking"}:
+        return "medium"
+    return "low"
 
 
 def update_accountability_case_status(

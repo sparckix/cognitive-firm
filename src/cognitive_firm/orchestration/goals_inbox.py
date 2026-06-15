@@ -25,12 +25,12 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - bare Python / product smoke path.
     yaml = None
 
-from cognitive_firm.common.paths import REPO_ROOT
+from cognitive_firm.common.paths import ORG_ROOT_DIR
 
 log = logging.getLogger(__name__)
 
-TASKS_ROOT = REPO_ROOT / "org" / "tasks"
-LEGACY_GOALS_ROOT = REPO_ROOT / "org" / "goals"
+TASKS_ROOT = ORG_ROOT_DIR / "tasks"
+LEGACY_GOALS_ROOT = ORG_ROOT_DIR / "goals"
 GOALS_ROOT = TASKS_ROOT if TASKS_ROOT.exists() else LEGACY_GOALS_ROOT
 PENDING_DIR = GOALS_ROOT / "pending"
 ACTIVE_DIR = GOALS_ROOT / "active"

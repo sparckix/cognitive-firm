@@ -11,15 +11,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from cognitive_firm.orchestration.actor_identity import register_actor_identity  # noqa: E402
-from cognitive_firm.orchestration.actor_membership import grant_actor_membership  # noqa: E402
-from cognitive_firm.orchestration.human_work import create_human_work_session  # noqa: E402
 from cognitive_firm.kernel_service import (  # noqa: E402
     KernelServiceConfig,
     dispatch_kernel_request,
 )
-from cognitive_firm.orchestration.policy_decisions import PolicyDecisionRequest, evaluate_policy  # noqa: E402
 from cognitive_firm.orchestration.state_backends import SqliteMutationBackend  # noqa: E402
+
+
+def _actor_context(actor_id: str, role_id: str, project_id: str = "project-a") -> dict[str, str]:
+    kind = "human" if actor_id.startswith("human.") else "service"
+    return {
+        "actor_id": actor_id,
+        "actor_kind": kind,
+        "role_id": role_id,
+        "surface": "walkthrough",
+        "tenant_id": "tenant-a",
+        "project_id": project_id,
+    }
+
+
+def _owner_context() -> dict[str, str]:
+    context = _actor_context("human.owner", "role.owner")
+    context["identity_provider"] = "fixture"
+    context["auth_subject"] = "owner@example.com"
+    return context
 
 
 def main() -> int:
@@ -32,84 +47,59 @@ def main() -> int:
         policy_log = root / "org" / "policy" / "policy_decisions.jsonl"
         mutation_db = root / "workspace" / "events.sqlite"
 
-        human_reviewer = register_actor_identity(
-            actor_id="human.reviewer",
-            display_name="Human Reviewer",
-            actor_kind="human",
-            identity_provider="fixture",
-            auth_subject="reviewer@example.com",
-            log_path=identity_log,
-        )
-        human_owner = register_actor_identity(
-            actor_id="human.owner",
-            display_name="Human Owner",
-            actor_kind="human",
-            identity_provider="fixture",
-            auth_subject="owner@example.com",
-            log_path=identity_log,
-        )
-        service_worker = register_actor_identity(
-            actor_id="service.worker",
-            display_name="Service Worker",
-            actor_kind="service",
-            identity_provider="fixture",
-            auth_subject="svc-worker",
-            log_path=identity_log,
-        )
-        service_app = register_actor_identity(
-            actor_id="service.app",
-            display_name="Service App",
-            actor_kind="service",
-            identity_provider="fixture",
-            auth_subject="svc-app",
-            log_path=identity_log,
+        bootstrap_config = KernelServiceConfig(
+            actor_identity_log=identity_log,
+            actor_membership_log=membership_log,
+            human_work_log=human_log,
+            policy_decisions_log=policy_log,
         )
 
-        for actor, role in [
-            (human_reviewer.actor_id, "role.reviewer"),
-            (human_owner.actor_id, "role.owner"),
-            (service_worker.actor_id, "role.worker"),
-            (service_app.actor_id, "role.app"),
+        for actor_id, display_name, actor_kind, auth_subject in [
+            ("human.reviewer", "Human Reviewer", "human", "reviewer@example.com"),
+            ("human.owner", "Human Owner", "human", "owner@example.com"),
+            ("service.worker", "Service Worker", "service", "svc-worker"),
+            ("service.app", "Service App", "service", "svc-app"),
         ]:
-            grant_actor_membership(
-                actor_id=actor,
-                role_id=role,
-                tenant_id="tenant-a",
-                project_id="project-a",
-                granted_by="human.owner",
-                decision_right_basis="fixture/multi-actor",
-                log_path=membership_log,
+            response = dispatch_kernel_request(
+                "POST",
+                "/kernel/actors",
+                {
+                    "actor_id": actor_id,
+                    "display_name": display_name,
+                    "actor_kind": actor_kind,
+                    "identity_provider": "fixture",
+                    "auth_subject": auth_subject,
+                    "actor_context": _owner_context(),
+                },
+                config=bootstrap_config,
             )
+            if response.status != 201:
+                raise SystemExit(f"actor registration failed: {response.payload}")
+
+        for actor_id, role_id in [
+            ("human.reviewer", "role.reviewer"),
+            ("human.owner", "role.owner"),
+            ("service.worker", "role.worker"),
+            ("service.app", "role.app"),
+        ]:
+            response = dispatch_kernel_request(
+                "POST",
+                "/kernel/memberships",
+                {
+                    "actor_id": actor_id,
+                    "role_id": role_id,
+                    "tenant_id": "tenant-a",
+                    "project_id": "project-a",
+                    "granted_by": "human.owner",
+                    "decision_right_basis": "fixture/multi-actor",
+                    "actor_context": _owner_context(),
+                },
+                config=bootstrap_config,
+            )
+            if response.status != 201:
+                raise SystemExit(f"membership grant failed: {response.payload}")
 
         backend = SqliteMutationBackend(mutation_db)
-        policy = evaluate_policy(
-            PolicyDecisionRequest(
-                action="kernel_event.append",
-                actor_id="service.worker",
-                resource_ref="kernel_event:project-a",
-                tenant_id="tenant-a",
-                role_id="role.worker",
-                project_id="project-a",
-            ),
-            rules=[
-                {
-                    "rule_id": "allow-worker-project-a",
-                    "effect": "allow",
-                    "reason": "worker has scoped project membership",
-                    "match": {"actor_id": "service.worker", "project_id": "project-a"},
-                }
-            ],
-            log_path=policy_log,
-        )
-        session = create_human_work_session(
-            requested_by="service.worker",
-            human_actor="human.reviewer",
-            objective="Review bounded source claim before external use.",
-            work_mode="source_check",
-            bottleneck_class="cognition",
-            collaborating_roles=["role.worker", "role.reviewer"],
-            log_path=human_log,
-        )
         config = KernelServiceConfig(
             mutation_backend=backend,
             enforce_registered_actors=True,
@@ -118,21 +108,63 @@ def main() -> int:
             actor_identity_log=identity_log,
             actor_membership_log=membership_log,
             leases_log=lease_log,
+            human_work_log=human_log,
+            policy_decisions_log=policy_log,
         )
+
+        policy_response = dispatch_kernel_request(
+            "POST",
+            "/kernel/policy-decisions/evaluate",
+            {
+                "request": {
+                    "action": "kernel_event.append",
+                    "actor_id": "service.worker",
+                    "resource_ref": "kernel_event:project-a",
+                    "tenant_id": "tenant-a",
+                    "role_id": "role.worker",
+                    "project_id": "project-a",
+                },
+                "rules": [
+                    {
+                        "rule_id": "allow-worker-project-a",
+                        "effect": "allow",
+                        "reason": "worker has scoped project membership",
+                        "match": {"actor_id": "service.worker", "project_id": "project-a"},
+                    }
+                ],
+                "actor_context": _actor_context("service.worker", "role.worker"),
+            },
+            config=config,
+        )
+        if policy_response.status != 201:
+            raise SystemExit(f"policy evaluation failed: {policy_response.payload}")
+        policy = policy_response.payload["policy_decision"]
+
+        session_response = dispatch_kernel_request(
+            "POST",
+            "/kernel/human-work",
+            {
+                "requested_by": "service.worker",
+                "human_actor": "human.reviewer",
+                "objective": "Review bounded source claim before external use.",
+                "work_mode": "source_check",
+                "bottleneck_class": "cognition",
+                "collaborating_roles": ["role.worker", "role.reviewer"],
+                "actor_context": _actor_context("service.worker", "role.worker"),
+            },
+            config=config,
+        )
+        if session_response.status != 201:
+            raise SystemExit(f"human-work creation failed: {session_response.payload}")
+        session = session_response.payload["session"]
+
         lease_response = dispatch_kernel_request(
             "POST",
             "/kernel/leases",
             {
                 "resource_ref": "kernel_event:project-a",
                 "ttl_seconds": 300,
-                "actor_context": {
-                    "actor_id": "service.worker",
-                    "actor_kind": "service",
-                    "role_id": "role.worker",
-                    "surface": "walkthrough",
-                    "tenant_id": "tenant-a",
-                    "project_id": "project-a",
-                },
+                "actor_context": _actor_context("service.worker", "role.worker"),
             },
             config=config,
         )
@@ -150,16 +182,9 @@ def main() -> int:
                 "event": {
                     "event": "work.proposed",
                     "project_id": "project-a",
-                    "policy_decision": policy.decision_id,
+                    "policy_decision": policy["decision_id"],
                 },
-                "actor_context": {
-                    "actor_id": "service.worker",
-                    "actor_kind": "service",
-                    "role_id": "role.worker",
-                    "surface": "walkthrough",
-                    "tenant_id": "tenant-a",
-                    "project_id": "project-a",
-                },
+                "actor_context": _actor_context("service.worker", "role.worker"),
             },
             config=config,
         )
@@ -172,14 +197,7 @@ def main() -> int:
                 "lease_id": lease["lease_id"],
                 "fencing_token": lease["fencing_token"],
                 "event": {"event": "work.proposed", "project_id": "project-b"},
-                "actor_context": {
-                    "actor_id": "service.worker",
-                    "actor_kind": "service",
-                    "role_id": "role.worker",
-                    "surface": "walkthrough",
-                    "tenant_id": "tenant-a",
-                    "project_id": "project-b",
-                },
+                "actor_context": _actor_context("service.worker", "role.worker", "project-b"),
             },
             config=config,
         )
@@ -190,9 +208,9 @@ def main() -> int:
             "ok": True,
             "accepted_status": accepted.status,
             "denied_status": denied.status,
-            "human_work_session": session.session_id,
+            "human_work_session": session["session_id"],
             "lease_token": lease["fencing_token"],
-            "policy_decision": policy.decision_id,
+            "policy_decision": policy["decision_id"],
         }, sort_keys=True))
     return 0
 

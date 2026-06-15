@@ -4,47 +4,103 @@ This path is for a new reader or agent opening the public kernel for the first
 time. It verifies the repo, explains the durable boundary, and shows where an
 organization would attach its own overlay.
 
-## 0-5: Identify the Boundary
+## 0-5: Run One Governed Action
 
-Open the repository root as an Obsidian vault if you prefer a linked-doc view.
-The repo ships a minimal `.obsidian/` config that keeps links relative and
-starts on `README.md`.
-
-Read:
-
-1. `README.md`
-2. `docs/kernel-invariants.md`
-3. `docs/abstraction-map.md`
-4. `docs/resource-event-catalog.md`
-5. `docs/blueprints/README.md`
-6. `docs/reader-checklist.md`
-7. `docs/recursive-organization.md`
-8. `docs/PROTOCOLS.md`
-9. `docs/adopting-cognitive-firm.md`
-
-The key distinction: cognitive-firm is a governance kernel, not an agent
-runtime. Role offices, mandates, transition events, evidence gaps, human work,
-and app projections live here. Tenant-specific research policy, scoring
-engines, private evidence, and business systems live in overlays or adapters.
-
-## 5-15: Run the Public Smoke
+Start with the shortest no-cost proof before reading the whole repo:
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
-make smoke-public
-make docs-surface-check
-make smoke-docker
+make first-gated-action
 ```
 
+This runs one fictional Kettle & Compass workflow: a role-bearing service actor
+claims work, opens a run, writes an attested artifact, receives a bounded
+human-work receipt, completes a governed exit, records outcome and
+accountability closure, and emits a governed-run bundle summary.
+
+What to look for in the JSON:
+
+- `authority_snapshot`: which role/mandate authorized the work;
+- `work_item`: the claimable work and governed exit;
+- `human_work_sessions`: bounded human contribution with receipt state;
+- `action_attestations`: machine provenance for the artifact;
+- `outcome_links`: measured-outcome placeholder for later verdicts;
+- `accountability_cases`: accountable closure for residual risk;
+- `bundle_validation.ok`: whether the replayable audit packet validates.
+
+## 5-10: Identify the Boundary
+
+Open the repository root as an Obsidian vault if you prefer a linked-doc view.
+The repo ships a minimal `.obsidian/` config that keeps links relative and
+starts on `README.md`.
+
+Read first:
+
+1. `README.md`
+2. `docs/kernel-invariants.md`
+3. `docs/abstraction-map.md`
+
+Then skim as needed:
+
+- `docs/PROTOCOLS.md` for the protocol index;
+- `docs/examples/README.md` for runnable proof paths and inspection guides;
+- `docs/resource-event-catalog.md` for state surfaces;
+- `docs/reader-checklist.md` for an adoption-oriented review checklist;
+- `docs/adopting-cognitive-firm.md` for integration patterns;
+- `docs/recursive-organization.md` for governed self-organization.
+
+The key distinction: cognitive-firm is a governance kernel, not an agent
+runtime. Role offices, mandates, transition events, evidence gaps, human work,
+and app projections live here. Tenant-specific research policy, scoring
+engines, private evidence, and business systems live in overlays or adapters.
+
+## 10-20: Run the Public Smoke
+
+```bash
+make release-candidate-check
+```
+
+`release-candidate-check` composes the public, clean-container, and diff-audit
+gates:
 `smoke-public` runs the Python test suite, renders the organization surface,
 exercises the framework-neutral runtime adapter, checks the kernel service's
 SQLite fenced-mutation path, runs deterministic app-integration and app-service
 conformance fixtures, checks source-coverage and learning-loop walkthroughs,
 verifies a minimal backup/restore path, validates package entry points, checks
 the documentation surface, and builds Orbit.
+`smoke-docker` builds and probes the clean container path.
+`release-diff-audit` classifies the current changed paths into review buckets
+and fails on unclassified release surfaces. If you are iterating locally and
+want the faster split form, run:
+
+```bash
+make smoke-public
+make docs-surface-check
+make smoke-docker
+make release-diff-audit
+```
+
+The release gate uses deterministic fixtures. Live subscription/local agent
+runs are intentionally separate because they depend on local login state and
+model output. For a bounded live proof after the deterministic gate is green,
+use a one-step budget and compact planner prompt:
+
+```bash
+make self-evolving-agent-preflight AGENT_RUNTIME=codex AGENT_ADAPTER=codex_exec
+make self-evolving-org-agent-demo \
+  AGENT_RUNTIME=codex \
+  AGENT_ADAPTER=codex_exec \
+  SELF_EVOLVING_DEMO_ITERATIONS=1 \
+  SELF_EVOLVING_DEMO_BUDGET_UNITS=1 \
+  SELF_EVOLVING_PLANNER_PROMPT_MODE=compact
+```
+
+If the live planner returns invalid JSON or times out, the harness records a
+rejected planner receipt and stops before applying a governed mutation.
+
 If the build backend from `requirements.txt` is installed, the package check
 also builds and inspects a local wheel. It should not require private tenant
 files.
@@ -55,8 +111,23 @@ If you only want the kernel read model:
 python -m cognitive_firm.orchestration.org_surface
 ```
 
-If you want the shortest inspection path for a governed native workflow, the
-failure fixtures, and an external-runtime projection:
+If your immediate question is "what did a local/subscription agent invocation
+do, under what role authority?", run the no-cost audit wedge and keep the
+runbook:
+
+```bash
+PYTHONPATH=src python scripts/agent_fleet_audit_demo.py \
+  --output-dir .cognitive-firm-runs/agent-fleet-audit
+```
+
+Start with
+`.cognitive-firm-runs/agent-fleet-audit/agent-fleet-audit-runbook.md`, then
+inspect the packet JSON if you need the exact receipt and bundle payload. The
+fixture does not call an external runtime; it shows the receipt and bundle
+shape used by live daemon dispatch.
+
+If you want the broader suite with failure fixtures and an external-runtime
+projection:
 
 ```bash
 make adoption-demo
@@ -91,9 +162,10 @@ the organization's governance graph and only then commits it, tagged
 See [`docs/protocols/distribution.md`](docs/protocols/distribution.md). The
 rest of this path inspects the kernel that distro is built on.
 
-## 15-25: Inspect the Kernel Surface
+## 20-25: Inspect the Kernel Surface
 
-Read:
+Read in this order only if you need to extend the kernel rather than just adopt
+it:
 
 1. `org/README.md`
 2. `src/cognitive_firm/orchestration/README.md`

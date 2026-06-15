@@ -10,9 +10,11 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from cognitive_firm.orchestration.action_attestation import (  # noqa: E402
     action_attestation_resource,
+    agent_invocation_audit_row,
     create_action_attestation,
     digest_file,
     digest_text,
+    list_agent_invocation_audits,
     list_action_attestations,
     main as action_attestation_main,
 )
@@ -132,10 +134,114 @@ def test_action_attestation_projects_to_resource_envelope(tmp_path: Path):
     assert payload["metadata"]["annotations"]["surface"] == "kernel_service"
     assert payload["spec"]["subject_digest"].startswith("sha256:")
     assert payload["spec"]["input_refs"] == ["artifact://brief"]
+    assert payload["spec"]["metadata"] == {"surface": "kernel_service"}
     assert payload["status"]["verification_summary"] == "signature and digest matched"
     assert {"rel": "subject", "href": "mcp://linear/create_issue/1"} in payload["links"]
     assert {"rel": "tool", "href": "mcp.linear.create_issue"} in payload["links"]
     assert {"rel": "output", "href": "linear://issue/CF-1"} in payload["links"]
+
+
+def test_action_attestation_resource_preserves_structured_invocation_receipt(
+    tmp_path: Path,
+):
+    log = tmp_path / "action_attestations.jsonl"
+    receipt = {
+        "schema_version": "agent_invocation_receipt.v1",
+        "runtime": "claude",
+        "adapter": "claude_print",
+        "command_argv": ["claude", "--print", "{prompt}"],
+        "prompt_digest": digest_text("prompt"),
+        "stdout_digest": digest_text("stdout"),
+        "stderr_digest": digest_text(""),
+    }
+    attestation = create_action_attestation(
+        subject_kind="runtime_event",
+        subject_ref="agent_invocation_receipt:abc123",
+        subject_digest=digest_text("receipt"),
+        producer="role.manager",
+        action_type="agent_cli_dispatch",
+        runtime_ref="run:run_1",
+        verification_status="verified",
+        run_id="run_1",
+        metadata={"agent_invocation_receipt": receipt},
+        log_path=log,
+    )
+
+    payload = action_attestation_resource(attestation).as_dict()
+
+    assert validate_resource(payload) == []
+    assert payload["spec"]["metadata"]["agent_invocation_receipt"] == receipt
+    assert (
+        payload["spec"]["metadata"]["agent_invocation_receipt"]["schema_version"]
+        == "agent_invocation_receipt.v1"
+    )
+    assert payload["metadata"]["annotations"]["agent_invocation_receipt"].startswith("{")
+
+
+def test_agent_invocation_audit_read_model_lists_recent_receipts(tmp_path: Path):
+    log = tmp_path / "action_attestations.jsonl"
+    receipt = {
+        "schema_version": "agent_invocation_receipt.v1",
+        "runtime": "codex",
+        "adapter": "codex_exec",
+        "command_argv": ["codex", "exec", "-"],
+        "prompt_transport": "stdin",
+        "returncode": 0,
+        "prompt_digest": digest_text("prompt"),
+        "stdout_digest": digest_text("stdout"),
+        "stderr_digest": digest_text(""),
+    }
+    ignored = create_action_attestation(
+        subject_kind="artifact",
+        subject_ref="workspace/report.md",
+        subject_digest=digest_text("report"),
+        producer="role.manager",
+        action_type="write_artifact",
+        log_path=log,
+    )
+    first = create_action_attestation(
+        subject_kind="runtime_event",
+        subject_ref="agent_invocation_receipt:first",
+        subject_digest=digest_text("first"),
+        producer="role.manager",
+        action_type="agent_cli_dispatch",
+        verification_status="verified",
+        run_id="run_1",
+        metadata={"agent_invocation_receipt": receipt},
+        log_path=log,
+    )
+    second = create_action_attestation(
+        subject_kind="runtime_event",
+        subject_ref="agent_invocation_receipt:second",
+        subject_digest=digest_text("second"),
+        producer="role.manager",
+        action_type="agent_cli_dispatch",
+        verification_status="failed",
+        run_id="run_2",
+        metadata={
+            "agent_invocation_receipt": {
+                **receipt,
+                "returncode": 2,
+                "agent_session_id": "session-2",
+            }
+        },
+        log_path=log,
+    )
+
+    assert agent_invocation_audit_row(ignored) is None
+    rows = list_agent_invocation_audits(log_path=log)
+
+    assert [row.attestation_id for row in rows] == [
+        second.attestation_id,
+        first.attestation_id,
+    ]
+    assert rows[0].verification_status == "failed"
+    assert rows[0].returncode == 2
+    assert rows[0].agent_session_id == "session-2"
+    assert rows[1].runtime == "codex"
+    assert [row.attestation_id for row in list_agent_invocation_audits(limit=1, log_path=log)] == [
+        second.attestation_id
+    ]
 
 
 def test_action_attestation_cli_can_render_resource_envelopes(

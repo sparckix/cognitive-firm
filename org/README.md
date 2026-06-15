@@ -117,6 +117,24 @@ pricing A/B loop, and `artifact_build` could mean a supplier onboarding
 workflow. The org layer should not know the domain; adapters and mandates bind
 the generic route to a local backend.
 
+For daemon-dispatched principal tasks, frontmatter is part of the authorization
+surface. Use typed fields rather than relying on prose parsing:
+
+```yaml
+goal_id: adjust-mandate
+assigned_to: role.org_evolver
+autonomous_scope_ok: true
+estimated_cost_usd: 0.0
+declared_paths:
+  - org/mandates/org_evolver_mandate.md
+```
+
+`autonomous_scope_ok` says the principal has allowed unattended dispatch for
+this task if the role mandate permits it. `estimated_cost_usd` is checked
+against the role budget. `declared_paths` is the path set used by dispatch
+authorization; task prose can explain intent, but it should not be the only
+source of execution scope.
+
 ### 5. Project Charter (tenant scope fidelity)
 
 Project charters are tenant/project artifacts, not public-kernel policy. The
@@ -295,10 +313,13 @@ architecture. Key paper claims grounded here:
 - [`patterns/`](patterns/) - 3 file(s)
 - [`preferences/`](preferences/) - 2 file(s)
 - [`roles/`](roles/) - 7 file(s)
+- [`sessions/`](sessions/) - 1 file(s)
+- [`signals/`](signals/) - 1 file(s)
 
 **Documents**
 
 - [bootstrap_manifest.yaml](bootstrap_manifest.yaml)
 
-<sub>4 sub-folder(s), 1 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
+<sub>6 sub-folder(s), 1 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
 
+<!-- AUTO-INDEX:END -->

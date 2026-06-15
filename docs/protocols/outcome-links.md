@@ -45,6 +45,8 @@ An `OutcomeLink` is canonical state. Fields:
 | `learning_event_id` | optional typed reference for the learning-event case |
 | `metric_name` / `metric_unit` | tenant-defined metric identity |
 | `direction` | optional tenant hint (e.g. `lower_is_better`) — kernel does not interpret it |
+| `metadata.predicted_effect` | optional typed prediction contract for a governed change |
+| `metadata.prediction_review` | derived after verdict; flags whether the prediction was met or should become a reversal candidate |
 | `baseline` | one `MetricSnapshot` taken before the change |
 | `post_snapshots` | one or more `MetricSnapshot` rows taken after the change |
 | `verdict` | tenant verdict ∈ {improved, no_change, regressed, inconclusive} |
@@ -56,6 +58,50 @@ An `OutcomeLink` is canonical state. Fields:
 A `MetricSnapshot` carries `kind` (`baseline` | `post`), a numeric `value`,
 `captured_at_utc`, `captured_by`, and optional `sample_size` / `measurement_ref`
 / `note`. The kernel stores the value verbatim; it does not compute it.
+
+## Prediction-Gated Mutations
+
+Governed structural mutations can attach a typed `predicted_effect` when the
+outcome link is created:
+
+```json
+{
+  "metric_name": "open_org_design_gaps",
+  "metric_unit": "count",
+  "direction": "lower_is_better",
+  "threshold": 1,
+  "review_horizon": "next_routine_review",
+  "expected_verdict": "improved",
+  "rationale": "fewer ambiguous handoffs after this mandate change"
+}
+```
+
+The kernel validates that the predicted metric matches the outcome link's
+`metric_name`, `metric_unit`, and optional `direction`. It does **not** decide
+whether snapshots satisfy the threshold. When a tenant records a verdict, the
+kernel derives `metadata.prediction_review`:
+
+- `prediction_met` -> continue or reaffirm;
+- `prediction_failed` -> file a reversal candidate at routine review;
+- `prediction_inconclusive` -> escalate or extend review;
+- `awaiting_verdict` -> continue measuring.
+
+This is the composition rule for falsifiable structural learning: a mutation is
+not just "approved"; it carries an expected effect, an outcome link, and a later
+review implication. Failed predictions do not auto-revert state. They become
+governed reversal evidence through the existing routine-review and
+governance-change path.
+
+The kernel service exposes this composition directly:
+
+```text
+POST /kernel/outcome-links/{outcome_link_id}/reversal-review
+```
+
+The route reads a recorded outcome link, requires
+`metadata.prediction_review.status == "prediction_failed"` by default, and
+schedules a normal routine review with reversal-candidate metadata. It does not
+amend, retire, roll back, or otherwise mutate the governed change.
 
 ## Lifecycle
 
@@ -91,9 +137,10 @@ GET  /kernel/outcome-links/summary               ?tenant_id=&project_id=
 
 Public functions: `create_outcome_link`, `record_metric_snapshot`,
 `record_verdict`, `void_outcome_link`, `list_outcome_links`, `get_outcome_link`,
-`summarize_outcome_links`, and `outcome_link_resource`. Every public write
-function takes `log_path` and `kernel_events_log` so deployments and tests can
-redirect storage.
+`summarize_outcome_links`, `predicted_effect_from_dict`,
+`prediction_review_for_outcome_link`, and `outcome_link_resource`. Every public
+write function takes `log_path` and `kernel_events_log` so deployments and
+tests can redirect storage.
 
 ## Outcome-Link Summary
 
@@ -148,13 +195,29 @@ tenant-supplied.
 
 ## Research Anchor
 
-This is the Holmström informativeness principle applied to organizational
-learning: a control system should condition on the most informative available
-signal, and a signal should be incorporated only when it carries information
-about whether the action worked. Recording only "was the lesson encountered"
-conditions the learning loop on the least informative signal and discards the
-outcome signal; the outcome link records what is informative about whether the
-change improved the measured outcome. The contribution here is not a metrics
-store — it is binding a measured before/after delta and a tenant verdict to a
-governed change as durable, auditable kernel state, so organizational learning
-becomes selectable rather than merely logged.
+Outcome links are grounded in four related traditions:
+
+- Holmström's informativeness principle in contract theory: a control system
+  should condition on informative signals about whether the action worked, not
+  only on whether the action happened. A public index for the principle is
+  <https://en.wikipedia.org/wiki/Informativeness_principle>.
+- Popper's falsifiability criterion: a claim that cannot specify what would
+  count against it is weak evidence for learning. `predicted_effect` applies
+  that discipline to governed structural change by requiring a metric,
+  direction, threshold, and review horizon before the outcome link can test the
+  claim. See <https://en.wikipedia.org/wiki/Falsifiability>.
+- Campbell's experimenting-society and quasi-experimentation tradition: policy
+  and organizational changes should leave inspectable before/after evidence,
+  while respecting the limits of field measurement. See Donald Campbell's
+  public bibliography and evaluation work at
+  <https://en.wikipedia.org/wiki/Donald_T._Campbell>.
+- Organizational learning and selection theory: routines need variation,
+  selection, and retention, not just accumulation. March's exploration and
+  exploitation framing is one anchor:
+  <https://doi.org/10.1287/orsc.2.1.71>.
+
+The shipped primitive is narrower than those traditions. It is not a metrics
+store, statistical evaluator, or automatic rollback engine. It binds a
+tenant-supplied before/after measurement, verdict, and optional falsifiable
+prediction to a governed change as durable kernel state. A failed prediction
+creates reversal-review evidence; it does not reverse the change by itself.

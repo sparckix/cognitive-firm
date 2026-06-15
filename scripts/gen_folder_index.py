@@ -26,17 +26,20 @@ def refresh_readmes(root: Path) -> None:
     for folder in sorted(set(targets)):
         readme = folder / "README.md"
         text = readme.read_text()
-        if START not in text or END not in text:
+        if START not in text:
             continue
-        readme.write_text(replace_block(text, render_index(folder)))
+        readme.write_text(replace_block(text, render_index(folder)).rstrip() + "\n")
 
 
 def replace_block(text: str, index: str) -> str:
     start_at = text.index(START)
-    end_at = text.index(END, start_at) + len(END)
     start_line_end = text.index("\n", start_at)
-    marker = text[start_at:start_line_end]
-    return text[: start_line_end + 1] + "\n" + index + "\n" + text[end_at:]
+    if END in text[start_at:]:
+        end_at = text.index(END, start_at) + len(END)
+        suffix = text[end_at:]
+    else:
+        suffix = ""
+    return text[: start_line_end + 1] + "\n" + index + "\n\n" + END + suffix
 
 
 def render_index(folder: Path) -> str:

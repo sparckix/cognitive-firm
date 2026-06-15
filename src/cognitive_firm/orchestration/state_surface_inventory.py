@@ -294,8 +294,8 @@ STATE_SURFACES: tuple[StateSurface, ...] = (
         state_class="canonical_state",
         default_location="org/attestations/action_attestations.jsonl",
         writer="create_action_attestation",
-        reader="list_action_attestations, release/review queues, governed-run bundle, action_attestation_resource",
-        notes="Machine-side provenance counterpart to human work receipts. Resource projection is a compatibility view, not canonical state.",
+        reader="list_action_attestations, list_agent_invocation_audits, release/review queues, governed-run bundle, action_attestation_resource",
+        notes="Machine-side provenance counterpart to human work receipts. Agent invocation audits are read models over agent_cli_dispatch attestations; resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_action_attestation.py"],
     ),
     StateSurface(
@@ -320,6 +320,54 @@ STATE_SURFACES: tuple[StateSurface, ...] = (
         writer="record_runtime_event",
         reader="run checkpoint projection and org surface",
         conformance_tests=["tests/test_runtime_adapters.py", "tests/test_run_checkpoints.py"],
+    ),
+    StateSurface(
+        primitive="multi_agent_trace_attribution",
+        module="cognitive_firm.orchestration.multi_agent_trace_attribution",
+        surface_kind="jsonl + resource projection",
+        connector_family="runtime",
+        state_class="telemetry",
+        default_location="org/multi_agent_traces/trace_events.jsonl and org/multi_agent_traces/attribution_packets.jsonl",
+        writer="record_trace_event / create_failure_attribution_packet",
+        reader="list_trace_events, diagnostics, delegation graph projection, learning candidate projection, resource projections, kernel service read/write routes",
+        notes="Runtime-owned multi-agent trace evidence, delegation graph projection, and attribution packets. Observer-only; does not execute agents or mutate governance.",
+        conformance_tests=["tests/test_multi_agent_trace_attribution.py", "tests/test_kernel_service.py"],
+    ),
+    StateSurface(
+        primitive="phase_execution",
+        module="cognitive_firm.orchestration.phase_execution",
+        surface_kind="jsonl + resource projection",
+        connector_family="runtime",
+        state_class="telemetry",
+        default_location="org/phase_execution/phase_execution.jsonl",
+        writer="start_phase_execution_plan / record_phase_directive / record_verification_feedback / learning_candidate_from_phase_execution_plan",
+        reader="list_phase_execution_plans, phase_execution_plan_resource, kernel service read/write routes, demos and runtime adapters",
+        notes="Thin Strategy -> Execution -> Verification overlay with bounded retry budget decay and observer-only learning candidates from blocked plans. Does not execute agents.",
+        conformance_tests=["tests/test_phase_execution.py", "tests/test_phase_execution_demo.py", "tests/test_kernel_service.py"],
+    ),
+    StateSurface(
+        primitive="protocol_experiments",
+        module="cognitive_firm.orchestration.protocol_experiments",
+        surface_kind="jsonl + resource projection",
+        connector_family="runtime",
+        state_class="telemetry",
+        default_location="org/protocol_experiments/protocol_experiments.jsonl",
+        writer="start_protocol_experiment / record_protocol_observation / build_protocol_experiment_report / learning_candidate_from_protocol_experiment_report",
+        reader="list_protocol_experiments, protocol_experiment_resource, kernel service read/write routes, demos and runtime adapters",
+        notes="Bounded coordination-pattern experiment evidence. Emits observer-only route-policy candidates and learning-candidate projections; does not choose or mutate routing policy.",
+        conformance_tests=["tests/test_protocol_experiments.py", "tests/test_protocol_experiment_demo.py", "tests/test_kernel_service.py"],
+    ),
+    StateSurface(
+        primitive="capability_signals",
+        module="cognitive_firm.orchestration.capability_signals",
+        surface_kind="jsonl + resource projection",
+        connector_family="runtime",
+        state_class="telemetry",
+        default_location="org/capability_signals/capability_signals.jsonl",
+        writer="record_capability_signal / route_capability_signal / close_capability_signal",
+        reader="list_capability_signals, summarize_capability_signals, capability_signal_resource, kernel service read/write routes",
+        notes="Typed abstention, authority-gap, evidence-gap, and capability-gap routing evidence. Does not grant capabilities or mutate work items.",
+        conformance_tests=["tests/test_capability_signals.py", "tests/test_capability_signal_demo.py", "tests/test_kernel_service.py"],
     ),
     StateSurface(
         primitive="notifications",
@@ -400,7 +448,7 @@ STATE_SURFACES: tuple[StateSurface, ...] = (
         connector_family="state_backend",
         state_class="canonical_state",
         default_location="org/governance_changes/governance_changes.jsonl",
-        writer="propose_governance_change",
+        writer="propose_governance_change / governance_change_from_candidate",
         reader="list_governance_changes, org surface, tenant review queues, governance_change_resource",
         notes="Governed self-modification proposals; records invariant checks and structural evidence sufficiency but does not apply changes. Resource projection is a compatibility view, not canonical state.",
         conformance_tests=["tests/test_governance_changes.py", "tests/test_org_surface.py"],
@@ -526,6 +574,18 @@ STATE_SURFACES: tuple[StateSurface, ...] = (
         conformance_tests=["tests/test_resource_allocation.py"],
     ),
     StateSurface(
+        primitive="decision_aggregation_cases",
+        module="cognitive_firm.orchestration.decision_aggregation",
+        surface_kind="jsonl + resource projection",
+        connector_family="state_backend",
+        state_class="canonical_state",
+        default_location="org/decision_aggregation/decision_aggregation_cases.jsonl",
+        writer="open_decision_aggregation_case / open_decision_aggregation_case_from_profile / record_decision_position / compute_decision_aggregation_case",
+        reader="list_decision_aggregation_cases, governance review, decision_aggregation_case_resource",
+        notes="Records deterministic decision-procedure evidence such as single-authority, quorum-majority, veto, and unanimity results; built-in profiles reduce adopter wiring but do not allocate authority or mutate org state. Resource projection is a compatibility view, not canonical state.",
+        conformance_tests=["tests/test_decision_aggregation.py", "tests/test_kernel_service.py"],
+    ),
+    StateSurface(
         primitive="residual_right_assignments",
         module="cognitive_firm.orchestration.decision_rights",
         surface_kind="jsonl + resource projection",
@@ -603,6 +663,7 @@ CAPABILITY_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "authority_domains",
             "leases",
             "policy_decisions",
+            "decision_aggregation_cases",
             "residual_right_assignments",
             "residual_decisions",
             "mcp_outbox",
@@ -625,6 +686,10 @@ CAPABILITY_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "kernel_events",
             "run_checkpoints",
             "runtime_adapters",
+            "multi_agent_trace_attribution",
+            "phase_execution",
+            "protocol_experiments",
+            "capability_signals",
             "otel_export",
             "state_backends",
         ),
@@ -675,8 +740,67 @@ CAPABILITY_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+WORK_SUBSTRATE_SURFACES = {
+    "human_work",
+    "work_items",
+    "operating_units",
+    "operating_unit_surface",
+    "resource_allocation",
+}
+
+FIRST_PARTY_EXECUTION_HELPERS = {
+    "phase_execution",
+    "protocol_experiments",
+    "capability_signals",
+    "business_function_bandit",
+}
+
+RUNTIME_IMPORT_SURFACES = {
+    "runtime_adapters",
+    "multi_agent_trace_attribution",
+    "otel_export",
+    "run_checkpoints",
+}
+
+AUDIT_AND_PROOF_SURFACES = {
+    "evidence_gaps",
+    "action_attestation",
+    "formal_verification",
+    "audit_integrity",
+    "governed_run_attestation",
+    "accountability_cases",
+    "accountability",
+    "resource_envelope",
+    "outcome_links",
+    "routine_reviews",
+}
+
+
 def _surfaces_by_id() -> dict[str, StateSurface]:
     return {surface.primitive: surface for surface in STATE_SURFACES}
+
+
+def execution_boundary_for_surface(surface: StateSurface) -> str:
+    """Classify how a surface relates to execution.
+
+    This label is documentation and review guidance. It is intentionally not an
+    authority check: authority still lives in mandates, leases, policies,
+    decision rights, and approvals.
+    """
+
+    if surface.tenant_owned:
+        return "tenant-owned input"
+    if surface.primitive in WORK_SUBSTRATE_SURFACES:
+        return "work substrate"
+    if surface.primitive in FIRST_PARTY_EXECUTION_HELPERS:
+        return "first-party execution helper"
+    if surface.primitive in RUNTIME_IMPORT_SURFACES:
+        return "runtime import/projection"
+    if surface.primitive in AUDIT_AND_PROOF_SURFACES:
+        return "audit/proof"
+    if surface.connector_family == "runtime":
+        return "runtime import/projection"
+    return "kernel governance/state"
 
 
 def capability_inventory() -> list[dict[str, object]]:
@@ -691,11 +815,16 @@ def capability_inventory() -> list[dict[str, object]]:
             if surface is None:
                 continue
             seen.add(primitive)
-            rows.append(surface.as_dict())
+            row = surface.as_dict()
+            row["execution_boundary"] = execution_boundary_for_surface(surface)
+            rows.append(row)
         grouped.append({"group": group_name, "surfaces": rows})
 
     ungrouped = [
-        surface.as_dict()
+        {
+            **surface.as_dict(),
+            "execution_boundary": execution_boundary_for_surface(surface),
+        }
         for surface in STATE_SURFACES
         if surface.primitive not in seen
     ]
@@ -712,12 +841,18 @@ def render_capability_inventory_markdown() -> str:
         "surfaces by the organizational problem they address. It is a map of",
         "implemented and tested interfaces, not a list of product promises.",
         "",
+        "The `Boundary` column separates kernel governance/state, work substrate,",
+        "first-party execution helpers, runtime imports/projections, tenant-owned",
+        "inputs, and audit/proof surfaces. This keeps cognitive-firm from",
+        "becoming a workflow/BPM system or a replacement agent runtime while still",
+        "making the execution substrate visible.",
+        "",
     ]
     for group in capability_inventory():
         lines.append(f"## {group['group']}")
         lines.append("")
-        lines.append("| Surface | Class | Kind | Writer | Tests |")
-        lines.append("|---|---|---|---|---|")
+        lines.append("| Surface | Boundary | Class | Kind | Writer | Tests |")
+        lines.append("|---|---|---|---|---|---|")
         for row in group["surfaces"]:  # type: ignore[index]
             assert isinstance(row, dict)
             tests = ", ".join(str(item) for item in row.get("conformance_tests", []))
@@ -726,6 +861,7 @@ def render_capability_inventory_markdown() -> str:
                 + " | ".join(
                     [
                         f"`{row['primitive']}`",
+                        str(row["execution_boundary"]),
                         str(row["state_class"]).replace("_", " "),
                         str(row["surface_kind"]).replace("_", " "),
                         f"`{row['writer']}`",

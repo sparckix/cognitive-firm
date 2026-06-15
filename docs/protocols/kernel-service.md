@@ -49,16 +49,54 @@ GET  /kernel/governance-changes
 GET  /kernel/governance-changes/{proposal_id}
 POST /kernel/governance-changes
 POST /kernel/governance-changes/{proposal_id}/decision
+POST /kernel/governance-changes/{proposal_id}/outcome-link
 POST /kernel/actors
 POST /kernel/memberships
 POST /kernel/memberships/{assignment_id}/revoke
 POST /kernel/leases
 POST /kernel/leases/{lease_id}/release
 POST /kernel/mutation-events
+POST /kernel/governed-run-bundles/build
+POST /kernel/governed-run-bundles/validate
+POST /kernel/mutation-proofs/build
+POST /kernel/mutation-proofs/validate
+GET  /kernel/multi-agent-trace-events
+POST /kernel/multi-agent-trace-events
+GET  /kernel/failure-attribution-packets
+POST /kernel/failure-attribution-packets
+GET  /kernel/delegation-graph
+GET  /kernel/phase-execution-plans
+POST /kernel/phase-execution-plans
+POST /kernel/phase-execution-plans/{plan_id}/directives
+POST /kernel/phase-execution-plans/{plan_id}/verification-feedback
+GET  /kernel/protocol-experiments
+POST /kernel/protocol-experiments
+POST /kernel/protocol-experiments/{experiment_id}/observations
+POST /kernel/protocol-experiments/{experiment_id}/reports
+GET  /kernel/action-impact/policy-evaluations
+POST /kernel/action-impact/policy-evaluations/evaluate
+GET  /kernel/action-impact/policy-promotion-packets
+POST /kernel/action-impact/policy-promotion-packets
+POST /kernel/action-impact/policy-promotion-packets/{packet_id}/governance-change
+GET  /kernel/policy-decisions
+POST /kernel/policy-decisions/evaluate
+GET  /kernel/decision-procedure-profiles
+GET  /kernel/decision-aggregation-cases
+POST /kernel/decision-aggregation-cases
+POST /kernel/decision-aggregation-cases/{case_id}/positions
+POST /kernel/decision-aggregation-cases/{case_id}/compute
+POST /kernel/decision-aggregation-cases/{case_id}/route-escalation
+GET  /kernel/capability-signals
+POST /kernel/capability-signals
+POST /kernel/capability-signals/{signal_id}/route
+POST /kernel/capability-signals/{signal_id}/close
+POST /kernel/execution-evidence/route
 POST /kernel/human-work
 POST /kernel/human-work/{session_id}/state
 POST /kernel/human-work/{session_id}/interaction
 POST /kernel/accountability-cases
+POST /kernel/accountability-cases/from-damage-signal
+POST /kernel/accountability-cases/{case_id}/status
 GET  /kernel/operating-units
 GET  /kernel/operating-units/{unit_id}
 GET  /kernel/operating-unit-dashboard
@@ -72,6 +110,9 @@ POST /kernel/runs/{run_id}/state
 GET  /kernel/learning-events
 GET  /kernel/learning-events/replay
 GET  /kernel/learning-events/summary
+POST /kernel/learning-events
+GET  /kernel/learning-transition-candidates
+POST /kernel/learning-transition-candidates/{candidate_id}/governance-change
 POST /kernel/learning-event-encounters
 GET  /kernel/outcome-links
 GET  /kernel/outcome-links/summary
@@ -79,6 +120,12 @@ POST /kernel/outcome-links
 POST /kernel/outcome-links/{outcome_link_id}/snapshots
 POST /kernel/outcome-links/{outcome_link_id}/verdict
 POST /kernel/outcome-links/{outcome_link_id}/void
+POST /kernel/outcome-links/{outcome_link_id}/reversal-review
+GET  /kernel/agent-invocations
+GET  /kernel/action-attestations
+POST /kernel/action-attestations
+GET  /kernel/formal-verifications
+POST /kernel/formal-verifications/provider-payload
 GET  /kernel/routine-reviews
 GET  /kernel/routine-reviews/due
 GET  /kernel/routine-reviews/summary
@@ -117,11 +164,153 @@ GET /kernel/operating-units?resource=true
 GET /kernel/operating-units/{unit_id}?resource=true
 GET /kernel/learning-events?resource=true
 GET /kernel/learning-events/replay?resource=true
+GET /kernel/learning-transition-candidates?source=execution
+GET /kernel/learning-transition-candidates?source=phase_execution
+GET /kernel/learning-transition-candidates?source=protocol_experiment
 GET /kernel/routine-reviews?resource=true
 GET /kernel/routine-reviews/due?resource=true
 GET /kernel/work-items?resource=true
 GET /kernel/work-items/{work_id}?resource=true
+GET /kernel/multi-agent-trace-events?resource=true
+GET /kernel/failure-attribution-packets?resource=true
+GET /kernel/delegation-graph?resource=true
+GET /kernel/phase-execution-plans?resource=true
+GET /kernel/protocol-experiments?resource=true
+GET /kernel/decision-aggregation-cases?resource=true
+GET /kernel/capability-signals?resource=true
 ```
+
+Decision aggregation routes record procedure evidence, not authority:
+
+- `GET /kernel/decision-procedure-profiles` lists built-in profile recipes.
+- `POST /kernel/decision-aggregation-cases` accepts either explicit
+  `procedure_kind`/`quorum` or a `procedure_profile` shortcut. `case_id` is
+  optional when a replayable client needs a stable receipt.
+- `POST /kernel/decision-aggregation-cases/{case_id}/positions` records one
+  eligible position. `position_id` is optional when the caller needs a stable
+  receipt.
+- `POST /kernel/decision-aggregation-cases/{case_id}/compute` computes the
+  deterministic recommendation. The result still has to be consumed by a
+  downstream mandate, policy, approval, accountability, or learning path.
+- `POST /kernel/decision-aggregation-cases/{case_id}/route-escalation` turns
+  an already-escalated case into a normal routed `CapabilitySignal` plus an
+  observer-only learning-transition candidate. This is for quorum failure,
+  abstention, recusal, or ties that should be inspected later. It does not
+  resolve the decision, override the aggregation result, approve governance, or
+  mutate files.
+
+Accountability routes:
+
+- `POST /kernel/accountability-cases` writes the normal accountability case
+  record.
+- `POST /kernel/accountability-cases/from-damage-signal` takes a damage-signal
+  object plus accountable role and authority-envelope refs, shapes the signal
+  into a normal accountability-case request, and writes the same canonical
+  case row. It does not clear the damage signal, decide remediation, mutate
+  routing, or close the case.
+
+Governance-change creation routes also understand an opt-in deletion-duty
+request shape:
+
+```json
+{
+  "require_deletion_duty": true,
+  "retirement_candidate_ref": "org/policies/old-review.md",
+  "net_growth_justification": "Required for the workload probe scorer.",
+  "deletion_duty_evidence_refs": ["routine_review:review-pruning"]
+}
+```
+
+When `require_deletion_duty` is true, the service appends a
+`deletion_duty_checked` invariant check before running the normal
+evidence-sufficiency gate. A structure-adding proposal without either a
+retirement candidate or net-growth justification becomes blocked. Omitting the
+flag preserves ordinary governance-change behavior.
+
+Governance-change creation also accepts a typed `predicted_effect` compatible
+with outcome-link prediction review:
+
+```json
+{
+  "predicted_effect": {
+    "metric_name": "handoff_rework_rate",
+    "metric_unit": "ratio",
+    "direction": "lower_is_better",
+    "threshold": 0.1,
+    "review_horizon": "after_next_10_handoffs",
+    "expected_verdict": "improved"
+  }
+}
+```
+
+After the proposal has an explicit approval event, clients may call
+`POST /kernel/governance-changes/{proposal_id}/outcome-link` to open the normal
+outcome-link lifecycle from that prediction. The route carries the proposal's
+metric identity and `predicted_effect` into `metadata.predicted_effect`; it does
+not record measurements, compute a verdict, apply files, or reverse anything.
+Planning-only measurements should use `POST /kernel/outcome-links` directly.
+
+If present, the service validates and stores the prediction on the proposal.
+The kernel still does not compute the metric; approved changes should carry the
+same prediction into an outcome link for later verdict and routine-review
+follow-up.
+
+`POST /kernel/governed-run-bundles/build`,
+`POST /kernel/governed-run-bundles/validate`,
+`POST /kernel/mutation-proofs/build`, and
+`POST /kernel/mutation-proofs/validate` are read-only projection routes even
+though they use POST for structured JSON bodies. They do not write kernel
+state, acquire leases, or authorize mutation.
+`/kernel/mutation-proofs/build` may include `evidence_carrier_refs` to digest
+execution evidence refs, such as trace events, capability signals,
+learning-transition candidates, phase execution plans, or protocol experiment
+reports, into the proof projection.
+
+The execution-evidence POST routes do mutate evidence logs and therefore pass
+through the same surface-write policy and lease checks as other kernel
+mutations. They import observer-only evidence: trace events, failure
+attribution packets, phase directives and verifier feedback, protocol
+experiment observations and reports, and capability/abstention routing
+signals. They do not approve governance changes or promote policies by
+themselves.
+
+`POST /kernel/execution-evidence/route` is the service-side composition route
+for a common runtime/adapter condition: "the agent could not or should not
+continue." It records a normal `CapabilitySignal`, optionally routes it,
+returns the matching observer-only learning-transition candidate, and can draft
+a governance-change proposal when the caller supplies
+`governance_change_target_ref`. It does not approve the proposal, mutate files,
+or run a worker. In lease-required deployments, the route uses one outer lease
+on `execution_evidence:route`; it does not require callers to acquire separate
+leases for the internal signal/candidate/proposal composition.
+
+`POST /kernel/decision-aggregation-cases/{case_id}/route-escalation` uses the
+same evidence-routing path for a narrower kernel condition: an aggregation
+case has already computed to `escalated`. This keeps reviewer abstentions,
+missing quorum, recusals, and ties visible to learning and governance without
+inventing a second approval path.
+
+`POST /kernel/action-impact/policy-promotion-packets/{packet_id}/governance-change`
+is the corresponding composition route for offline action-impact evidence. It
+projects a `review_ready` `PolicyPromotionPacket` into a
+`GovernanceChangeProposal` with `change_kind=route_policy_change` and cites the
+packet as evidence. It does not approve the change, apply a policy, choose
+actions, or execute a runtime. In lease-required deployments, callers acquire
+one lease on
+`action_impact:policy_promotion_packet:{packet_id}:governance_change`.
+
+`POST /kernel/action-attestations` and `POST /kernel/learning-events` create
+canonical provenance and approved-learning rows. They are mutating service
+routes, not read-only proof helpers. Demos and adapters should prefer these
+routes over direct JSONL writes when exercising the kernel service boundary.
+
+`GET /kernel/agent-invocations` is a read-only projection over
+`ActionAttestation` rows whose `action_type` is `agent_cli_dispatch` and whose
+metadata includes `agent_invocation_receipt.v1`. It supports `producer`,
+`tenant_id`, `project_id`, `run_id`, `verification_status`, and `limit`
+filters. Dashboards, demos, and runtime adapters should use this route when
+they need recent local/subscription agent execution receipts without parsing
+the full action-attestation ledger.
 
 Run locally:
 

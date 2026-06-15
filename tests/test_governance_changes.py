@@ -10,13 +10,20 @@ from cognitive_firm.orchestration.governance_changes import (  # noqa: E402
     REQUIRED_EVIDENCE_FIELDS,
     REQUIRED_INVARIANTS,
     assess_evidence_sufficiency,
+    classify_governance_change_tier,
+    deletion_duty_invariant_check,
     InvariantCheck,
     failed_invariants,
+    governance_change_from_candidate,
     governance_change_resource,
     list_governance_changes,
     main as governance_changes_main,
     missing_required_invariants,
     propose_governance_change,
+    tier_classification_invariant_check,
+)
+from cognitive_firm.orchestration.learning_transition_compiler import (  # noqa: E402
+    LearningTransitionCandidate,
 )
 from cognitive_firm.orchestration.resource_envelope import validate_resource  # noqa: E402
 
@@ -59,6 +66,110 @@ def test_governance_change_requires_all_invariants_for_review_ready(tmp_path: Pa
 
     proposals = list_governance_changes(status="review_ready", log_path=log_path)
     assert [item.proposal_id for item in proposals] == [proposal.proposal_id]
+
+
+def test_governance_change_can_carry_typed_predicted_effect(tmp_path: Path):
+    log_path = tmp_path / "governance_changes.jsonl"
+
+    proposal = propose_governance_change(
+        change_kind="mandate_change",
+        title="Tighten handoff mandate",
+        proposed_by="role.org_evolver",
+        target_ref="org/mandates/evaluator.md",
+        rationale="Verifier misses show handoffs need a measured acceptance rule.",
+        predicted_effect={
+            "metric_name": "handoff_rework_rate",
+            "metric_unit": "ratio",
+            "direction": "lower_is_better",
+            "threshold": 0.1,
+            "review_horizon": "after_next_10_handoffs",
+            "expected_verdict": "improved",
+        },
+        risk_summary="Narrows acceptance criteria without expanding authority.",
+        rollback_plan="Restore prior evaluator mandate.",
+        source_refs=["outcome_link:olink_baseline"],
+        invariant_checks=_passing_checks(),
+        log_path=log_path,
+    )
+
+    assert proposal.status == "review_ready"
+    assert proposal.predicted_effect == {
+        "metric_name": "handoff_rework_rate",
+        "metric_unit": "ratio",
+        "direction": "lower_is_better",
+        "threshold": 0.1,
+        "review_horizon": "after_next_10_handoffs",
+        "expected_verdict": "improved",
+        "rationale": None,
+    }
+    assert proposal.expected_behavior_change is None
+    assert proposal.evidence_sufficiency is not None
+    assert proposal.evidence_sufficiency.status == "pass"
+
+    payload = governance_change_resource(proposal).as_dict()
+    assert payload["spec"]["predicted_effect"] == proposal.predicted_effect
+    loaded = list_governance_changes(log_path=log_path)[0]
+    assert loaded.predicted_effect == proposal.predicted_effect
+
+
+def test_governance_change_tier_classification_standard_check() -> None:
+    tier0 = tier_classification_invariant_check(
+        target_ref="org/roles/principal.yaml",
+        change_kind="role_change",
+    )
+    assert tier0.status == "fail"
+    assert "tier_0_immutable" in tier0.rationale
+    assert "tier_classification:tier_0_immutable" in tier0.evidence_refs
+
+    tier1 = tier_classification_invariant_check(
+        target_ref="org/charters/self_evolving_firm.md",
+        change_kind="project_charter_change",
+    )
+    assert tier1.status == "pass"
+    assert "principal_explicit_approval" in tier1.rationale
+
+    tier2 = classify_governance_change_tier(
+        target_ref="org/policies/review.md",
+        change_kind="learning_policy_change",
+    )
+    assert tier2 == {
+        "tier": "tier_2_governed_mutation",
+        "required_approval_path": "ordinary_governed_mutation",
+        "rationale": "target affects ordinary governed organization structure",
+    }
+
+
+def test_deletion_duty_optional_invariant_check() -> None:
+    missing = deletion_duty_invariant_check(
+        target_ref="org/roles/new_reviewer.yaml",
+        change_kind="role_change",
+    )
+    assert missing.status == "fail"
+    assert "retirement candidate" in missing.rationale
+    assert "deletion_duty:missing_retirement_or_justification" in missing.evidence_refs
+
+    retirement = deletion_duty_invariant_check(
+        target_ref="org/policies/new_review.md",
+        change_kind="learning_policy_change",
+        retirement_candidate_ref="org/policies/old_review.md",
+    )
+    assert retirement.status == "pass"
+    assert "retirement_candidate:org/policies/old_review.md" in retirement.evidence_refs
+
+    justified = deletion_duty_invariant_check(
+        target_ref="org/decision_models/resource_allocation.md",
+        change_kind="tenant_policy_change",
+        net_growth_justification="Adds a decision model needed for the workload probe.",
+    )
+    assert justified.status == "pass"
+    assert "net_growth_justification:present" in justified.evidence_refs
+
+    not_applicable = deletion_duty_invariant_check(
+        target_ref="org/mandates/evaluator.md",
+        change_kind="mandate_change",
+    )
+    assert not_applicable.status == "pass"
+    assert "deletion_duty:not_applicable" in not_applicable.evidence_refs
 
 
 def test_governance_change_blocks_missing_or_failed_invariants(tmp_path: Path):
@@ -203,6 +314,65 @@ def test_governance_change_projects_to_resource_envelope(tmp_path: Path):
         "rel": "source",
         "href": "policy_promotion_packet:packet_1",
     } in payload["links"]
+
+
+def test_governance_change_from_candidate_preserves_evidence_and_gate(tmp_path: Path):
+    candidate = LearningTransitionCandidate(
+        candidate_id="ltc_test_candidate",
+        transition_kind="mandate_review",
+        severity="warning",
+        rationale="Verifier failures show the mandate needs clearer evidence requirements.",
+        source_kind="multi_agent_failure_attribution",
+        object_ref="protocol:handoff-source-refs",
+        suggested_owner_role="role.evaluator",
+        review_question="Should handoff evidence requirements change?",
+        source_refs=["multi_agent_attribution:packet_1"],
+        proposed_payload={"diagnostics": {"verifier_failures": 1}},
+    )
+
+    proposal = governance_change_from_candidate(
+        candidate,
+        target_ref="org/mandates/evaluator.md",
+        proposed_by="role.evaluator",
+        expected_behavior_change="Evaluator mandate now requires source refs before accepting handoffs.",
+        risk_summary="Narrows acceptance criteria and does not expand authority.",
+        rollback_plan="Restore the previous evaluator mandate text.",
+        invariant_checks=_passing_checks(),
+        log_path=tmp_path / "governance_changes.jsonl",
+    )
+
+    assert proposal.status == "review_ready"
+    assert proposal.change_kind == "mandate_change"
+    assert proposal.owner_role == "role.evaluator"
+    assert "multi_agent_attribution:packet_1" in proposal.source_refs
+    assert "protocol:handoff-source-refs" in proposal.source_refs
+    assert "learning_transition_candidate:ltc_test_candidate" in proposal.source_refs
+    assert proposal.metadata["candidate_id"] == "ltc_test_candidate"
+    assert proposal.metadata["candidate_source_kind"] == "multi_agent_failure_attribution"
+
+
+def test_governance_change_from_candidate_still_blocks_missing_review_evidence(tmp_path: Path):
+    candidate = LearningTransitionCandidate(
+        candidate_id="ltc_weak_candidate",
+        transition_kind="evidence_gap",
+        severity="warning",
+        rationale="A capability signal indicates missing evidence.",
+        source_kind="capability_signal",
+        object_ref="work_item:work_1",
+        source_refs=["capability_signal:csig_1"],
+    )
+
+    proposal = governance_change_from_candidate(
+        candidate,
+        target_ref="org/policies/learning.md",
+        proposed_by="role.evaluator",
+        log_path=tmp_path / "governance_changes.jsonl",
+    )
+
+    assert proposal.status == "blocked"
+    assert proposal.change_kind == "learning_policy_change"
+    assert proposal.evidence_sufficiency is not None
+    assert proposal.evidence_sufficiency.status == "fail"
 
 
 def test_governance_change_cli_can_render_resource_envelopes(

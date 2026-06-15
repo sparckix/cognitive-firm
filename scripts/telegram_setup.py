@@ -26,7 +26,8 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CREDS_PATH = REPO_ROOT / "org" / "mandates" / ".telegram_creds"
+ORG_ROOT = Path(os.environ.get("ORG_ROOT") or REPO_ROOT / "org")
+CREDS_PATH = ORG_ROOT / "mandates" / ".telegram_creds"
 TELEGRAM_API_BASE = "https://api.telegram.org"
 
 
