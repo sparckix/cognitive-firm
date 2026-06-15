@@ -110,6 +110,7 @@ POST /kernel/runs/{run_id}/state
 GET  /kernel/learning-events
 GET  /kernel/learning-events/replay
 GET  /kernel/learning-events/summary
+GET  /kernel/work-discovery
 POST /kernel/learning-events
 GET  /kernel/learning-transition-candidates
 POST /kernel/learning-transition-candidates/{candidate_id}/governance-change
@@ -150,6 +151,7 @@ POST /kernel/directives
 POST /kernel/controls
 POST /kernel/chat/messages
 POST /kernel/roles/{role_id}/agent-utilization
+GET  /kernel/work-inbox/{actor_id}
 ```
 
 Read routes for resource-projected primitives can render the common
@@ -179,6 +181,16 @@ GET /kernel/protocol-experiments?resource=true
 GET /kernel/decision-aggregation-cases?resource=true
 GET /kernel/capability-signals?resource=true
 ```
+
+`GET /kernel/work-discovery?assigned_to=role.manager&tenant_id=...&cue=...`
+is the pre-work context surface for app and agent userland. It joins matching
+approved learning events to their outcome links and routine reviews, returns
+matching work-discovery candidates, and includes a `context_packet` digest over
+the exact refs/query basis. The packet is a citeable projection receipt, not a
+canonical memory store. If the returned context influences a concrete work
+surface, the consumer records telemetry through
+`POST /kernel/learning-event-encounters`; the read route does not write that row
+automatically.
 
 Decision aggregation routes record procedure evidence, not authority:
 

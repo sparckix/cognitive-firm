@@ -4126,6 +4126,59 @@ def test_kernel_service_routes_the_durable_learning_layer(tmp_path: Path):
     assert other_tenant.status == 200
     assert other_tenant.payload["learning_events"] == []
 
+    context_link = create_outcome_link(
+        change_ref=f"learning_event:{event.learning_event_id}",
+        change_kind="learning_event",
+        metric_name="queue_cycle_time",
+        metric_unit="hours",
+        created_by="actor.analyst",
+        learning_event_id=event.learning_event_id,
+        tenant_id="tenant-a",
+        log_path=config.outcome_links_log,
+    )
+    context_review = schedule_routine_review(
+        routine_ref=f"learning_event:{event.learning_event_id}",
+        routine_kind="learning_event",
+        review_due_utc="2000-01-01T00:00:00+00:00",
+        scheduled_by="role.manager",
+        learning_event_id=event.learning_event_id,
+        tenant_id="tenant-a",
+        log_path=config.routine_reviews_log,
+    )
+    work_context = dispatch_kernel_request(
+        "GET",
+        "/kernel/work-discovery?assigned_to=role.manager&tenant_id=tenant-a&cue=queue+stalls",
+        config=config,
+    )
+    assert work_context.status == 200
+    assert work_context.payload["read_only"] is True
+    assert work_context.payload["context_packet"]["write_policy"] == "projection_only"
+    assert work_context.payload["context_packet"]["basis"]["learning_event_ids"] == [
+        event.learning_event_id
+    ]
+    assert work_context.payload["context_packet"]["basis"]["outcome_link_ids"] == [
+        context_link.outcome_link_id
+    ]
+    assert config.learning_encounters_log.exists() is False
+    assert [
+        row["learning_event"]["learning_event_id"]
+        for row in work_context.payload["learning_context"]
+    ] == [event.learning_event_id]
+    assert (
+        work_context.payload["learning_context"][0]["outcome_links"][0][
+            "outcome_link_id"
+        ]
+        == context_link.outcome_link_id
+    )
+    assert work_context.payload["learning_context"][0]["overdue_review_ids"] == [
+        context_review.review_id
+    ]
+    assert [
+        candidate["metadata"]["learning_event_id"]
+        for candidate in work_context.payload["work_candidates"]
+        if candidate["source"] == "learning-event-replay"
+    ] == [event.learning_event_id]
+
     encounter = dispatch_kernel_request(
         "POST",
         "/kernel/learning-event-encounters",
@@ -4194,10 +4247,14 @@ def test_kernel_service_routes_the_durable_learning_layer(tmp_path: Path):
         "GET", "/kernel/outcome-links?resource=true", config=config
     )
     assert outcome_resources.status == 200
-    assert outcome_resources.payload["outcome_links"][0]["kind"] == "OutcomeLink"
+    outcome_resource = next(
+        row
+        for row in outcome_resources.payload["outcome_links"]
+        if row["metadata"]["resource_id"] == link_id
+    )
+    assert outcome_resource["kind"] == "OutcomeLink"
     assert (
-        outcome_resources.payload["outcome_links"][0]["metadata"]["resource_id"]
-        == link_id
+        outcome_resource["metadata"]["resource_id"] == link_id
     )
 
     # Failed prediction: schedule a reversal-candidate routine review from the
@@ -4287,7 +4344,9 @@ def test_kernel_service_routes_the_durable_learning_layer(tmp_path: Path):
     review_id = scheduled.payload["routine_review"]["review_id"]
     due = dispatch_kernel_request("GET", "/kernel/routine-reviews/due", config=config)
     assert due.status == 200
-    assert len(due.payload["due_reviews"]) == 1
+    due_review_ids = {row["review_id"] for row in due.payload["due_reviews"]}
+    assert review_id in due_review_ids
+    assert context_review.review_id in due_review_ids
     review_resources = dispatch_kernel_request(
         "GET", "/kernel/routine-reviews?resource=true", config=config
     )
@@ -4305,7 +4364,7 @@ def test_kernel_service_routes_the_durable_learning_layer(tmp_path: Path):
         "GET", "/kernel/routine-reviews/due?resource=true", config=config
     )
     assert due_resources.status == 200
-    assert due_resources.payload["due_reviews"][0]["status"]["overdue"] is True
+    assert all(row["status"]["overdue"] is True for row in due_resources.payload["due_reviews"])
 
     # Resource allocation: record a move, apply it, read the ledger.
     decision = dispatch_kernel_request(

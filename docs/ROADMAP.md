@@ -43,6 +43,12 @@ tenant-specific research policy, scoring systems, and optimizer rules.
   measured outcome?), routine reviews (scheduled review and accountable
   retirement of stale routines), governed resource allocation across operating
   units, and residual decision-rights records for incomplete-mandate situations.
+- Pre-work learning context projection: `GET /kernel/work-discovery` returns
+  matching approved learning events joined to outcome links, routine-review
+  state, and work-discovery candidates without recording encounter telemetry or
+  applying a route change. It includes a projection-only `context_packet`
+  digest over the exact refs/query basis so later work can cite what context was
+  available.
 - Public verification commands: `make smoke-public`, `make smoke-docker`, and
   the Python test suite.
 - Backup/restore smoke for a minimal T1 organization snapshot and restored
@@ -145,8 +151,9 @@ tenant-specific research policy, scoring systems, and optimizer rules.
 - Userland layer (`src/cognitive_firm/userland/`): the operator- and
   member-human-facing layer over the kernel, with five layers — L0 enrollment,
   L1 attention router, L2 action (operator `needs-me` queue, member-human work
-  inbox), L3 inspection/surface-policy, L4 vocabulary spine. Exposed by two
-  kernel-service routes: `GET /kernel/attention/{actor_id}` and
+  inbox), L3 inspection/surface-policy, L4 vocabulary spine. Exposed by
+  kernel-service routes including `GET /kernel/attention/{actor_id}`,
+  `GET /kernel/work-inbox/{actor_id}`, `GET /kernel/work-discovery`, and
   `GET /kernel/vocabulary`. The `cognitive-firm-userland` CLI ships `needs-me`,
   `inbox`, `vocabulary`, `status`, `resolve`, and the governed-install
   human-review verbs `proposals` / `approve` / `decline` (over the
@@ -315,6 +322,17 @@ should extend the current primitives rather than create parallel subsystems.
 | Policy proof obligations | formal-verification records, governed-run attestation bundles, package authority diffs | Allow a governance-change proposal to cite formal-verification records before a high-risk policy adapter is approved. |
 | Attention allocation learning | userland attention router, human-work sessions, action-impact, authority domains | Learn candidate attention-routing improvements from reviewed rows, but route them through governance before activation. |
 | Replayable decision log | run checkpoints, policy decisions, action attestations, outcome links, governed-run bundles | Add a demo that rebuilds a candidate policy report and bundle from logs alone. |
+| Context packet receipts | work-discovery pre-work projection, approved learning events, outcome links, routine reviews, governed-run bundles | Add a citeable context packet digest over the exact refs/query shown before work. Treat it like a chain-of-custody evidence bag: receipt only, not a plan or memory oracle. |
+| Learning-use receipts | learning-event encounters, action attestations, outcome links | Require stronger evidence for `applied`, `ignored`, and `deferred` encounters, optionally linked to a context packet and work/run ref. This borrows the clinical-audit pattern: guideline deviations are allowed but must be explainable. |
+| Structured cue/topology matching | learning-event metadata, multi-agent trace attribution, state-surface inventory | Add exact cue signatures/resource refs/topology refs so non-agent substrates can ask what learning applies to a tool, verifier, state surface, or memory shard without inventing new role offices or using vector recall as authority. |
+| Human-work pressure learning | human-work sessions, strategy findings, learning-transition candidates | Convert repeated access/labor/cognition bottlenecks into observer-only source-repair or mandate-review candidates; do not treat taste, safety, relationship, or authority-boundary work as automatically automatable. |
+
+Research anchors for the v0.4 memory/context direction: Reflexion
+(arXiv:2303.11366), Generative Agents (arXiv:2304.03442), MemGPT
+(arXiv:2310.08560), and Voyager (arXiv:2305.16291) all demonstrate useful
+feedback/retrieval/skill/context compounding patterns. The kernel translation
+is deliberately narrower: refs, digests, provenance, encounters, outcomes, and
+review lifecycles rather than runtime memory or retrieval authority.
 
 ## Runtime Integration Roadmap
 

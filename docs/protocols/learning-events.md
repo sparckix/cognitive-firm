@@ -132,12 +132,18 @@ GET  /kernel/learning-events/replay?role=role.manager&tenant_id=tenant-a&cue=...
 GET  /kernel/learning-events/replay?source_ref=multi_agent_attribution:packet_1
 GET  /kernel/learning-events/replay?tag=trace_attribution
 GET  /kernel/learning-events/summary
+GET  /kernel/work-discovery?assigned_to=role.manager&tenant_id=tenant-a&cue=...
 POST /kernel/learning-event-encounters
 ```
 
 `GET /kernel/learning-events/replay` is read-only and deterministic. It returns
 active approved events that match role, tenant/project scope, exact refs,
 explicit tags, and lexical cue.
+`GET /kernel/work-discovery` is the broader pre-work context projection. It
+returns those same matching events, joins each event to outcome links and
+routine-review state, includes matching discovery candidates, and returns a
+`context_packet` digest over the exact refs/query basis. It is still read-only;
+it does not record a learning encounter.
 `POST /kernel/learning-event-encounters` records whether a later work surface
 encountered, applied, ignored, or deferred an approved event. The service
 rejects encounter telemetry for an unknown learning event id, so usage rows do
@@ -272,6 +278,15 @@ This primitive sits between several established lines of work:
   options/chunking gives the computational analogue: useful experience becomes
   reusable higher-level units only when it has an applicability condition and a
   repeatable effect.
+- Recent LLM-agent memory work provides a useful negative boundary. Reflexion
+  (arXiv:2303.11366) stores verbal feedback for later trials; Generative Agents
+  (arXiv:2304.03442) combines observation, reflection, and retrieval; MemGPT
+  (arXiv:2310.08560) treats context as managed memory tiers; Voyager
+  (arXiv:2305.16291) compounds skill libraries from execution feedback. The
+  kernel does not import those runtime memories. It records approved learning
+  units, context refs, encounters, outcomes, and review pressure so a runtime
+  or userland surface can decide what to retrieve without making retrieval an
+  authority source.
 
 The kernel translation is deliberately narrow: a learning unit is not a note
 or model memory; it is an approved, replayable behavior-change record with

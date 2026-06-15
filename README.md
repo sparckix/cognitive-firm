@@ -550,7 +550,7 @@ operator runbook before treating it as release evidence.
 | Governance change proposals | `src/cognitive_firm/orchestration/governance_changes.py` | `tests/test_governance_changes.py` |
 | Learning transition compiler | `src/cognitive_firm/orchestration/learning_transition_compiler.py` | `tests/test_learning_transition_compiler.py` |
 | Approved learning events | `src/cognitive_firm/orchestration/learning_events.py` | `tests/test_learning_events.py` |
-| Learning-carrier work discovery | `src/cognitive_firm/orchestration/work_discovery.py` | `tests/test_work_discovery_learning_carriers.py` |
+| Learning-carrier work discovery and pre-work context projection | `src/cognitive_firm/orchestration/work_discovery.py`, `src/cognitive_firm/kernel_service.py` | `tests/test_work_discovery_learning_carriers.py`, `tests/test_kernel_service.py` |
 | Operating-unit contracts | `src/cognitive_firm/orchestration/operating_units.py` | `tests/test_operating_units.py` |
 | Durable work-item queue | `src/cognitive_firm/orchestration/work_items.py` | `tests/test_work_items.py`, `tests/test_kernel_service.py` |
 | Operating-unit dashboard | `src/cognitive_firm/orchestration/operating_unit_surface.py` | `tests/test_operating_unit_surface.py` |

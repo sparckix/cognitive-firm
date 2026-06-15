@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +17,10 @@ from cognitive_firm.orchestration.human_work import (  # noqa: E402
 )
 from cognitive_firm.orchestration.learning_events import create_learning_event  # noqa: E402
 from cognitive_firm.orchestration.learning_events import list_learning_event_encounters  # noqa: E402
+from cognitive_firm.orchestration.outcome_links import create_outcome_link  # noqa: E402
+from cognitive_firm.orchestration.routine_reviews import schedule_routine_review  # noqa: E402
 from cognitive_firm.orchestration.work_discovery import (  # noqa: E402
+    build_role_learning_context,
     discover_all,
     discover_evidence_gaps,
     discover_human_work_sessions,
@@ -319,6 +323,89 @@ def test_discover_relevant_learning_events_accepts_explicit_log_path(tmp_path: P
     assert [candidate.metadata["learning_event_id"] for candidate in candidates] == [
         event.learning_event_id
     ]
+
+
+def test_role_learning_context_joins_outcomes_reviews_without_recording_encounters(
+    tmp_path: Path,
+):
+    learning_log = tmp_path / "learning_events.jsonl"
+    outcome_log = tmp_path / "outcome_links.jsonl"
+    review_log = tmp_path / "routine_reviews.jsonl"
+    encounter_log = tmp_path / "learning_encounters.jsonl"
+    event = create_learning_event(
+        learning_unit_kind="routine_change",
+        decision_use="Route queue stalls through reviewer handoff before escalation.",
+        future_application_cue="queue stalls",
+        approved_by="role.owner",
+        approval_ref="decision:learning-queue",
+        owner_role="role.manager",
+        tenant_id="tenant-a",
+        project_id="project-a",
+        source_carrier_refs=["attribution:packet-queue"],
+        log_path=learning_log,
+    )
+    link = create_outcome_link(
+        change_ref=f"learning_event:{event.learning_event_id}",
+        change_kind="learning_event",
+        learning_event_id=event.learning_event_id,
+        metric_name="queue_cycle_time",
+        metric_unit="hours",
+        created_by="actor.analyst",
+        tenant_id="tenant-a",
+        project_id="project-a",
+        log_path=outcome_log,
+    )
+    due = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    review = schedule_routine_review(
+        routine_ref=f"learning_event:{event.learning_event_id}",
+        routine_kind="learning_event",
+        learning_event_id=event.learning_event_id,
+        review_due_utc=due,
+        scheduled_by="role.manager",
+        tenant_id="tenant-a",
+        project_id="project-a",
+        reason="Check whether the queue-stall routine still fits.",
+        log_path=review_log,
+    )
+
+    context = build_role_learning_context(
+        assigned_to="role.manager",
+        tenant_id="tenant-a",
+        project_id="project-a",
+        cue="queue stalls during handoff",
+        learning_events_log_path=learning_log,
+        outcome_links_log_path=outcome_log,
+        routine_reviews_log_path=review_log,
+    )
+
+    assert context["read_only"] is True
+    assert context["context_packet"]["context_packet_id"].startswith("ctx_")
+    assert context["context_packet"]["basis"]["learning_event_ids"] == [
+        event.learning_event_id
+    ]
+    assert context["context_packet"]["basis"]["outcome_link_ids"] == [
+        link.outcome_link_id
+    ]
+    assert context["context_packet"]["basis"]["overdue_review_ids"] == [
+        review.review_id
+    ]
+    assert context["context_packet"]["write_policy"] == "projection_only"
+    assert context["consumer_contract"]["encounter_route"] == (
+        "POST /kernel/learning-event-encounters"
+    )
+    assert encounter_log.exists() is False
+    assert [row["learning_event"]["learning_event_id"] for row in context["learning_context"]] == [
+        event.learning_event_id
+    ]
+    assert context["learning_context"][0]["outcome_links"][0]["outcome_link_id"] == (
+        link.outcome_link_id
+    )
+    assert context["learning_context"][0]["overdue_review_ids"] == [review.review_id]
+    assert [
+        candidate["metadata"]["learning_event_id"]
+        for candidate in context["work_candidates"]
+        if candidate["source"] == "learning-event-replay"
+    ] == [event.learning_event_id]
 
 
 def test_discover_open_debates_returns_valid_candidate(tmp_path: Path, monkeypatch):

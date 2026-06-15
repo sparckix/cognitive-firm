@@ -245,6 +245,7 @@ from cognitive_firm.orchestration.work_items import (
     start_work_item,
     work_item_resource,
 )
+from cognitive_firm.orchestration.work_discovery import build_role_learning_context
 
 
 @dataclass(frozen=True)
@@ -2492,6 +2493,29 @@ def dispatch_kernel_request(
                     }
                 )
             return _ok({"learning_events": [event.as_dict() for event in events]})
+
+        if method == "GET" and route == "/kernel/work-discovery":
+            try:
+                max_per_source = _query_optional_int(query, "max_per_source", default=5)
+            except ValueError as exc:
+                return _error(400, str(exc))
+            assigned_to = (
+                query.get("assigned_to", [None])[0]
+                or query.get("role", [None])[0]
+            )
+            return _ok(
+                build_role_learning_context(
+                    assigned_to=assigned_to,
+                    tenant_id=query.get("tenant_id", [None])[0],
+                    project_id=query.get("project_id", [None])[0],
+                    cue=query.get("cue", [None])[0],
+                    max_per_source=max_per_source or 5,
+                    include_work_candidates=not _query_bool(query, "learning_only"),
+                    learning_events_log_path=config.learning_events_log,
+                    outcome_links_log_path=config.outcome_links_log,
+                    routine_reviews_log_path=config.routine_reviews_log,
+                )
+            )
 
         if method == "GET" and route == "/kernel/learning-events":
             events = list_learning_events(

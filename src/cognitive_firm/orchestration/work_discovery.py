@@ -28,10 +28,12 @@ from __future__ import annotations
 import os
 import re
 import time
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR, REPO_ROOT, WORKSPACE_DIR
 from cognitive_firm.orchestration.execution_routing import infer_execution_route
@@ -53,6 +55,20 @@ class Candidate:
     age_days: Optional[float] = None
     severity: str = "info"          # info | warn | critical
     metadata: dict = field(default_factory=dict)
+
+
+def candidate_as_dict(candidate: Candidate) -> dict[str, Any]:
+    """Serialize a discovery candidate for service/userland read models."""
+    return {
+        "source": candidate.source,
+        "intent": candidate.intent,
+        "origin_path": str(candidate.origin_path) if candidate.origin_path else None,
+        "scarcity_signal": candidate.scarcity_signal,
+        "raw_text": candidate.raw_text,
+        "age_days": candidate.age_days,
+        "severity": candidate.severity,
+        "metadata": dict(candidate.metadata),
+    }
 
 
 def discover_open_todos(
@@ -747,6 +763,7 @@ def attach_learning_context(
     tenant_id: str | None = None,
     project_id: str | None = None,
     record_encounter: bool = False,
+    learning_events_log_path: Path | None = None,
 ) -> Candidate:
     """Attach approved learning events that match a discovered work item."""
     if not assigned_to or candidate.source == "learning-event-replay":
@@ -775,6 +792,7 @@ def attach_learning_context(
             tenant_id=candidate_tenant_id,
             project_id=candidate_project_id,
             cue=cue,
+            log_path=learning_events_log_path,
         )
     except Exception:  # noqa: BLE001
         return candidate
@@ -889,6 +907,7 @@ def discover_all(
     project_id: str | None = None,
     cue: str | None = None,
     record_learning_encounters: bool = False,
+    learning_events_log_path: Path | None = None,
 ) -> list[Candidate]:
     """Run all implemented discovery sources and return combined list.
 
@@ -923,6 +942,7 @@ def discover_all(
             project_id=project_id,
             cue=cue,
             max_per_source=max_per_source,
+            log_path=learning_events_log_path,
         ))
     out.extend(discover_human_work_sessions(
         assigned_to=assigned_to, max_per_source=max_per_source))
@@ -945,9 +965,136 @@ def discover_all(
             tenant_id=tenant_id,
             project_id=project_id,
             record_encounter=record_learning_encounters,
+            learning_events_log_path=learning_events_log_path,
         )
         for c in scoped
     ]
+
+
+def build_role_learning_context(
+    *,
+    assigned_to: str | None,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    cue: str | None = None,
+    max_per_source: int = 5,
+    include_work_candidates: bool = True,
+    learning_events_log_path: Path | None = None,
+    outcome_links_log_path: Path | None = None,
+    routine_reviews_log_path: Path | None = None,
+) -> dict[str, Any]:
+    """Build a read-only pre-work context projection for one role surface.
+
+    This composes existing primitives. It does not create memory, mutate
+    learning-event state, or record encounter telemetry.
+    """
+    from cognitive_firm.orchestration.learning_events import replay_learning_events
+    from cognitive_firm.orchestration.outcome_links import list_outcome_links
+    from cognitive_firm.orchestration.routine_reviews import list_routine_reviews
+
+    events = (
+        replay_learning_events(
+            role=assigned_to,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            cue=cue,
+            log_path=learning_events_log_path,
+        )
+        if assigned_to
+        else []
+    )
+    learning_context: list[dict[str, Any]] = []
+    for event in events[:max_per_source]:
+        links = list_outcome_links(
+            learning_event_id=event.learning_event_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            log_path=outcome_links_log_path,
+        )
+        reviews = list_routine_reviews(
+            learning_event_id=event.learning_event_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            log_path=routine_reviews_log_path,
+        )
+        learning_context.append({
+            "learning_event": event.as_dict(),
+            "outcome_links": [link.as_dict() for link in links],
+            "routine_reviews": [review.as_dict() for review in reviews],
+            "overdue_review_ids": [
+                review.review_id for review in reviews if review.is_overdue()
+            ],
+            "source_carrier_refs": list(event.source_carrier_refs),
+            "approval_ref": event.approval_ref,
+        })
+
+    work_candidates = (
+        discover_all(
+            assigned_to=assigned_to,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            cue=cue,
+            max_per_source=max_per_source,
+            record_learning_encounters=False,
+            learning_events_log_path=learning_events_log_path,
+        )
+        if include_work_candidates
+        else []
+    )
+    packet_basis = {
+        "assigned_to": assigned_to,
+        "tenant_id": tenant_id,
+        "project_id": project_id,
+        "cue": cue,
+        "learning_event_ids": [
+            row["learning_event"]["learning_event_id"] for row in learning_context
+        ],
+        "outcome_link_ids": [
+            link["outcome_link_id"]
+            for row in learning_context
+            for link in row["outcome_links"]
+        ],
+        "routine_review_ids": [
+            review["review_id"]
+            for row in learning_context
+            for review in row["routine_reviews"]
+        ],
+        "overdue_review_ids": [
+            review_id
+            for row in learning_context
+            for review_id in row["overdue_review_ids"]
+        ],
+        "work_candidate_refs": [_candidate_work_ref(candidate) for candidate in work_candidates],
+    }
+    packet_digest = hashlib.sha256(
+        json.dumps(packet_basis, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {
+        "assigned_to": assigned_to,
+        "tenant_id": tenant_id,
+        "project_id": project_id,
+        "cue": cue,
+        "read_only": True,
+        "context_packet": {
+            "context_packet_id": f"ctx_{packet_digest[:16]}",
+            "digest": packet_digest,
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "basis": packet_basis,
+            "write_policy": "projection_only",
+            "canonical_store": None,
+        },
+        "learning_context": learning_context,
+        "work_candidates": [candidate_as_dict(candidate) for candidate in work_candidates],
+        "consumer_contract": {
+            "read_only": True,
+            "encounter_route": "POST /kernel/learning-event-encounters",
+            "encounter_when": (
+                "Record an encounter only after this context influenced a concrete "
+                "work surface or role decision."
+            ),
+            "no_auto_application": True,
+        },
+    }
 
 
 def format_candidate_for_inbox(c: Candidate) -> str:

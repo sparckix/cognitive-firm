@@ -73,6 +73,19 @@ Before a role starts material work, the organization surface can show:
 
 The surface is a projection. It does not apply changes.
 
+The service also exposes a narrower pre-work context projection:
+
+```text
+GET /kernel/work-discovery?assigned_to=role.research_director&project_id=demo-branch&cue=same+branch+failure
+```
+
+That read joins matching approved learning events to their outcome links and
+routine-review state, then returns matching work-discovery candidates plus a
+`context_packet` digest over the exact refs/query basis. If the context changes
+a concrete work surface, the caller can cite the packet and records that
+separately as a learning-event encounter. The read route itself does not write
+memory or dispatch work.
+
 ## 5. Strategy Finding And Candidate
 
 The strategy-office interface may emit a finding:
