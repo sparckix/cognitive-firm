@@ -84,12 +84,44 @@ def compile_learning_transitions(surface: Any) -> LearningTransitionPlan:
         )
     )
     candidates.extend(_from_source_improvements(payload.get("intelligence_coverage_state") or {}))
+    candidates.extend(_from_human_work_pressure(payload.get("a2h_pressure") or []))
+    candidates.extend(_from_damage_patterns(payload.get("recent_damage_signals") or []))
+    attention_state = payload.get("attention_state") or {}
+    if isinstance(attention_state, dict):
+        candidates.extend(
+            _from_attention_signals(attention_state.get("routed_signals") or [])
+        )
 
     deduped: dict[str, LearningTransitionCandidate] = {}
     for candidate in candidates:
         deduped.setdefault(candidate.candidate_id, candidate)
     ordered = sorted(
         deduped.values(),
+        key=lambda item: (_severity_rank(item.severity), item.transition_kind, item.candidate_id),
+    )
+    return LearningTransitionPlan(n_candidates=len(ordered), candidates=ordered)
+
+
+def compile_attention_transition_candidates(
+    routed_signals: list[dict[str, Any]] | Any,
+    *,
+    stale_after_seconds: int = 3600,
+    repeated_threshold: int = 3,
+) -> LearningTransitionPlan:
+    """Compile routed attention signals into observer-only review candidates.
+
+    This read model does not reroute attention, mutate policy, or create work.
+    It turns visible attention strain into governance-review candidates so a
+    human can decide whether authority domains, actor memberships, mandates, or
+    receipt discipline need durable change.
+    """
+    candidates = _from_attention_signals(
+        routed_signals,
+        stale_after_seconds=stale_after_seconds,
+        repeated_threshold=repeated_threshold,
+    )
+    ordered = sorted(
+        {candidate.candidate_id: candidate for candidate in candidates}.values(),
         key=lambda item: (_severity_rank(item.severity), item.transition_kind, item.candidate_id),
     )
     return LearningTransitionPlan(n_candidates=len(ordered), candidates=ordered)
@@ -245,6 +277,380 @@ def _from_source_improvements(coverage_state: dict[str, Any]) -> list[LearningTr
     return candidates
 
 
+def _from_human_work_pressure(
+    pressure_groups: list[dict[str, Any]],
+) -> list[LearningTransitionCandidate]:
+    candidates: list[LearningTransitionCandidate] = []
+    for group in pressure_groups:
+        if not isinstance(group, dict):
+            continue
+        role = str(group.get("agent_counterparty_role") or "")
+        bottleneck = str(group.get("bottleneck_class") or "unknown")
+        if not role:
+            continue
+        session_ids = _string_list(group.get("session_ids") or [])
+        active_count = _int_or_zero(group.get("active_count"))
+        missing_receipt_count = _int_or_zero(group.get("missing_receipt_count"))
+        stale_count = _int_or_zero(group.get("stale_count"))
+        transition_kind = _transition_kind_for_a2h_pressure(
+            bottleneck=bottleneck,
+            active_count=active_count,
+            missing_receipt_count=missing_receipt_count,
+        )
+        candidates.append(
+            _candidate(
+                transition_kind=transition_kind,
+                severity=(
+                    "warning"
+                    if missing_receipt_count or stale_count or active_count >= 3
+                    else "info"
+                ),
+                rationale=(
+                    "Repeated A2H human-work pressure needs review before it "
+                    "changes future source, mandate, or routing behavior."
+                ),
+                source_kind="a2h_pressure",
+                object_ref=f"a2h_pressure:{role}:{bottleneck}",
+                suggested_owner_role=role,
+                review_question=_a2h_pressure_review_question(bottleneck),
+                source_refs=[f"human_work_session:{session_id}" for session_id in session_ids],
+                proposed_payload={
+                    "agent_counterparty_role": role,
+                    "bottleneck_class": bottleneck,
+                    "active_count": active_count,
+                    "waiting_count": _int_or_zero(group.get("waiting_count")),
+                    "missing_receipt_count": missing_receipt_count,
+                    "stale_count": stale_count,
+                    "session_ids": session_ids,
+                    "recommendation": group.get("recommendation"),
+                    "allowed_next_steps": _a2h_pressure_allowed_next_steps(bottleneck),
+                    "boundary": (
+                        "observer-only pressure candidate; does not automate, "
+                        "reroute, or close human work"
+                    ),
+                },
+            )
+        )
+    return candidates
+
+
+def _from_damage_patterns(
+    signals: Any,
+    *,
+    repeated_threshold: int = 2,
+) -> list[LearningTransitionCandidate]:
+    rows = [
+        dict(row)
+        for row in _list_or_empty(signals)
+        if isinstance(row, dict) and row.get("kind")
+    ]
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        groups.setdefault(str(row.get("kind") or "unknown"), []).append(row)
+
+    candidates: list[LearningTransitionCandidate] = []
+    for kind, group in groups.items():
+        severities = {str(row.get("severity") or "warn").lower() for row in group}
+        has_critical = "critical" in severities
+        if len(group) < repeated_threshold and not has_critical:
+            continue
+        source_refs = [_damage_source_ref(row) for row in group]
+        candidates.append(
+            _candidate(
+                transition_kind="mandate_review",
+                severity="blocking" if has_critical else "warning",
+                rationale=(
+                    "Repeated or critical damage signals are accumulating; "
+                    "review whether a mandate, route policy, routine, or "
+                    "accountability case is warranted."
+                ),
+                source_kind="damage_pattern",
+                object_ref=f"damage_pattern:{kind}",
+                suggested_owner_role="role.manager",
+                review_question=(
+                    "Is this damage pattern a one-off observation, evidence "
+                    "for an accountability case, a mandate/route-policy gap, "
+                    "or an accepted-risk decision?"
+                ),
+                source_refs=source_refs,
+                proposed_payload={
+                    "damage_kind": kind,
+                    "signal_count": len(group),
+                    "sources": sorted(
+                        {
+                            str(row.get("source"))
+                            for row in group
+                            if row.get("source")
+                        }
+                    ),
+                    "severities": sorted(severities),
+                    "session_ids": sorted(
+                        {
+                            str(row.get("session_id"))
+                            for row in group
+                            if row.get("session_id")
+                        }
+                    ),
+                    "allowed_next_steps": [
+                        "accountability_case_review",
+                        "mandate_review",
+                        "route_policy_review",
+                        "routine_retirement_review",
+                        "accepted_risk_review",
+                    ],
+                    "boundary": (
+                        "observer-only immune-response candidate; does not "
+                        "quarantine, block, reroute, or create an "
+                        "accountability case"
+                    ),
+                },
+            )
+        )
+    return candidates
+
+
+def _damage_source_ref(row: dict[str, Any]) -> str:
+    if row.get("signal_id"):
+        return f"damage_signal:{row['signal_id']}"
+    timestamp = str(row.get("timestamp_utc") or "").strip()
+    source = str(row.get("source") or "unknown_source").strip()
+    kind = str(row.get("kind") or "unknown").strip()
+    if timestamp:
+        return f"damage_signal:{source}:{kind}:{timestamp}"
+    return f"damage_signal:{source}:{kind}"
+
+
+def _transition_kind_for_a2h_pressure(
+    *,
+    bottleneck: str,
+    active_count: int,
+    missing_receipt_count: int,
+) -> str:
+    normalized = bottleneck.lower()
+    if missing_receipt_count and active_count < 3:
+        return "human_work_session"
+    if normalized == "access":
+        return "source_repair"
+    if normalized in {"authority", "safety"}:
+        return "route_policy_change"
+    return "mandate_review"
+
+
+def _a2h_pressure_review_question(bottleneck: str) -> str:
+    normalized = bottleneck.lower()
+    if normalized in {"access", "labor", "cognition"}:
+        return (
+            "Should this repeated human-work pressure become source repair, "
+            "tooling support, mandate review, or an intentionally preserved "
+            "human boundary?"
+        )
+    if normalized in {"authority", "safety"}:
+        return (
+            "Should future routing preserve this human boundary, batch review, "
+            "or require a stricter escalation policy?"
+        )
+    return (
+        "Should this human-work pressure change future review cadence, "
+        "mandate wording, or receipt discipline?"
+    )
+
+
+def _a2h_pressure_allowed_next_steps(bottleneck: str) -> list[str]:
+    normalized = bottleneck.lower()
+    if normalized in {"access", "labor", "cognition"}:
+        return ["source_repair", "tooling_support", "mandate_review", "preserve_boundary"]
+    if normalized in {"authority", "safety"}:
+        return ["preserve_boundary", "batch_review", "route_policy_review"]
+    return ["mandate_review", "receipt_discipline", "preserve_boundary"]
+
+
+def _from_attention_signals(
+    routed_signals: Any,
+    *,
+    stale_after_seconds: int = 3600,
+    repeated_threshold: int = 3,
+) -> list[LearningTransitionCandidate]:
+    candidates: list[LearningTransitionCandidate] = []
+    rows = [_attention_row(row) for row in _list_or_empty(routed_signals)]
+    actionable_rows = [
+        row
+        for row in rows
+        if row.get("signal_class") in {"governance_interrupt", "work_interrupt"}
+    ]
+    for row in actionable_rows:
+        signal_id = str(row.get("signal_id") or "")
+        source_ref = str(row.get("source_ref") or f"attention_signal:{signal_id}")
+        target_actor = str(row.get("target_actor_id") or "")
+        target_role = str(row.get("target_role_id") or "")
+        signal_class = str(row.get("signal_class") or "")
+        urgency = str(row.get("urgency") or "")
+        age_seconds = _int_or_zero(row.get("age_seconds"))
+        if not target_actor:
+            candidates.append(
+                _candidate(
+                    transition_kind=_attention_unrouted_transition_kind(signal_class),
+                    severity="warning" if urgency != "informational" else "info",
+                    rationale=(
+                        "A routed attention signal has no target actor; review "
+                        "authority domains, actor memberships, or assignment "
+                        "rules before changing future routing."
+                    ),
+                    source_kind="attention_unrouted_signal",
+                    object_ref=f"attention_signal:{signal_id}",
+                    suggested_owner_role=target_role or "role.manager",
+                    review_question=(
+                        "Who should be accountable for this class of attention "
+                        "signal, and is a scoped authority or membership record "
+                        "missing?"
+                    ),
+                    source_refs=[source_ref],
+                    proposed_payload={
+                        "signal_id": signal_id,
+                        "signal_class": signal_class,
+                        "urgency": urgency,
+                        "pace_layer": row.get("pace_layer"),
+                        "primary_action": row.get("primary_action"),
+                        "target_role_id": target_role or None,
+                        "target_actor_id": None,
+                        "headline": row.get("headline"),
+                        "boundary": (
+                            "observer-only attention candidate; does not "
+                            "reroute, page, assign, or close work"
+                        ),
+                    },
+                )
+            )
+        if age_seconds >= stale_after_seconds and urgency != "informational":
+            candidates.append(
+                _candidate(
+                    transition_kind=_attention_stale_transition_kind(signal_class),
+                    severity="warning",
+                    rationale=(
+                        "A routed attention signal is stale; review whether "
+                        "future signals should be batched, sampled, escalated, "
+                        "or supported with better receipt discipline."
+                    ),
+                    source_kind="attention_stale_signal",
+                    object_ref=f"attention_signal:{signal_id}",
+                    suggested_owner_role=target_role or "role.manager",
+                    review_question=(
+                        "Is this stale signal a one-off delay, a missing "
+                        "receipt, or evidence that the routing policy/mandate "
+                        "needs review?"
+                    ),
+                    source_refs=[source_ref],
+                    proposed_payload={
+                        "signal_id": signal_id,
+                        "signal_class": signal_class,
+                        "urgency": urgency,
+                        "age_seconds": age_seconds,
+                        "stale_after_seconds": stale_after_seconds,
+                        "target_role_id": target_role or None,
+                        "target_actor_id": target_actor or None,
+                        "boundary": (
+                            "observer-only attention candidate; does not "
+                            "reroute, page, assign, or close work"
+                        ),
+                    },
+                )
+            )
+
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for row in actionable_rows:
+        key = (
+            str(row.get("target_role_id") or "unresolved_role"),
+            str(row.get("signal_class") or "unknown"),
+            str(row.get("urgency") or "unknown"),
+        )
+        groups.setdefault(key, []).append(row)
+    for (target_role, signal_class, urgency), group in groups.items():
+        if len(group) < repeated_threshold:
+            continue
+        source_refs = [
+            str(row.get("source_ref") or f"attention_signal:{row.get('signal_id')}")
+            for row in group
+        ]
+        candidates.append(
+            _candidate(
+                transition_kind=_attention_pressure_transition_kind(signal_class),
+                severity="warning" if urgency != "informational" else "info",
+                rationale=(
+                    "Repeated attention pressure is accumulating for one role "
+                    "and signal class; review whether durable routing, mandate, "
+                    "or receipt changes are warranted."
+                ),
+                source_kind="attention_pressure",
+                object_ref=f"attention_pressure:{target_role}:{signal_class}:{urgency}",
+                suggested_owner_role=None if target_role == "unresolved_role" else target_role,
+                review_question=(
+                    "Should this repeated attention pressure change future "
+                    "routing cadence, mandate wording, staffing/membership, "
+                    "or stay intentionally human-reviewed?"
+                ),
+                source_refs=source_refs,
+                proposed_payload={
+                    "target_role_id": None if target_role == "unresolved_role" else target_role,
+                    "signal_class": signal_class,
+                    "urgency": urgency,
+                    "signal_count": len(group),
+                    "signal_ids": [str(row.get("signal_id") or "") for row in group],
+                    "target_actor_ids": sorted(
+                        {
+                            str(row.get("target_actor_id"))
+                            for row in group
+                            if row.get("target_actor_id")
+                        }
+                    ),
+                    "primary_actions": sorted(
+                        {
+                            str(row.get("primary_action"))
+                            for row in group
+                            if row.get("primary_action")
+                        }
+                    ),
+                    "repeated_threshold": repeated_threshold,
+                    "boundary": (
+                        "observer-only attention candidate; does not reroute, "
+                        "page, assign, or close work"
+                    ),
+                },
+            )
+        )
+    return candidates
+
+
+def _attention_row(row: Any) -> dict[str, Any]:
+    if hasattr(row, "as_dict"):
+        return dict(row.as_dict())
+    if isinstance(row, dict):
+        return dict(row)
+    return {}
+
+
+def _list_or_empty(payload: Any) -> list[Any]:
+    return payload if isinstance(payload, list) else []
+
+
+def _attention_unrouted_transition_kind(signal_class: str) -> str:
+    if signal_class == "work_interrupt":
+        return "human_work_session"
+    return "route_policy_change"
+
+
+def _attention_stale_transition_kind(signal_class: str) -> str:
+    if signal_class == "work_interrupt":
+        return "human_work_session"
+    return "mandate_review"
+
+
+def _attention_pressure_transition_kind(signal_class: str) -> str:
+    if signal_class == "work_interrupt":
+        return "human_work_session"
+    if signal_class == "governance_interrupt":
+        return "route_policy_change"
+    return "mandate_review"
+
+
 def _candidate(
     *,
     transition_kind: str,
@@ -302,6 +708,13 @@ def _string_list(payload: Any) -> list[str]:
     if payload:
         return [str(payload)]
     return []
+
+
+def _int_or_zero(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _severity_rank(severity: str) -> int:

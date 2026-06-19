@@ -130,20 +130,42 @@ surfaces:
 GET  /kernel/learning-events
 GET  /kernel/learning-events/replay?role=role.manager&tenant_id=tenant-a&cue=...
 GET  /kernel/learning-events/replay?source_ref=multi_agent_attribution:packet_1
+GET  /kernel/learning-events/replay?cue_signature=formal_verification.provider_payload&resource_ref=formal_provider:trusted_checker
 GET  /kernel/learning-events/replay?tag=trace_attribution
 GET  /kernel/learning-events/summary
+GET  /kernel/learning-events/{learning_event_id}/loop
 GET  /kernel/work-discovery?assigned_to=role.manager&tenant_id=tenant-a&cue=...
+GET  /kernel/work-discovery?cue_signature=...&resource_ref=...&topology_ref=...
+POST /kernel/work-discovery/context-packet/verify
 POST /kernel/learning-event-encounters
 ```
 
 `GET /kernel/learning-events/replay` is read-only and deterministic. It returns
 active approved events that match role, tenant/project scope, exact refs,
-explicit tags, and lexical cue.
+explicit tags, lexical cue, and exact structured metadata filters. Supported
+structured filters are `cue_signature`, repeated `resource_ref`, and repeated
+`topology_ref`; they match learning-event `metadata.cue_signature(s)`,
+`metadata.resource_ref(s)`, and `metadata.topology_ref(s)`. `metadata.negative_cue(s)`
+can exclude a lexical or signature match.
 `GET /kernel/work-discovery` is the broader pre-work context projection. It
 returns those same matching events, joins each event to outcome links and
-routine-review state, includes matching discovery candidates, and returns a
-`context_packet` digest over the exact refs/query basis. It is still read-only;
-it does not record a learning encounter.
+routine-review state, includes matching discovery candidates when a role/office
+selector is present, and returns a `context_packet` digest over the exact
+refs/query basis. It is still read-only; it does not record a learning
+encounter.
+`POST /kernel/work-discovery/context-packet/verify` and
+`cognitive-firm-userland context-packet-verify <json>` recompute a captured
+packet digest from its embedded `basis` and check the `ctx_...` id. They are
+digest-only integrity checks; they do not replay live logs or prove that a
+packet is still current.
+`cognitive-firm-userland work-context --assigned-to ... --cue ...` renders that
+projection for terminal users.
+For non-role substrates, `work-context --cue-signature ... --resource-ref ...
+--topology-ref ...` can retrieve exact approved learning for a tool, verifier,
+state surface, or memory shard without creating a durable role office. No-role
+structured queries stay learning-only by default: generic work candidates are
+not folded into the packet basis. These filters are selectors only; they do not
+rank work, dispatch work, or apply the learning event.
 `POST /kernel/learning-event-encounters` records whether a later work surface
 encountered, applied, ignored, or deferred an approved event. The service
 rejects encounter telemetry for an unknown learning event id, so usage rows do
@@ -151,6 +173,27 @@ not drift away from approved learning state.
 `applied` is a learning-use receipt and requires `work_ref`, `evidence_refs`, or
 `context_packet_ref`. `ignored` and `deferred` require `reason`. This keeps
 non-application legitimate while making it auditable.
+When callers still have the captured packet, they can submit it as
+`context_packet` on `POST /kernel/learning-event-encounters` or use
+`cognitive-firm-userland learning-use --context-packet-json <json>`. The
+service verifies the digest and requires the packet basis to include the target
+learning event. A bare `context_packet_ref` remains accepted for compatibility,
+but the JSON path is the stronger receipt. Accepted JSON-backed rows include a
+metadata marker and digest so later projections can distinguish them from bare
+packet-ref telemetry without storing the packet.
+Adapters and scripts that are not using the HTTP service can call
+`verify_learning_event_context_packet_use(...)` for the same read-only
+invariant. It checks packet integrity and basis membership only; it does not
+replay logs, apply learning, authorize work, or write state.
+`cognitive-firm-userland learning-use ...` is the CLI carrier for that receipt;
+it preserves the same validation instead of inferring application from
+discovery.
+`GET /kernel/learning-events/{id}/loop` and
+`cognitive-firm-userland learning-loop <id>` provide a read-only loop view for
+one approved learning event: source evidence, future context selectors,
+context-packet refs, verified context-packet refs, encounters, outcome verdict
+coverage, routine reviews, overdue review ids, and a recommendation. It is a
+dashboard projection, not a memory store or automatic promotion path.
 
 ## Compounding
 

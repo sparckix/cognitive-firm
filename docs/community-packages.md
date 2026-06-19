@@ -89,7 +89,9 @@ org will treat as trusted evidence and what proof artifacts must accompany
 them. The operator still configures the provider public key before signed
 payloads can clear without caveats. This keeps executable checker code outside
 the kernel while still making adoption inspectable and reversible through the
-package manager.
+package manager. `make formal-provider-proof-pack` packages the overlay
+manifest, conformance config, trust policy, signed-provider happy path, and
+missing-evidence caveat path into one adoption receipt.
 
 ## Authoring a package
 
@@ -126,4 +128,6 @@ adapter-policy package. It installs only `adapters/` and
 `adapter_conformance/` declarations: the adapter manifest, required fixture
 checks, and the boundary statement that LangGraph owns graph execution while
 cognitive-firm owns the organizational projection. It is intentionally
-authority-neutral and should pass `preview-overlay` without a proposal.
+authority-neutral and should pass `preview-overlay` without a proposal. Run
+`make langgraph-adapter-policy-preview` for a no-cost proof against a temporary
+starter org.

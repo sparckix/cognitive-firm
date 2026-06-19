@@ -125,6 +125,131 @@ def test_kernel_service_creates_and_updates_a2h_human_work(tmp_path: Path):
     assert surface.payload["surface"]["counts"]["a2h_followup_sessions"] == 1
 
 
+def test_kernel_service_exposes_human_speed_envelope() -> None:
+    response = dispatch_kernel_request(
+        "GET",
+        (
+            "/kernel/human-speed-envelope?"
+            "risk_tier=irreversible&"
+            "bottleneck_class=authority&"
+            "deployment_class=external_write&"
+            "reversible=false&"
+            "external_side_effect=true"
+        ),
+    )
+
+    assert response.status == 200
+    envelope = response.payload["envelope"]
+    assert envelope["schema"] == "human_speed_envelope.v1"
+    assert envelope["speed_class"] == "gate_before_action"
+    assert envelope["required_record"] == "policy_decision_or_gate_plus_lease"
+    assert envelope["gate_required"] is True
+    assert envelope["boundary"]["does_not_dispatch_work"] is True
+    assert response.payload["read_only"] is True
+
+
+def test_kernel_service_lists_leases_and_resource_projection(tmp_path: Path):
+    config = KernelServiceConfig(leases_log=tmp_path / "leases.jsonl")
+    actor_context = {
+        "actor_id": "human.principal",
+        "actor_kind": "human",
+        "role_id": "role.principal",
+    }
+
+    acquired = dispatch_kernel_request(
+        "POST",
+        "/kernel/leases",
+        {
+            "resource_ref": "governance_change:gcp_list:decision",
+            "ttl_seconds": 60,
+            "purpose": "service route list regression",
+            "actor_context": actor_context,
+        },
+        config=config,
+    )
+    assert acquired.status == 201
+    lease_id = acquired.payload["lease"]["lease_id"]
+
+    listed = dispatch_kernel_request(
+        "GET",
+        "/kernel/leases?resource_ref=governance_change:gcp_list%3Adecision&state=active",
+        config=config,
+    )
+    assert listed.status == 200
+    assert [lease["lease_id"] for lease in listed.payload["leases"]] == [lease_id]
+    assert listed.payload["leases"][0]["state"] == "active"
+    assert listed.payload["leases"][0]["held_by_actor_id"] == "human.principal"
+
+    resources = dispatch_kernel_request(
+        "GET",
+        "/kernel/leases?resource=true",
+        config=config,
+    )
+    assert resources.status == 200
+    resource = resources.payload["leases"][0]
+    assert resource["kind"] == "Lease"
+    assert resource["metadata"]["resource_id"] == lease_id
+    assert resource["metadata"]["labels"]["resource_ref"] == "governance_change:gcp_list:decision"
+
+
+def test_kernel_service_records_structured_human_work_receipt(tmp_path: Path):
+    config = KernelServiceConfig(
+        human_work_log=tmp_path / "human_work.jsonl",
+        accountability_cases_log=tmp_path / "accountability_cases.jsonl",
+        actor_identity_log=tmp_path / "actors.jsonl",
+        leases_log=tmp_path / "leases.jsonl",
+    )
+    created = dispatch_kernel_request(
+        "POST",
+        "/kernel/human-work",
+        {
+            "coordination_pattern": "a2h_work_request",
+            "requested_by": "role.reviewer",
+            "human_actor": "principal",
+            "objective": "Review the agent-generated release note.",
+            "work_mode": "judgment",
+            "bottleneck_class": "cognition",
+            "human_deliverable": "accept, reject, or request changes",
+            "artifact_refs": ["artifact://agent-output/release-note"],
+        },
+        config=config,
+    )
+    session_id = created.payload["session"]["session_id"]
+
+    receipt = dispatch_kernel_request(
+        "POST",
+        f"/kernel/human-work/{session_id}/receipt",
+        {
+            "actor": "principal",
+            "summary": "Accepted after checking the claims against the diff.",
+            "receipt_type": "artifact_ref",
+            "subject_refs": [
+                "artifact://agent-output/release-note",
+                "action_attestation:aat_release_note",
+            ],
+            "artifact_refs": ["artifact://human-review/release-note-accepted"],
+            "confidence": "high",
+            "observability": "digital_artifact",
+            "metadata": {"review_decision": "accepted"},
+        },
+        config=config,
+    )
+
+    assert receipt.status == 201
+    session = receipt.payload["session"]
+    assert session["receipt_type"] == "artifact_ref"
+    assert session["confidence"] == "high"
+    assert session["sample_for_review"] is False
+    assert session["work_receipts"][0]["subject_refs"] == [
+        "artifact://agent-output/release-note",
+        "action_attestation:aat_release_note",
+    ]
+    assert session["work_receipts"][0]["artifact_refs"] == [
+        "artifact://human-review/release-note-accepted"
+    ]
+    assert session["work_receipts"][0]["metadata"]["review_decision"] == "accepted"
+
+
 def test_kernel_service_blocks_receipt_required_integration_without_receipt(tmp_path: Path):
     config = KernelServiceConfig(
         human_work_log=tmp_path / "human_work.jsonl",
@@ -886,6 +1011,7 @@ def test_kernel_service_routes_governance_change_lifecycle(tmp_path: Path):
     config = KernelServiceConfig(
         org_dir=tmp_path / "org",
         transition_log=tmp_path / "transitions.jsonl",
+        outcome_links_log=tmp_path / "outcome_links.jsonl",
     )
 
     created = dispatch_kernel_request(
@@ -938,6 +1064,28 @@ def test_kernel_service_routes_governance_change_lifecycle(tmp_path: Path):
     ]
     assert filtered.payload["proposals"][0]["decided"] is False
 
+    review_view = dispatch_kernel_request(
+        "GET",
+        (
+            "/kernel/governance-changes"
+            "?status=review_ready&view=review"
+            "&tenant_id=tenant-a&project_id=project-alpha"
+        ),
+        config=config,
+    )
+    assert review_view.status == 200
+    review_row = review_view.payload["proposals"][0]
+    assert review_view.payload["view"] == "review"
+    assert review_view.payload["read_only"] is True
+    assert review_row["proposal_id"] == proposal_id
+    assert review_row["review_state"] == "awaiting_review"
+    assert review_row["evidence_status"] == "pass"
+    assert review_row["missing_evidence"] == []
+    assert review_row["failed_invariants"] == []
+    assert review_row["decision_route"].endswith(
+        f"/kernel/governance-changes/{proposal_id}/decision"
+    )
+
     listed_resources = dispatch_kernel_request(
         "GET", "/kernel/governance-changes?resource=true", config=config
     )
@@ -955,6 +1103,35 @@ def test_kernel_service_routes_governance_change_lifecycle(tmp_path: Path):
         "Clarify evaluator escalation authority"
     )
 
+    fetched_review = dispatch_kernel_request(
+        "GET", f"/kernel/governance-changes/{proposal_id}?view=review", config=config
+    )
+    assert fetched_review.status == 200
+    assert fetched_review.payload["proposal"]["review_state"] == "awaiting_review"
+
+    review_packet = dispatch_kernel_request(
+        "GET",
+        f"/kernel/governance-changes/{proposal_id}/review-packet?event_limit=3",
+        config=config,
+    )
+    assert review_packet.status == 200
+    packet = review_packet.payload["packet"]
+    assert packet["packet_kind"] == "governance_change_review_handoff"
+    assert packet["read_only"] is True
+    assert packet["projection_only"] is True
+    assert packet["review"]["proposal_id"] == proposal_id
+    assert packet["review"]["review_state"] == "awaiting_review"
+    assert packet["provenance_report"]["query"]["ref"] == f"governance_change:{proposal_id}"
+    assert packet["provenance_report"]["summary"]["event_count"] >= 1
+    assert packet["follow_through"]["status"] == "proposal_only"
+    assert packet["follow_through"]["decision_events"] == 0
+    assert "## Follow-Through" in packet["markdown"]
+    assert any(
+        row["ref"] == "work:review-42"
+        for row in packet["evidence_refs"]
+    )
+    assert "# Governance Change Review Packet" in packet["markdown"]
+
     decided = dispatch_kernel_request(
         "POST",
         f"/kernel/governance-changes/{proposal_id}/decision",
@@ -971,12 +1148,41 @@ def test_kernel_service_routes_governance_change_lifecycle(tmp_path: Path):
     )
     assert decided.status == 200
     assert decided.payload["result"]["decided_by"] == "human.principal"
+    create_outcome_link(
+        change_ref=f"governance_change:{proposal_id}",
+        change_kind="governance_change",
+        metric_name="handoff_rework_rate",
+        metric_unit="ratio",
+        created_by="role.principal",
+        tenant_id="tenant-a",
+        project_id="project-alpha",
+        log_path=config.outcome_links_log,
+    )
 
     fetched = dispatch_kernel_request(
         "GET", f"/kernel/governance-changes/{proposal_id}", config=config
     )
     assert fetched.status == 200
     assert fetched.payload["proposal"]["decided"] is True
+
+    decided_review = dispatch_kernel_request(
+        "GET", f"/kernel/governance-changes/{proposal_id}?view=review", config=config
+    )
+    assert decided_review.status == 200
+    assert decided_review.payload["proposal"]["decided"] is True
+    assert decided_review.payload["proposal"]["review_state"] == "decided"
+
+    decided_packet = dispatch_kernel_request(
+        "GET",
+        f"/kernel/governance-changes/{proposal_id}/review-packet?event_limit=8",
+        config=config,
+    )
+    assert decided_packet.status == 200
+    follow = decided_packet.payload["packet"]["follow_through"]
+    assert follow["status"] == "closed_loop_observed"
+    assert follow["decision_events"] == 1
+    assert follow["outcome_links"] == 1
+    assert f"governance_change:{proposal_id}" in follow["latest_refs"]
 
     duplicate = dispatch_kernel_request(
         "POST",
@@ -1251,6 +1457,85 @@ def test_kernel_service_opens_predicted_mutation_outcome_link_from_approved_prop
     )
 
 
+def test_governance_decision_route_honors_required_mutation_lease(
+    tmp_path: Path,
+) -> None:
+    config = KernelServiceConfig(
+        org_dir=tmp_path / "org",
+        transition_log=tmp_path / "transitions.jsonl",
+        leases_log=tmp_path / "leases.jsonl",
+        require_leases=True,
+    )
+    created = dispatch_kernel_request(
+        "POST",
+        "/kernel/governance-changes",
+        {
+            "proposal_id": "gcp_lease_decision",
+            "change_kind": "role_change",
+            "title": "Require fenced approval",
+            "proposed_by": "role.manager",
+            "target_ref": "org/roles/manager.yaml",
+            "rationale": "Decision writes should honor mutation leases.",
+            "source_refs": ["test://lease-decision"],
+            "expected_behavior_change": "Approvals require an active lease.",
+            "risk_summary": "Prevents unfenced approval writes.",
+            "rollback_plan": "Disable require_leases for local-only tests.",
+            "invariant_checks": _passing_governance_checks(),
+        },
+        config=KernelServiceConfig(
+            org_dir=config.org_dir,
+            transition_log=config.transition_log,
+            leases_log=config.leases_log,
+        ),
+    )
+    assert created.status == 201
+
+    actor_context = {
+        "actor_id": "human.principal",
+        "actor_kind": "human",
+        "role_id": "role.principal",
+    }
+    missing = dispatch_kernel_request(
+        "POST",
+        "/kernel/governance-changes/gcp_lease_decision/decision",
+        {
+            "decision": "approve",
+            "reason": "No lease yet.",
+            "actor_context": actor_context,
+        },
+        config=config,
+    )
+    assert missing.status == 400
+    assert "lease required" in missing.payload["error"]
+
+    lease = dispatch_kernel_request(
+        "POST",
+        "/kernel/leases",
+        {
+            "resource_ref": "governance_change:gcp_lease_decision:decision",
+            "ttl_seconds": 60,
+            "actor_context": actor_context,
+        },
+        config=config,
+    )
+    assert lease.status == 201
+
+    approved = dispatch_kernel_request(
+        "POST",
+        "/kernel/governance-changes/gcp_lease_decision/decision",
+        {
+            "decision": "approve",
+            "reason": "Lease evidence present.",
+            "actor_context": actor_context,
+            "lease_id": lease.payload["lease"]["lease_id"],
+            "fencing_token": lease.payload["lease"]["fencing_token"],
+        },
+        config=config,
+    )
+    assert approved.status == 200
+    assert approved.payload["result"]["decided_by"] == "human.principal"
+
+
 def test_kernel_service_records_action_impact_policy_evaluation_and_promotion_packet(
     tmp_path: Path,
 ) -> None:
@@ -1391,6 +1676,16 @@ def test_kernel_service_records_action_impact_policy_evaluation_and_promotion_pa
         "applied_policy": False,
         "executed_runtime": False,
     }
+
+    review = dispatch_kernel_request(
+        "GET",
+        "/kernel/governance-changes/gcp_enterprise_review_policy?view=review",
+        config=config,
+    )
+    assert review.status == 200
+    proof = review.payload["proposal"]["proof_obligations"]
+    assert proof["status"] == "satisfied"
+    assert proof["formal_verification_refs"] == ["formal_verification:fver_policy_boundary"]
 
     approved = dispatch_kernel_request(
         "POST",
@@ -2281,6 +2576,66 @@ def test_kernel_service_routes_execution_evidence_into_learning_path(tmp_path: P
     assert [proposal["proposal_id"] for proposal in proposals.payload["proposals"]] == [
         payload["proposal"]["proposal_id"]
     ]
+
+
+def test_kernel_service_builds_governed_action_composition_packet_read_only(
+    tmp_path: Path,
+) -> None:
+    config = KernelServiceConfig(
+        org_dir=tmp_path / "org",
+        require_leases=True,
+    )
+
+    response = dispatch_kernel_request(
+        "POST",
+        "/kernel/governed-action-composition",
+        {
+            "action_label": "first gated action",
+            "profile": "first_gated_action",
+            "observed_result": {
+                "bundle_validation": {"ok": True},
+                "summary": {
+                    "verdict": "passed",
+                    "run_id": "run_1",
+                    "bundle_id": "gab_1",
+                    "bundle_digest": "sha256:" + "a" * 64,
+                    "authority_snapshot": {
+                        "status": "resolved",
+                        "role_ref": "org/roles/analyst.yaml",
+                        "mandate_ref": "org/mandates/analyst.md",
+                        "mandate_hash": "abc123",
+                    },
+                    "ids": {
+                        "action_attestations": ["aat_1"],
+                        "human_work_sessions": ["hws_1"],
+                        "outcome_links": ["olink_1"],
+                        "work_items": ["work_1"],
+                    },
+                },
+                "work_item": {"status": "done", "work_id": "work_1"},
+            },
+        },
+        config=config,
+    )
+
+    assert response.status == 200
+    packet = response.payload["composition_packet"]
+    assert packet["schema"] == "governed_action_composition_packet.v1"
+    assert packet["status"] == "ready_for_review"
+    assert packet["summary"]["required_blockers"] == 0
+    assert packet["boundary"]["does_not_mutate_kernel_state"] is True
+
+    malformed = dispatch_kernel_request(
+        "POST",
+        "/kernel/governed-action-composition",
+        {
+            "action_label": "first gated action",
+            "observed_result": "not-json-object",
+        },
+        config=config,
+    )
+    assert malformed.status == 400
+    assert "observed_result must be an object" in malformed.payload["error"]
 
 
 def test_kernel_service_routes_execution_evidence_with_single_outer_lease(
@@ -4231,6 +4586,35 @@ def test_kernel_service_routes_the_durable_learning_layer(tmp_path: Path):
         encounter.payload["encounter"]["context_packet_ref"]
         == work_context.payload["context_packet"]["context_packet_id"]
     )
+    loop = dispatch_kernel_request(
+        "GET",
+        f"/kernel/learning-events/{event.learning_event_id}/loop",
+        config=config,
+    )
+    assert loop.status == 200
+    learning_loop = loop.payload["learning_loop"]
+    assert learning_loop["read_only"] is True
+    assert learning_loop["loop_state"] == "awaiting_outcome_verdict"
+    assert learning_loop["learned"]["decision_use"] == (
+        "Require reviewer handoff when a similar queue stalls."
+    )
+    assert learning_loop["future_context"]["context_packet_refs"] == [
+        work_context.payload["context_packet"]["context_packet_id"]
+    ]
+    assert learning_loop["future_context"]["verified_context_packet_refs"] == []
+    assert learning_loop["encounter_counts"]["applied"] == 1
+    assert learning_loop["outcome_link_count"] == 1
+    assert learning_loop["routine_review_count"] == 1
+    assert learning_loop["overdue_review_ids"] == [context_review.review_id]
+    assert context_link.outcome_link_id in learning_loop["evidence_refs"]
+
+    missing_loop = dispatch_kernel_request(
+        "GET",
+        "/kernel/learning-events/learn_missing/loop",
+        config=config,
+    )
+    assert missing_loop.status == 404
+
     missing_encounter = dispatch_kernel_request(
         "POST",
         "/kernel/learning-event-encounters",
@@ -4247,6 +4631,8 @@ def test_kernel_service_routes_the_durable_learning_layer(tmp_path: Path):
     )
     assert learning_summary.status == 200
     assert learning_summary.payload["summary"]["active"] == 1
+
+
     assert learning_summary.payload["summary"]["encounter_counts"]["applied"] == 1
 
     # Outcome link: open, measure baseline + post, record a verdict.
@@ -4452,6 +4838,8 @@ def test_kernel_service_routes_the_durable_learning_layer(tmp_path: Path):
     )
     assert holder.status == 200
     assert holder.payload["holder"]["holder_role"] == "role.project_lead"
+    assert holder.payload["holder_resolution"]["source"] == "residual_right_assignment"
+    assert holder.payload["holder_resolution"]["authoritative_for_decision_recording"] is True
     residual = dispatch_kernel_request(
         "POST",
         "/kernel/residual-decisions",
@@ -4466,3 +4854,210 @@ def test_kernel_service_routes_the_durable_learning_layer(tmp_path: Path):
     )
     assert residual.status == 201
     assert residual.payload["residual_decision"]["unauthorized"] is False
+
+
+def test_kernel_service_residual_holder_projects_authority_domain(
+    tmp_path: Path,
+):
+    domains = tmp_path / "authority_domains" / "authority_domains.json"
+    domains.parent.mkdir(parents=True)
+    domains.write_text(
+        json.dumps(
+            {
+                "authority_domains": [
+                    {
+                        "domain_id": "policy_decisions",
+                        "authority_role_id": "role.policy_authority",
+                        "scope_kind": "decision_class",
+                        "scope_id": "policy_change",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = KernelServiceConfig(
+        org_dir=tmp_path,
+        residual_rights_log=tmp_path / "residual_rights.jsonl",
+        actor_membership_log=tmp_path / "memberships.jsonl",
+    )
+
+    response = dispatch_kernel_request(
+        "GET",
+        "/kernel/residual-rights/holder?scope_kind=decision_class&scope_ref=policy_change",
+        config=config,
+    )
+
+    assert response.status == 200
+    assert response.payload["holder"] is None
+    assert response.payload["holder_resolution"]["source"] == "authority_domain"
+    assert response.payload["holder_resolution"]["holder_role"] == "role.policy_authority"
+    assert response.payload["holder_resolution"]["authority_domain_id"] == "policy_decisions"
+    assert response.payload["holder_resolution"]["projection_only"] is True
+    assert (
+        response.payload["holder_resolution"]["authoritative_for_decision_recording"]
+        is False
+    )
+    assert response.payload["boundary"]["authority_domain_fallback"] == "projection_only"
+    assert response.payload["boundary"]["creates_residual_right_assignment"] is False
+
+
+def test_kernel_work_discovery_accepts_structured_context_filters_without_role(
+    tmp_path: Path,
+):
+    config = KernelServiceConfig(
+        learning_events_log=tmp_path / "learning_events.jsonl",
+        learning_encounters_log=tmp_path / "learning_encounters.jsonl",
+        outcome_links_log=tmp_path / "outcome_links.jsonl",
+        routine_reviews_log=tmp_path / "routine_reviews.jsonl",
+    )
+    event = create_learning_event(
+        learning_unit_kind="routine_change",
+        decision_use="Check provider proof evidence before trusting verifier output.",
+        future_application_cue="formal verifier provider payload",
+        approved_by="role.manager",
+        approval_ref="review/learning/provider-proof",
+        tenant_id="tenant-a",
+        metadata={
+            "cue_signatures": ["formal_verification.provider_payload"],
+            "resource_refs": ["formal_provider:trusted_checker"],
+            "topology_refs": ["state_surface:formal_verifications"],
+        },
+        log_path=config.learning_events_log,
+    )
+
+    response = dispatch_kernel_request(
+        "GET",
+        (
+            "/kernel/work-discovery?tenant_id=tenant-a"
+            "&cue_signature=formal_verification.provider_payload"
+            "&resource_ref=formal_provider:trusted_checker"
+            "&topology_ref=state_surface:formal_verifications"
+        ),
+        config=config,
+    )
+
+    assert response.status == 200
+    assert response.payload["assigned_to"] is None
+    assert response.payload["cue_signature"] == "formal_verification.provider_payload"
+    assert response.payload["resource_refs"] == ["formal_provider:trusted_checker"]
+    assert response.payload["topology_refs"] == ["state_surface:formal_verifications"]
+    assert response.payload["context_packet"]["basis"]["learning_event_ids"] == [
+        event.learning_event_id
+    ]
+    assert (
+        response.payload["context_packet"]["basis"]["work_candidates_included"]
+        is False
+    )
+    assert response.payload["work_candidates"] == []
+
+    verified = dispatch_kernel_request(
+        "POST",
+        "/kernel/work-discovery/context-packet/verify",
+        {"context_packet": response.payload["context_packet"]},
+        config=config,
+    )
+
+    assert verified.status == 200
+    assert verified.payload["verification"]["ok"] is True
+    assert verified.payload["verification"]["read_only"] is True
+    assert verified.payload["verification"]["basis"]["learning_event_ids"] == [
+        event.learning_event_id
+    ]
+
+    projection_config = KernelServiceConfig(
+        learning_events_log=config.learning_events_log,
+        outcome_links_log=config.outcome_links_log,
+        routine_reviews_log=config.routine_reviews_log,
+        surface_write_modes={"orbit": "projection_only"},
+    )
+    projection_verified = dispatch_kernel_request(
+        "POST",
+        "/kernel/work-discovery/context-packet/verify",
+        {
+            "actor_context": {"surface": "orbit"},
+            "context_packet": response.payload["context_packet"],
+        },
+        config=projection_config,
+    )
+
+    assert projection_verified.status == 200
+    assert projection_verified.payload["verification"]["ok"] is True
+
+    tampered_packet = dict(response.payload["context_packet"])
+    tampered_packet["basis"] = {
+        **response.payload["context_packet"]["basis"],
+        "resource_refs": ["formal_provider:tampered"],
+    }
+    rejected = dispatch_kernel_request(
+        "POST",
+        "/kernel/work-discovery/context-packet/verify",
+        {"context_packet": tampered_packet},
+        config=config,
+    )
+
+    assert rejected.status == 200
+    assert rejected.payload["verification"]["ok"] is False
+    assert "context_packet.digest does not match basis" in rejected.payload[
+        "verification"
+    ]["issues"]
+
+    encounter = dispatch_kernel_request(
+        "POST",
+        "/kernel/learning-event-encounters",
+        {
+            "learning_event_id": event.learning_event_id,
+            "role": "role.verifier",
+            "cue": "formal verifier provider payload",
+            "outcome": "applied",
+            "context_packet": response.payload["context_packet"],
+        },
+        config=config,
+    )
+
+    assert encounter.status == 201
+    assert encounter.payload["encounter"]["context_packet_ref"] == response.payload[
+        "context_packet"
+    ]["context_packet_id"]
+    assert encounter.payload["encounter"]["metadata"][
+        "context_packet_verification"
+    ] == "digest_basis_includes_learning_event"
+    assert encounter.payload["encounter"]["metadata"][
+        "context_packet_digest"
+    ] == response.payload["context_packet"]["digest"]
+    loop = dispatch_kernel_request(
+        "GET",
+        f"/kernel/learning-events/{event.learning_event_id}/loop",
+        config=config,
+    )
+    assert loop.status == 200
+    assert loop.payload["learning_loop"]["future_context"][
+        "verified_context_packet_refs"
+    ] == [response.payload["context_packet"]["context_packet_id"]]
+
+    other_event = create_learning_event(
+        learning_unit_kind="routine_change",
+        decision_use="Use a different provider proof packet.",
+        future_application_cue="other formal verifier payload",
+        approved_by="role.manager",
+        approval_ref="review/learning/other-provider-proof",
+        tenant_id="tenant-a",
+        log_path=config.learning_events_log,
+    )
+    rejected_encounter = dispatch_kernel_request(
+        "POST",
+        "/kernel/learning-event-encounters",
+        {
+            "learning_event_id": other_event.learning_event_id,
+            "role": "role.verifier",
+            "cue": "formal verifier provider payload",
+            "outcome": "applied",
+            "context_packet": response.payload["context_packet"],
+        },
+        config=config,
+    )
+
+    assert rejected_encounter.status == 400
+    assert "context_packet does not include learning_event_id" in rejected_encounter.payload[
+        "error"
+    ]

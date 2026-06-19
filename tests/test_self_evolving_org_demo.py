@@ -48,10 +48,49 @@ def test_self_evolving_org_demo_runs_governed_iterations(tmp_path):
     assert report["summary"]["mutation_proofs_valid"] is True
     assert report["summary"]["mutation_proofs_reconstructed"] == 3
     assert report["summary"]["mutation_proof_replay_valid"] is True
+    assert report["summary"]["learning_use_receipts"] == 3
+    assert report["summary"]["context_packets"] == 3
+    assert report["summary"]["verified_context_packets"] == 3
+    assert report["summary"]["provenance_reports"] == 3
+    assert report["summary"]["proposal_review_packets"] == 4
+    assert report["summary"]["proposal_review_follow_through_closed_loop"] == 3
+    assert report["summary"]["proposal_review_follow_through_proposal_only"] == 1
+    assert report["summary"]["proposal_review_follow_through_decision_observed"] == 0
     assert report["summary"]["verdict"] == "passed"
     assert len(report["mutation_proofs"]) == 3
     assert len(report["mutation_proof_replay"]) == 3
     assert all(row["matches_saved"] and row["valid"] for row in report["mutation_proof_replay"])
+    assert len(report["provenance_reports"]) == 3
+    assert all(row["read_only"] is True for row in report["provenance_reports"])
+    assert all(row["projection_only"] is True for row in report["provenance_reports"])
+    assert all(
+        row["coverage"]["status"] in {"complete_enough_for_review", "partial"}
+        for row in report["provenance_reports"]
+    )
+    assert all(row["summary"]["event_count"] > 0 for row in report["provenance_reports"])
+    assert all(
+        row["follow_through"]["status"] == "closed_loop_observed"
+        for row in report["provenance_reports"]
+    )
+    assert len(report["proposal_review_packets"]) == 4
+    proposal_outcomes = {
+        row["proposal_id"]: row["proposal_outcome"]
+        for row in report["proposal_review_packets"]
+    }
+    assert set(proposal_outcomes.values()) == {"accepted", "blocked"}
+    assert all(row["read_only"] is True for row in report["proposal_review_packets"])
+    assert all(row["projection_only"] is True for row in report["proposal_review_packets"])
+    assert all(
+        row["packet_kind"] == "governance_change_review_handoff"
+        for row in report["proposal_review_packets"]
+    )
+    assert {
+        row["proposal_outcome"]: row["follow_through"]["status"]
+        for row in report["proposal_review_packets"]
+    } == {
+        "accepted": "closed_loop_observed",
+        "blocked": "proposal_only",
+    }
     assert len(report["planner_receipts"]) == 1
     receipt = report["planner_receipts"][0]
     assert receipt["receipt_id"].startswith("planner_fixture_")
@@ -61,6 +100,28 @@ def test_self_evolving_org_demo_runs_governed_iterations(tmp_path):
     assert (demo_firm / "reports" / "planner" / receipt["receipt_id"] / "receipt.json").exists()
     assert (demo_firm / "reports" / "planner" / receipt["receipt_id"] / "response.txt").exists()
     assert (demo_firm / "reports" / "planner" / receipt["receipt_id"] / "steps.json").exists()
+    for provenance in report["provenance_reports"]:
+        assert (
+            demo_firm
+            / provenance["report_ref"].removeprefix("file://")
+        ).exists()
+        markdown_path = demo_firm / provenance["markdown_ref"].removeprefix("file://")
+        assert markdown_path.exists()
+        assert "# Provenance Report" in markdown_path.read_text(encoding="utf-8")
+    for packet in report["proposal_review_packets"]:
+        packet_path = demo_firm / packet["report_ref"].removeprefix("file://")
+        assert packet_path.exists()
+        packet_payload = json.loads(packet_path.read_text(encoding="utf-8"))
+        assert packet_payload["proposal_id"] == packet["proposal_id"]
+        assert packet_payload["read_only"] is True
+        assert packet_payload["projection_only"] is True
+        assert packet_payload["follow_through"] == packet["follow_through"]
+        markdown_path = demo_firm / packet["markdown_ref"].removeprefix("file://")
+        assert markdown_path.exists()
+        assert "# Governance Change Review Packet" in markdown_path.read_text(
+            encoding="utf-8"
+        )
+        assert "## Follow-Through" in markdown_path.read_text(encoding="utf-8")
     assert (demo_firm / "org" / "workload" / "inbox" / "packets.jsonl").exists()
     assert (demo_firm / "org" / "workload" / "executions" / "IN-01.md").exists()
     assert (tmp_path / "operator-only" / "workload-probes" / "IN-01.scorecard.json").exists()
@@ -103,6 +164,24 @@ def test_self_evolving_org_demo_runs_governed_iterations(tmp_path):
         ]
         assert step["learning_event_id"].startswith("learn_")
         assert step["learning_encounter_id"].startswith("lenc_")
+        assert step["learning_use_receipt"]["encounter_id"] == step["learning_encounter_id"]
+        assert step["learning_use_receipt"]["context_packet_ref"] == step["context_packet_id"]
+        assert step["learning_use_receipt"]["metadata"][
+            "context_packet_verification"
+        ] == "digest_basis_includes_learning_event"
+        assert step["context_packet_ref"] == f"context_packet:{step['context_packet_id']}"
+        assert step["context_packet_id"].startswith("ctx_")
+        assert step["context_packet_verification"]["ok"] is True
+        assert step["future_context_packet"]["verification"]["ok"] is True
+        assert step["learning_event_id"] in step["future_context_packet"]["basis"][
+            "learning_event_ids"
+        ]
+        assert step["outcome_link_id"] in step["future_context_packet"]["basis"][
+            "outcome_link_ids"
+        ]
+        assert step["routine_review_id"] in step["future_context_packet"]["basis"][
+            "routine_review_ids"
+        ]
         assert step["future_replay"]["learning_event_id"] == step["learning_event_id"]
         assert step["future_replay"]["candidate_source"] == "learning-event-replay"
         assert "apply approved learning" in step["future_replay"]["intent"]
@@ -155,6 +234,14 @@ def test_self_evolving_org_demo_runs_governed_iterations(tmp_path):
             / f"{step['a2a_messages'][2]['message_id']}.json"
         ).exists()
         assert f"planner_receipt:{receipt['receipt_id']}" in step["planner_evidence_refs"]
+        assert (
+            "file://reports/workload-probes/workload-probe-summary.json"
+            in step["planner_evidence_refs"]
+        )
+        assert (
+            "file://org/workload/executions/README.md"
+            in step["planner_evidence_refs"]
+        )
         assert len(step["trace_event_ids"]) == 5
         assert step["delegation_graph"]["runtime_name"] == "self_evolving_org_demo"
         assert step["delegation_graph"]["diagnostics"]["n_events"] == 5
@@ -329,6 +416,11 @@ def test_self_evolving_org_demo_runs_governed_iterations(tmp_path):
         unit["learning_steward_review_ref"].startswith("a2a_message:")
         for unit in company_state["learning_units"]
     )
+    assert all(
+        unit["context_packet_ref"].startswith("context_packet:ctx_")
+        and unit["context_packet_verified"] is True
+        for unit in company_state["learning_units"]
+    )
     assert company_state["agent_transcripts"]["planner_receipts"][0]["response_text"]
     company_html = (
         demo_firm / "reports" / "self-evolving-org-company-state.html"
@@ -362,6 +454,7 @@ def test_self_evolving_org_demo_runs_governed_iterations(tmp_path):
     assert 'data-tab-target="communications-tab"' in company_html
     assert 'data-tab-target="proof-tab"' in company_html
     assert "learning steward:" in company_html
+    assert "context packet:" in company_html
     assert "simulation ticks" in company_html
     assert 'id="state-data"' in company_html
     markdown_report = (
@@ -370,6 +463,10 @@ def test_self_evolving_org_demo_runs_governed_iterations(tmp_path):
     assert "# Self-Evolving Organization Demo Report" in markdown_report
     assert "## Approved Mutations" in markdown_report
     assert "## Planner Receipts" in markdown_report
+    assert "## Provenance Reports" in markdown_report
+    assert "provenance-report.json" in markdown_report
+    assert "## Proposal Review Packets" in markdown_report
+    assert "proposal-review-packet.json" in markdown_report
     assert "## Proof Chains" in markdown_report
     assert "Decision Procedure" in markdown_report
     assert "| Tick | Step | Proposal |" in markdown_report
@@ -403,6 +500,22 @@ def test_self_evolving_org_demo_runs_governed_iterations(tmp_path):
     assert runbook["status"]["open_execution_signals"] == 1
     assert runbook["status"]["blocking_execution_signals"] == 1
     assert runbook["status"]["blocked_phase_plans"] == 0
+    assert runbook["status"]["learning_closure_count"] == 3
+    assert runbook["status"]["learning_closure_needs_review"] == 0
+    assert runbook["status"]["operator_burden_level"] in {"low", "medium", "high"}
+    assert len(runbook["learning_closure"]) == 3
+    first_closure = runbook["learning_closure"][0]
+    assert first_closure["learning_event_ref"].startswith("learning_event:learn_")
+    assert first_closure["learning_use_receipt_ref"].startswith(
+        "learning_event_encounter:lenc_"
+    )
+    assert first_closure["outcome_link_ref"].startswith("outcome_link:olink_")
+    assert first_closure["routine_review_ref"].startswith("routine_review:rrev_")
+    assert first_closure["changed_context_ref"].startswith("org/")
+    assert first_closure["context_packet_refs"][0].startswith("ctx_")
+    assert "apply approved learning" in first_closure["future_work_context"]
+    assert runbook["operator_burden"]["schema"] == "operator_burden_projection.v1"
+    assert runbook["operator_burden"]["boundary"]["does_not_schedule_work"] is True
     assert len(runbook["execution_signals"]) == 4
     assert any(
         signal["signal_ref"] == f"capability_signal:{blocked['capability_signal_id']}"
@@ -428,11 +541,23 @@ def test_self_evolving_org_demo_runs_governed_iterations(tmp_path):
         artifact["ref"] == "file://reports/self-evolving-org-mutation-proofs.json"
         for artifact in runbook["artifacts"]
     )
+    assert any(
+        artifact["ref"].startswith("file://reports/provenance/")
+        for artifact in runbook["artifacts"]
+    )
+    assert any(
+        artifact["ref"].startswith("file://reports/proposals/")
+        for artifact in runbook["artifacts"]
+    )
     assert any(command["label"] == "serve_viewer" for command in runbook["commands"])
     runbook_markdown = (
         demo_firm / "reports" / "self-evolving-org-runbook.md"
     ).read_text(encoding="utf-8")
     assert "# Self-Evolving Organization Operator Runbook" in runbook_markdown
+    assert "## Learning Closure" in runbook_markdown
+    assert "learning_event:" in runbook_markdown
+    assert "routine_review:" in runbook_markdown
+    assert "## Operator Burden" in runbook_markdown
     assert "## Execution Health" in runbook_markdown
     assert f"capability_signal:{blocked['capability_signal_id']}" in runbook_markdown
     assert "phase_execution_plan:pex_evaluator_handoff" in runbook_markdown
@@ -491,6 +616,11 @@ def test_self_evolving_org_demo_supports_withheld_workload_feedback(tmp_path):
     ).read_text(encoding="utf-8")
     assert "withheld from firm-visible state" in visible_receipt
     assert "Rubric visible to firm: `false`" in visible_receipt
+    prompt = _llm_evolution_prompt(demo_firm, iterations=1, prompt_mode="compact")
+    assert "Current workload evidence:" in prompt
+    assert "Firm received score totals: false" in prompt
+    assert "Numeric score totals are withheld from firm-visible state" in prompt
+    assert "Visible capability score per budget unit" not in prompt
     operator_scorecard = json.loads(
         (tmp_path / "operator-only" / "workload-probes" / "IN-01.scorecard.json").read_text(
             encoding="utf-8"
@@ -964,6 +1094,8 @@ import sys
 prompt = sys.argv[-1]
 assert "cognitive-firm reviewer office" in prompt
 assert "Return only JSON" in prompt
+assert "file://reports/workload-probes/workload-probe-summary.json" in prompt
+assert "file://org/workload/executions/README.md" in prompt
 print(json.dumps({{
     "position": "approve",
     "rationale": "The proposed change is bounded and evidence-carrying.",
@@ -992,6 +1124,13 @@ print(json.dumps({{
         invocation["verification_status"] == "verified"
         for invocation in step["reviewer_invocations"]
     )
+    for invocation in step["reviewer_invocations"]:
+        assert (
+            "file://reports/workload-probes/workload-probe-summary.json"
+            in invocation["input_refs"]
+        )
+        assert "file://org/workload/executions/README.md" in invocation["input_refs"]
+        assert any(ref.endswith("/stdout.txt") for ref in invocation["output_refs"])
     assert step["governed_mutation_evidence_pack"]["summary"][
         "reviewer_evidence_refs"
     ] == 9
@@ -1020,6 +1159,10 @@ print(json.dumps({{
             "role.learning_steward",
         ]
     )
+    company_state_html = (
+        demo_firm / "reports" / "self-evolving-org-company-state.html"
+    ).read_text(encoding="utf-8")
+    assert "Reviewer input evidence" in company_state_html
     runbook = json.loads(
         (demo_firm / "reports" / "self-evolving-org-runbook.json").read_text(
             encoding="utf-8"
@@ -1093,6 +1236,16 @@ print(json.dumps({{
     assert blocked["blocked_by"] == "reviewer_quorum"
     assert blocked["decision_aggregation_result"]["recommendation"] == "escalate"
     assert blocked["decision_aggregation_result"]["quorum_met"] is False
+    assert len(blocked["decision_positions"]) == 4
+    positions_by_role = {
+        position["role_id"]: position for position in blocked["decision_positions"]
+    }
+    assert positions_by_role["role.risk_guardian"]["position"] == "abstain"
+    assert (
+        "file://reports/workload-probes/workload-probe-summary.json"
+        in positions_by_role["role.risk_guardian"]["invocation"]["input_refs"]
+    )
+    assert len(blocked["reviewer_invocations"]) == 3
     assert blocked["route_packet"]["schema"] == "execution_evidence_route_packet.v1"
     assert blocked["route_packet"]["boundary"]["does_not_approve_governance"] is True
     assert blocked["route_packet"]["boundary"]["does_not_mutate_files"] is True
@@ -1100,6 +1253,17 @@ print(json.dumps({{
     demo_firm = tmp_path / "live-reviewer-blocked-run" / "demo-firm"
     assert (demo_firm / "reports" / "self-evolving-org-demo.json").exists()
     assert (demo_firm / "reports" / "self-evolving-org-company-state.html").exists()
+    company_state = json.loads(
+        (demo_firm / "reports" / "self-evolving-org-company-state.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert len(company_state["blocked_proposals"][0]["decision_positions"]) == 4
+    company_state_html = (
+        demo_firm / "reports" / "self-evolving-org-company-state.html"
+    ).read_text(encoding="utf-8")
+    assert "Blocked reviewer positions" in company_state_html
+    assert "Reviewer input evidence" in company_state_html
     runbook = json.loads(
         (demo_firm / "reports" / "self-evolving-org-runbook.json").read_text(
             encoding="utf-8"
@@ -1604,5 +1768,9 @@ def test_live_planner_prompt_prioritizes_self_evolving_firm_charter(tmp_path):
 
     assert "--- org/charters/self_evolving_firm.md ---" in prompt
     assert "trailing workload score per dispatched budget unit" in prompt
+    assert "Current workload evidence:" in prompt
+    assert "file://reports/workload-probes/workload-probe-summary.json" in prompt
+    assert "Firm received score totals: true" in prompt
+    assert "Visible capability score per budget unit" in prompt
     assert "org/workload/inbox" in prompt
     assert "project_charter_change" in prompt

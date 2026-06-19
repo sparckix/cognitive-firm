@@ -126,18 +126,102 @@ inspect the packet JSON if you need the exact receipt and bundle payload. The
 fixture does not call an external runtime; it shows the receipt and bundle
 shape used by live daemon dispatch.
 
+For the same persistent review packet through a one-command Make target:
+
+```bash
+make agent-fleet-review-packet
+```
+
 If you want the broader suite with failure fixtures and an external-runtime
 projection:
 
 ```bash
 make adoption-demo
+make adoption-onramp-packet
+make adoption-readiness-packet
 ```
 
-The demo first runs a fictional Kettle & Compass product-claim workflow using
-only native kernel primitives, then runs governance failure fixtures, then
-projects a LangGraph-style lifecycle into the kernel. All paths use
-deterministic stubs and make no external calls. For an existing run, export a
-compact review view with:
+The first-review path is deliberately small: run governed work, inspect the
+provenance, verify that approved learning reaches future context, then render a
+handoff packet. All paths use deterministic stubs and make no external calls.
+`adoption-onramp-packet` runs fixed no-cost proof commands with per-command
+timeouts, stores their outputs under `.cognitive-firm-runs/adoption-onramp/...`,
+and writes `adoption-readiness-packet.json` plus
+`adoption-readiness-packet.md`. It is a bounded evidence harness, not a planner,
+scheduler, or workflow engine. Optional rows cover adapter-policy preview,
+formal-provider, runtime-adapter, agent-fleet, and field-pilot evidence. A
+separately produced live-agent proof can be attached with
+`--result bounded_live_agent_run=/path/to/self-evolving-org-demo.json`; the
+collector cites that artifact without running the external substrate. Prefer
+the generated report JSON from `reports/self-evolving-org-demo.json` over a
+clipped stdout summary, because the readiness packet checks the v0.4
+learning-use, context-packet, provenance, and proposal-review counters,
+including proposal follow-through that shows whether at least one proposal
+reached closed-loop evidence. Those counters must be present and nonzero for
+the live-agent row to count as fully reviewable. Missing optional evidence
+stays visible as deferred evidence, but a supplied optional artifact that fails
+its checks blocks the packet from reporting `ok: true`.
+To rediscover the same first-review sequence from the kernel surface, run
+`cognitive-firm-userland operator-path first_review` or
+`cognitive-firm-userland commands "first serious review"`; both return ranked
+metadata, not a workflow runner.
+
+To test the on-ramp as a clean adopter replay rather than an author-local run:
+
+```bash
+make adoption-onramp-replay
+```
+
+That command stages the public repo surface into an isolated copy, excludes
+`internal/`, local run state, virtualenvs, and `.env`, then runs the core
+collector from the copy. It proves the first-review path is clone-replayable;
+it still does not run external agents, approve a release, schedule work, or
+write durable kernel state.
+
+For a fuller portability check, use:
+
+```bash
+make adoption-onramp-full-replay
+```
+
+That runs the same clean-copy replay with optional no-cost rows enabled,
+including adapter-policy preview, formal-provider proof pack, runtime-adapter
+proof pack, agent-fleet audit, and field-pilot action-impact evidence.
+
+`adoption-readiness-packet` builds the same read-only reviewer handoff. The
+Make target re-renders the latest on-ramp packet when one exists, otherwise it
+shows the expected proof paths as missing. Direct script calls can still pass
+observed JSON outputs with `--result CHECK_ID=path`; the script does not run
+commands, approve a release, or write kernel state. The packet reports
+expected, present, and missing evidence fields for each check, and required
+checks with thin payloads remain review blockers even when their basic command
+verdict is green. Its
+`Reviewer Path` section shows where the handoff sits in the first serious
+review sequence, including purpose and `not_a` boundary text, without executing
+that sequence. For a manual observed minimal packet:
+
+```bash
+python scripts/native_e2e_demo.py --output /tmp/cf-native-e2e.json
+python scripts/kernel_service_smoke.py --output /tmp/cf-kernel-smoke.json
+python scripts/learning_loop_walkthrough.py --output /tmp/cf-learning-loop.json
+python scripts/agent_fleet_audit_demo.py --output /tmp/cf-agent-fleet.json
+python scripts/field_pilot_action_impact_demo.py --output /tmp/cf-field-pilot.json
+python scripts/adoption_readiness_packet.py --markdown \
+  --result first_gated_action=/tmp/cf-native-e2e.json \
+  --result kernel_service_smoke=/tmp/cf-kernel-smoke.json \
+  --result learning_loop_walkthrough=/tmp/cf-learning-loop.json \
+  --result agent_fleet_audit_demo=/tmp/cf-agent-fleet.json \
+  --result field_pilot_action_impact_demo=/tmp/cf-field-pilot.json
+```
+
+The `kernel_service_smoke` JSON is intentionally more than a service-health
+ping. Its provenance row should report
+`provenance_follow_through=closed_loop_observed` with outcome, routine-review,
+learning-event, and learning-use counts; otherwise the readiness handoff treats
+the smoke output as too thin for v0.4 adoption review.
+
+For an
+existing run, export a compact review view with:
 
 ```bash
 cognitive-firm-governed-run-bundle <run_id> --summary
@@ -195,6 +279,31 @@ If you want to inspect the app-service boundary without starting the daemon:
 ```bash
 cognitive-firm-kernel-service --host 127.0.0.1 --port 8765
 ```
+
+If you want the operator-facing terminal surface over the same kernel routes,
+try the read-only commands first:
+
+```bash
+cognitive-firm-userland status
+cognitive-firm-userland commands "adoption readiness packet"
+cognitive-firm-userland work-context --cue-signature formal_verification.provider_payload --resource-ref formal_provider:trusted_checker --topology-ref state_surface:formal_verifications
+cognitive-firm-userland human-pressure --agent-counterparty-role role.manager --tenant-id tenant-a
+cognitive-firm-userland learning-candidates --source human_work
+cognitive-firm-userland timeline --run-id <run_id>
+cognitive-firm-userland graph --run-id <run_id>
+```
+
+`work-context` returns a citeable pre-work context packet. `timeline` requires a
+run, ref, tenant, or tenant plus project selector so it stays an intentional
+provenance view rather than a broad state dump. `graph` uses the same selectors
+and returns a projection-only event/ref graph for custom visualization surfaces.
+`commands` suggests exact repo commands from known Make targets and Python
+scripts; it does not run them.
+`human-pressure` shows repeated A2H bottlenecks as observer-only review signals;
+tenant/project selectors scope the pressure summary before grouping.
+`learning-candidates --source human_work` compiles whole-firm A2H pressure into
+review candidates with human-work source refs, without automating or rerouting
+the work.
 
 For a stricter local T2-style check, read `docs/protocols/kernel-service.md`
 before enabling registered actors, token authentication, or lease-required

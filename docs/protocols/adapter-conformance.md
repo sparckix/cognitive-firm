@@ -111,10 +111,46 @@ The same config shape applies to provider adapters. For example, the
 `protocol=formal_verification_provider_payload` and points its fixture command
 at `make formal-provider-bundle-demo`.
 
+Formal-verification providers can also publish an adoption receipt:
+
+```bash
+make formal-provider-proof-pack
+```
+
+The target emits `formal_provider_proof_pack.v1`. It validates the bundled
+`leanmill-formal-verification` manifest/config/trust-policy declarations,
+runs the deterministic formal-provider demo in a temporary workspace, checks
+that signed trusted evidence clears the governed-run bundle, and checks that
+missing provider evidence remains caveated. It is a reviewer handoff; it does
+not execute LeanMill, install provider code, approve trust, or mutate durable
+kernel state.
+
 Packages do not need a separate lint command for these files.
 `cognitive-firm-distro lint <package>` automatically validates any
 `files/adapters/*.{yaml,yml,json}` and `files/adapter_conformance/*.{json,yaml,yml}`
 files it finds, including manifest/config alignment when both are present.
+
+## Runtime Adapter Proof Pack
+
+Runtime adapters have an additional cross-substrate proof:
+
+```bash
+make runtime-adapter-proof-pack
+```
+
+The target emits `runtime_adapter_proof_pack.v1`. It validates the bundled
+`langgraph-runtime-adapter` manifest/config pair, then compares the native
+kernel demo and the LangGraph-style runtime demo against the same governed-run
+summary contract. Both paths must carry a passing bundle, resolved authority,
+bounded human work, action attestation, outcome evidence, accountability
+closure, and matching summary keys.
+
+The pack also checks the runtime-specific projection: external runtime id,
+external run id, opaque resume ref, and evidence refs are explicit, but graph
+execution, checkpoint replay, and resume semantics remain owned by the
+external runtime. The proof pack is a reviewer handoff. It does not install or
+run a framework adapter, approve support status, schedule work, or mutate
+kernel state.
 
 ## Golden Cases
 

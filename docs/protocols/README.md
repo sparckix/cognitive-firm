@@ -58,6 +58,9 @@ portable export view over one run's checkpoints, action attestations, human
 work, formal verifications, outcome links, accountability cases, linked
 leases, referenced governance approvals, observability refs, and authority
 snapshot. The v1 schema validates packet shape and digest for interchange.
+The kernel-service provenance timeline, graph, and report routes are
+projection-only reviewer surfaces over those same log families; they do not
+replace the governed-run bundle or create a second ledger.
 [Governed Mutation Proofs](mutation-proofs.md) define the compact ordered
 proof row for approved state mutation, linking run, work item, proposal,
 approval, mutation, attestation, learning, outcome, review, bundle, and git
@@ -92,7 +95,8 @@ the connector-inventory surface. [Action Attestation](action-attestation.md)
 records compact machine-side provenance for actions, tool calls, runtime events,
 and artifacts. [Formal Verification](formal-verification.md) records
 provider-agnostic certificate rows from formal checkers and joins them into the
-governed-run bundle. [EU AI Act Deploy Gate](eu-ai-act-deploy-gate.md) defines the
+governed-run bundle, including provider proof-pack receipts for signed
+evidence and caveated trust gaps. [EU AI Act Deploy Gate](eu-ai-act-deploy-gate.md) defines the
 optional T2 mapping check for roles that opt into it.
 [Work Items And Operating Units](work-items.md) defines the production layer:
 typed operating-unit contracts and a durable, lease-fenced work queue with

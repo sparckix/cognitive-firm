@@ -593,8 +593,8 @@ STATE_SURFACES: tuple[StateSurface, ...] = (
         state_class="canonical_state",
         default_location="org/decision_rights/residual_right_assignments.jsonl",
         writer="assign_residual_right",
-        reader="get_residual_right_holder, summarize_decision_rights, governance review, residual_right_assignment_resource",
-        notes="Names the default decider (residual control right) per scope when a mandate is silent; idempotent on scope with supersede. Resource projection is a compatibility view, not canonical state.",
+        reader="get_residual_right_holder, resolve_residual_right_holder, summarize_decision_rights, governance review, residual_right_assignment_resource",
+        notes="Names the default decider (residual control right) per scope when a mandate is silent; idempotent on scope with supersede. Holder resolution can project authority-domain accountability when no assignment exists; that projection is not canonical state.",
         conformance_tests=["tests/test_decision_rights.py"],
     ),
     StateSurface(

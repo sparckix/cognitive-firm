@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import tempfile
@@ -28,14 +29,37 @@ from cognitive_firm.orchestration.human_work import (  # noqa: E402
     update_human_work_state,
 )
 from cognitive_firm.orchestration.learning_events import (  # noqa: E402
+    learning_event_loop_projection,
     learning_event_from_candidate,
+    record_learning_event_encounter,
     replay_learning_events,
 )
 from cognitive_firm.orchestration.learning_transition_compiler import compile_learning_transitions  # noqa: E402
 from cognitive_firm.orchestration.org_surface import build_org_surface  # noqa: E402
+from cognitive_firm.orchestration.outcome_links import create_outcome_link  # noqa: E402
+from cognitive_firm.orchestration.routine_reviews import schedule_routine_review  # noqa: E402
+from cognitive_firm.orchestration.run_checkpoints import (  # noqa: E402
+    append_checkpoint,
+    set_run_state,
+    start_run,
+)
+from cognitive_firm.orchestration.work_discovery import (  # noqa: E402
+    build_role_learning_context,
+    verify_context_packet,
+)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Run the no-cost cognitive-firm learning-loop walkthrough.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Optional path for the emitted JSON payload. Stdout is still written.",
+    )
+    args = parser.parse_args(argv)
+
     with tempfile.TemporaryDirectory(prefix="cf-learning-loop-") as raw:
         root = Path(raw)
         logs = {
@@ -43,6 +67,9 @@ def main() -> int:
             "human": root / "org" / "human_work" / "human_work.jsonl",
             "accountability": root / "org" / "accountability" / "accountability_cases.jsonl",
             "learning": root / "org" / "learning_events" / "learning_events.jsonl",
+            "encounters": root / "org" / "learning_events" / "learning_event_encounters.jsonl",
+            "outcomes": root / "org" / "outcome_links" / "outcome_links.jsonl",
+            "reviews": root / "org" / "routine_reviews" / "routine_reviews.jsonl",
             "attestation": root / "org" / "attestations" / "action_attestations.jsonl",
             "transitions": root / "workspace" / "transitions.jsonl",
         }
@@ -60,6 +87,14 @@ def main() -> int:
             owner_role="role.manager",
             source_ref="project/demo/claim-1",
             log_path=logs["evidence"],
+        )
+        run = start_run(
+            owner_role="role.manager",
+            objective="resolve restricted-source claim without repeating stale routing",
+            tenant_id="tenant-demo",
+            project_id="demo-branch",
+            run_id="run_learning_loop_demo",
+            log_path=logs["transitions"],
         )
         session = create_agent_requested_human_work_session(
             requested_by_role="role.researcher",
@@ -99,7 +134,19 @@ def main() -> int:
             output_refs=["artifact/demo/evidence-brief"],
             verification_status="verified",
             verification_summary="Receipt integrated into bounded evidence brief.",
+            tenant_id="tenant-demo",
+            project_id="demo-branch",
+            run_id=run.run_id,
             log_path=logs["attestation"],
+        )
+        append_checkpoint(
+            run.run_id,
+            actor="role.researcher",
+            step_id="integrate_human_receipt",
+            status="completed",
+            summary="Integrated bounded human source receipt into evidence brief.",
+            payload_ref="artifact/demo/evidence-brief",
+            log_path=logs["transitions"],
         )
         case = create_accountability_case(
             trigger_ref="action/demo/reused-local-heuristic",
@@ -194,15 +241,109 @@ def main() -> int:
             before_state="ad hoc restricted-source routing",
             after_state="predeclare source plan and review burden before dispatch",
             externality_review_ref=case.case_id,
+            tenant_id="tenant-demo",
+            project_id="demo-branch",
             log_path=logs["learning"],
+        )
+        outcome = create_outcome_link(
+            change_ref=f"learning_event:{event.learning_event_id}",
+            change_kind="learning_event",
+            metric_name="review_burden",
+            metric_unit="operator_minutes",
+            created_by="role.manager",
+            learning_event_id=event.learning_event_id,
+            tenant_id="tenant-demo",
+            project_id="demo-branch",
+            metadata={"run_id": run.run_id},
+            log_path=logs["outcomes"],
+            kernel_events_log=logs["transitions"],
+        )
+        review = schedule_routine_review(
+            routine_ref=f"learning_event:{event.learning_event_id}",
+            routine_kind="learning_event",
+            review_due_utc="2030-01-01T00:00:00+00:00",
+            scheduled_by="role.manager",
+            learning_event_id=event.learning_event_id,
+            tenant_id="tenant-demo",
+            project_id="demo-branch",
+            metadata={"run_id": run.run_id},
+            log_path=logs["reviews"],
+            kernel_events_log=logs["transitions"],
         )
         replayed = replay_learning_events(
             role=event.owner_role,
             cue="restricted-source claim",
+            tenant_id="tenant-demo",
+            project_id="demo-branch",
             log_path=logs["learning"],
         )
         if [item.learning_event_id for item in replayed] != [event.learning_event_id]:
             raise SystemExit("approved learning event was not replayed for future work")
+        work_context = build_role_learning_context(
+            assigned_to=event.owner_role,
+            tenant_id="tenant-demo",
+            project_id="demo-branch",
+            cue="restricted-source claim",
+            include_work_candidates=False,
+            learning_events_log_path=logs["learning"],
+            outcome_links_log_path=logs["outcomes"],
+            routine_reviews_log_path=logs["reviews"],
+        )
+        context_packet = work_context["context_packet"]
+        if context_packet["basis"]["learning_event_ids"] != [event.learning_event_id]:
+            raise SystemExit("context packet did not cite approved learning event")
+        if context_packet["basis"]["outcome_link_ids"] != [outcome.outcome_link_id]:
+            raise SystemExit("context packet did not cite learning outcome link")
+        if context_packet["basis"]["routine_review_ids"] != [review.review_id]:
+            raise SystemExit("context packet did not cite routine review")
+        packet_verification = verify_context_packet(context_packet)
+        if not packet_verification["ok"]:
+            raise SystemExit("context packet verification failed")
+        encounter = record_learning_event_encounter(
+            learning_event_id=event.learning_event_id,
+            role=event.owner_role or "role.manager",
+            cue="restricted-source claim",
+            outcome="applied",
+            work_ref=f"run:{run.run_id}",
+            tenant_id="tenant-demo",
+            project_id="demo-branch",
+            context_packet_ref=context_packet["context_packet_id"],
+            metadata={
+                "context_packet_verification": "digest_basis_includes_learning_event",
+                "context_packet_digest": packet_verification["digest"],
+                "context_packet_verification_policy": packet_verification[
+                    "verification_policy"
+                ],
+            },
+            log_path=logs["encounters"],
+        )
+        if encounter.context_packet_ref != context_packet["context_packet_id"]:
+            raise SystemExit("learning-use receipt did not cite context packet")
+        loop_view = learning_event_loop_projection(
+            event.learning_event_id,
+            log_path=logs["learning"],
+            encounters_log_path=logs["encounters"],
+            outcome_links_log_path=logs["outcomes"],
+            routine_reviews_log_path=logs["reviews"],
+        )
+        if loop_view["loop_state"] != "awaiting_outcome_verdict":
+            raise SystemExit("learning loop projection did not expose outcome gap")
+        if loop_view["future_context"]["context_packet_refs"] != [
+            context_packet["context_packet_id"]
+        ]:
+            raise SystemExit("learning loop projection lost context packet ref")
+        if loop_view["future_context"]["verified_context_packet_refs"] != [
+            context_packet["context_packet_id"]
+        ]:
+            raise SystemExit("learning loop projection lost verified packet ref")
+        if loop_view["outcome_link_count"] != 1 or loop_view["routine_review_count"] != 1:
+            raise SystemExit("learning loop projection did not join outcome/review rows")
+        set_run_state(
+            run.run_id,
+            actor="role.manager",
+            state="completed",
+            log_path=logs["transitions"],
+        )
         final_surface = build_org_surface(
             project_root=root,
             evidence_gaps_log=logs["evidence"],
@@ -217,21 +358,28 @@ def main() -> int:
         if final_surface.counts["active_learning_events"] != 1:
             raise SystemExit("approved learning event was not visible on organization surface")
 
-        print(
-            json.dumps(
-                {
-                    "ok": True,
-                    "evidence_gap_status": "closed",
-                    "human_work_state": integrated.state,
-                    "attestation": attestation.attestation_id,
-                    "accountability_case": case.case_id,
-                    "learning_candidate": candidate.candidate_id,
-                    "learning_event": event.learning_event_id,
-                    "replayed_for_future_work": True,
-                },
-                sort_keys=True,
-            )
-        )
+        payload = {
+            "ok": True,
+            "evidence_gap_status": "closed",
+            "human_work_state": integrated.state,
+            "attestation": attestation.attestation_id,
+            "accountability_case": case.case_id,
+            "context_packet": context_packet["context_packet_id"],
+            "verified_context_packet": context_packet["context_packet_id"],
+            "learning_candidate": candidate.candidate_id,
+            "learning_event": event.learning_event_id,
+            "learning_loop_state": loop_view["loop_state"],
+            "learning_loop_outcome_links": loop_view["outcome_link_count"],
+            "learning_loop_routine_reviews": loop_view["routine_review_count"],
+            "learning_use_receipt": encounter.encounter_id,
+            "replayed_for_future_work": True,
+            "run_id": run.run_id,
+        }
+        rendered = json.dumps(payload, sort_keys=True)
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(rendered + "\n", encoding="utf-8")
+        print(rendered)
     return 0
 
 

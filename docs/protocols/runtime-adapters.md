@@ -74,6 +74,8 @@ second runtime ledger.
 
 ```bash
 python -m cognitive_firm.orchestration.runtime_adapters \
+  --log-path workspace/transitions.jsonl \
+  --human-work-log-path workspace/human_work.jsonl \
   --event-json '{
     "runtime_name": "langgraph",
     "external_run_id": "thread-1",
@@ -83,6 +85,27 @@ python -m cognitive_firm.orchestration.runtime_adapters \
     "objective": "run graph under governance"
   }'
 ```
+
+For `interrupted` events, `--human-work-log-path` keeps the generated A2H
+human-work request in the same bounded workspace as the imported runtime
+projection. This is useful for adapter conformance tests and clean-container
+smokes because the command can prove the pause/human-work seam without writing
+to the default org state.
+
+## Runtime Interrupt Command Conformance
+
+```bash
+make runtime-interrupt-command-conformance
+```
+
+The fixture imports runtime events through the CLI. It proves that checkpoint
+events are rejected before a run is started, incomplete interrupt events are
+rejected, `started` is idempotent, a valid `interrupted` event pauses the run,
+the interrupt checkpoint preserves the runtime `resume_ref`, and one
+receipt-required A2H human-work session is reused on interrupt replay.
+
+It does not execute the external runtime, resume the thread, assign a human, or
+own workflow semantics.
 
 ## Runtime Boundary
 
@@ -152,6 +175,29 @@ cognitive-firm-adapter-conformance validate-conformance \
   --evidence-root .
 ```
 
+## Runtime Adapter Proof Pack
+
+```bash
+make runtime-adapter-proof-pack
+```
+
+This target builds `runtime_adapter_proof_pack.v1`. It validates the bundled
+LangGraph adapter manifest and conformance config, runs the no-cost native
+kernel demo and the LangGraph-style demo in temporary workspaces, and compares
+their governed-run summaries. The proof pack blocks if either path lacks a
+passing bundle, resolved authority, human-work receipt state, machine
+attestation, outcome evidence, accountability closure, or the shared summary
+contract.
+
+The check also inspects the runtime projection. External runtime identity,
+external run id, and `resume_ref` stay opaque runtime-owned facts; the kernel
+only records evidence refs that join the run, human work, and outcome.
+
+The proof pack does not install adapter executable code, run LangGraph, resume
+a graph, schedule work, or approve adapter support. It is the adopter-facing
+contract proof that native and external-runtime paths remain governance-
+equivalent while execution semantics stay outside the kernel.
+
 ## OpenTelemetry Projection
 
 Use `cognitive_firm.orchestration.otel_export` when a deployment wants to send
@@ -161,4 +207,7 @@ attributes for kernel-specific fields. It is a projection only.
 
 ## Tests
 
-Covered by `tests/test_runtime_adapters.py`.
+Covered by `tests/test_runtime_adapters.py`,
+`tests/test_runtime_interrupt_command_conformance.py`,
+`tests/test_adapter_conformance.py`, and
+`tests/test_runtime_adapter_proof_pack_script.py`.

@@ -86,6 +86,28 @@ def main() -> int:
         if "requires receipt" not in rejected.stderr:
             raise SystemExit(f"unexpected missing-receipt error: {rejected.stderr.strip()}")
 
+        followup_before_receipt = _run_lines(
+            [
+                "followup",
+                "--agent-counterparty-role",
+                "role.researcher",
+                "--log-path",
+                str(log_path),
+                "--resource",
+            ]
+        )
+        if len(followup_before_receipt) != 1:
+            raise SystemExit(
+                f"expected one ready-for-agent follow-up row, got {len(followup_before_receipt)}"
+            )
+        followup_resource = followup_before_receipt[0]
+        if followup_resource["status"]["state"] != "completed":
+            raise SystemExit(
+                f"unexpected follow-up state: {followup_resource['status']['state']}"
+            )
+        if followup_resource["status"]["receipt_present"] is not False:
+            raise SystemExit("follow-up view should expose missing receipt before integration")
+
         integrated = _run_json(
             [
                 "update-state",
@@ -112,6 +134,17 @@ def main() -> int:
             raise SystemExit("integrated resource did not report receipt_present=true")
         if resource["status"]["state"] != "integrated":
             raise SystemExit(f"unexpected final state: {resource['status']['state']}")
+        followup_after_integration = _run_lines(
+            [
+                "followup",
+                "--agent-counterparty-role",
+                "role.researcher",
+                "--log-path",
+                str(log_path),
+            ]
+        )
+        if followup_after_integration:
+            raise SystemExit("integrated session should not remain in the follow-up view")
 
         print(
             json.dumps(
@@ -120,6 +153,9 @@ def main() -> int:
                     "fixture": "a2h_command_conformance",
                     "session_id": session_id,
                     "receipt_before_integration_enforced": True,
+                    "ready_for_agent_followup_before_integration": True,
+                    "followup_missing_receipt_visible": True,
+                    "followup_cleared_after_integration": True,
                     "completed_without_receipt_state": completed_without_receipt["state"],
                     "final_state": integrated["state"],
                     "resource_kind": resource["kind"],

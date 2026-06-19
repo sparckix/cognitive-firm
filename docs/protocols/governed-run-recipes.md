@@ -21,10 +21,29 @@ Current helper surface:
   governance-change request from the candidate.
 - `GovernedRunOperatorSummaryInput`: the compact post-run inspection input for
   artifacts, commands, bounded controls, bundle summaries, mutation proofs,
-  execution signals, learning candidates, and phase plans.
+  execution signals, learning candidates, phase plans, learning-closure rows,
+  and optional operator-burden evidence.
 - `build_governed_run_operator_summary`: produces
   `governed_run_operator_summary.v1`, a stable human/operator review projection
-  for demos and adapters.
+  for demos and adapters. When learning-closure rows are provided, it shows the
+  approved learning event, changed context ref, future replay/use cue, outcome
+  review, routine review, and evidence refs without creating memory or
+  scheduling review. When `operator_burden` is provided, it also emits an
+  `operator_burden_projection.v1` section over existing bundle counts,
+  human-work pressure groups, and action-impact review-burden summaries.
+- `GovernedActionCompositionInput`: observed output from one already-run demo,
+  adapter, or operator command.
+- `build_governed_action_composition_packet`: produces
+  `governed_action_composition_packet.v1`, a read-only traceability matrix over
+  the expected authority, run, work, human-work, attestation, outcome, bundle,
+  and learning-use evidence links. It reports missing composition links without
+  executing commands, calling service routes, scheduling work, approving
+  governance, or verifying row existence.
+- `summarize_operator_burden_field_pilot`: produces
+  `operator_burden_field_pilot_summary.v1`, a read-only pilot measurement over
+  baseline and pilot rows. It compares observed human touchpoints,
+  coordination minutes, rework, missing receipts, hidden-burden reports, and
+  projection undercount without assigning work or optimizing routing.
 - `render_governed_run_operator_summary_markdown`: renders that projection as
   a concise runbook.
 - `GovernedMutationRecipeInput`: the references required for a governed
@@ -83,6 +102,58 @@ This checks both paths a client must keep aligned:
 
 - the work-item completion artifacts humans inspect;
 - the evidence carrier refs later used in mutation proofs.
+
+Governed-action composition preflight:
+
+```python
+packet = build_governed_action_composition_packet(
+    GovernedActionCompositionInput(
+        action_label="first gated action",
+        profile="first_gated_action",
+        observed_result=first_gated_action_json,
+    )
+)
+if packet["summary"]["required_blockers"]:
+    raise ValueError(packet["review_questions"])
+```
+
+The composition packet is a traceability matrix, not a workflow. The
+`first_gated_action` profile expects the shortest deterministic proof to carry
+resolved authority, run id, completed work item, bounded human-work session,
+action attestation, outcome link, and governed-run bundle digest. The
+`learning_loop` profile expects approved learning, context-packet, verified
+context-packet, learning-use receipt, outcome, and routine-review follow-through.
+`build_adoption_readiness_packet(...)` embeds these packets for observed
+first-gated-action and learning-loop outputs so a green command cannot hide a
+disconnected proof chain.
+
+Each adoption-check row also reports `expected_evidence_fields`,
+`present_evidence_fields`, `missing_evidence_fields`, and `evidence_quality`.
+For required checks, a command can pass its basic expectations and still block
+human adoption review when expected evidence fields are absent. This is a
+chain-of-custody gate over the reviewer packet, not a command runner or release
+approval.
+The required `kernel_service_smoke` row expects closed-loop provenance
+follow-through (`closed_loop_observed`) with outcome, routine-review,
+learning-event, and learning-use counts, so a service smoke that only proves
+basic route health remains too thin for v0.4 review.
+The packet also embeds a read-only `reviewer_path` derived from the command
+surface's first-review guidance, so the Markdown handoff shows `make
+smoke-public`, `make adoption-onramp-packet`, and `make
+adoption-readiness-packet` in order. This is orientation metadata over existing
+commands, not a runner or workflow plan.
+
+Service and userland surfaces:
+
+- `POST /kernel/governed-action-composition` accepts `action_label`,
+  `profile`, `observed_result`, optional `evidence_refs`, and returns the same
+  `composition_packet`. It is a read-only POST because the observed output can
+  be large and structured; it does not require a mutation lease and does not
+  read or write canonical rows.
+- `cognitive-firm-userland composition-packet --observed-json ...` renders the
+  same matrix for terminal preflights. It exits non-zero when required
+  composition blockers remain so adopter scripts can fail closed without
+  treating the command as an approval gate.
 
 Execution evidence routing recipe:
 
@@ -189,6 +260,25 @@ summary = build_governed_run_operator_summary(
         execution_signals=[capability_signal_row],
         learning_candidates=[learning_candidate_row],
         phase_plans=[phase_execution_plan_row],
+        learning_closure=[
+            {
+                "step_id": "step_1",
+                "learning_event_id": "learn_1",
+                "learning_use_receipt_id": "lenc_1",
+                "context_packet_refs": ["ctx_1"],
+                "target_ref": "org/mandates/evaluator.md",
+                "future_replay_intent": "apply approved learning before matching work",
+                "outcome_link_id": "olink_1",
+                "outcome_review_status": "prediction_met",
+                "routine_review_id": "rrev_1",
+                "routine_review_status": "scheduled",
+                "evidence_refs": ["learning_event:learn_1", "outcome_link:olink_1"],
+            }
+        ],
+        operator_burden={
+            "human_work_pressure": pressure_groups,
+            "action_impact_summary": action_impact_summary,
+        },
     )
 )
 markdown = render_governed_run_operator_summary_markdown(summary)
@@ -200,8 +290,44 @@ Execution signals, learning candidates, and phase plans are compacted into an
 `Execution Health` section so an operator can see unresolved abstentions,
 authority gaps, blocked verification loops, and review-ready learning without
 opening every JSONL log first. The summary counts open/blocking signals,
-blocked phase plans, and review candidates; it does not close them or choose a
-route.
+blocked phase plans, review candidates, and learning-closure rows. The
+`Learning Closure` section is the v0.4 compounding-learning check: what was
+learned, what context changed, which verified context packet future work can
+inspect, whether outcome review confirmed it, and when routine review can
+retire or reaffirm it. It does not close blocked phase plans, choose a route,
+or promote memory.
+
+When present, the `Operator Burden` section estimates human touchpoints from
+bundle counts, missing receipts, A2H pressure, accountability cases, approval
+events, and action-impact rows that require review. It includes review questions
+so operators can ask whether governance is reducing hidden coordination or just
+moving work onto people. This is still a projection: it does not assign work,
+schedule review, approve policy, or optimize routing.
+
+For field pilots, `summarize_operator_burden_field_pilot(...)` compares the
+measured baseline and pilot rows in the same read-only style. The output
+reports `stable`, `needs_review`, or `insufficient_evidence`; phase summaries;
+pilot-vs-baseline deltas; projection-fit rows where actual human touchpoints
+exceeded the runbook projection; and review reasons for hidden burden, missing
+receipts, stale sessions, burden shift, or increased touchpoints. The summary
+is evidence for a human adoption review, not a sampling policy or workload
+optimizer.
+
+Research Anchor:
+
+- Cognitive-load theory motivates separating necessary judgment from avoidable
+  extraneous load: John Sweller, "Cognitive Load During Problem Solving: Effects
+  on Learning," Cognitive Science, 1988,
+  <https://doi.org/10.1207/s15516709cog1202_4>.
+- Queueing theory motivates surfacing waiting/stale pressure before bounded
+  human attention becomes the bottleneck: John D. C. Little, "A Proof for the
+  Queuing Formula: L = lambda W," Operations Research, 1961,
+  <https://doi.org/10.1287/opre.9.3.383>.
+- SRE toil accounting motivates treating repeated manual review as an observable
+  load that should be reduced by better design when it is not essential human
+  judgment: <https://sre.google/sre-book/eliminating-toil/>.
+- Cost-of-quality accounting motivates keeping appraisal/review cost visible
+  alongside failure/externality risk: <https://asq.org/quality-resources/cost-of-quality>.
 
 Boundary:
 

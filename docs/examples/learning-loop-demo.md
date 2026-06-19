@@ -138,9 +138,14 @@ Run:
 make learning-loop-walkthrough
 ```
 
-The fixture creates a temporary evidence gap, A2H human-work session, human
-receipt, action attestation, accountability case, forecast summary, and
-action-impact summary. It then builds the organization surface, compiles a
-reviewable transition candidate, promotes one approved learning event, and
-checks that the event is visible on the final organization surface and replayed
-for matching future work.
+The fixture creates a temporary governed run, evidence gap, A2H human-work
+session, human receipt, action attestation, accountability case, forecast
+summary, and action-impact summary. It then builds the organization surface,
+compiles a reviewable transition candidate, promotes one approved learning
+event, creates outcome/review follow-up records, projects a pre-work
+`context_packet`, verifies the packet digest, records a learning-use receipt
+that cites the verified packet, and then builds the one-event `learning-loop`
+projection. The check fails if the event is not visible on the final
+organization surface, is not replayed for matching future work, the receipt
+loses the packet link, or the loop projection does not expose the verified
+packet ref and joined outcome/review follow-up state.

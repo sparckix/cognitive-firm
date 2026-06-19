@@ -6,10 +6,11 @@
  *   - GET /api/state → full OrgState JSON
  *   - WebSocket /ws → push updates on file changes
  *
- * This is the local/solo control-plane projection. It reads org/ and
- * the configured workspace, exposes state to Orbit, and writes approved governance
- * decisions back into the canonical filesystem backend. Git is audit/sync/
- * rollback, not the low-latency coordination substrate.
+ * This is the bundled Orbit backend projection. It reads org/ and the configured
+ * workspace for display, and routes typed human intents through the kernel
+ * service when mutation is enabled. Canonical state stays in the kernel-backed
+ * filesystem/logs; Git is audit/sync/rollback, not the low-latency coordination
+ * substrate.
  */
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'fs'
@@ -409,9 +410,8 @@ const server = createServer((req, res) => {
 
   // ── /api/chat/* — per-role two-way chat (Orbit v2 ChatPane) ──────
   // GET /api/chat/:role_id?day=YYYY-MM-DD → list messages for that role+day
-  // POST /api/chat/send body: { role_id, text } → append principal message
-  //   to org/sessions/<role_id>/chat/<today>.jsonl. Daemon picks it up next
-  //   tick and generates a cheap-tier reply (subscription via claude/gemini).
+  // POST /api/chat/send body: { role_id, text } → route a typed chat intent
+  //   through the kernel service. Orbit does not own the chat log mutation.
   if (req.url && req.url.startsWith('/api/chat/') && req.method === 'GET') {
     const m = req.url.match(/^\/api\/chat\/([A-Za-z0-9_]+)(?:\?day=([0-9-]+))?/)
     if (!m) {
@@ -516,7 +516,7 @@ const server = createServer((req, res) => {
     return
   }
 
-  // ── ACTION ENDPOINTS (write to canonical filesystem backend) ──────
+  // ── ACTION ENDPOINTS (typed intents routed through the kernel service) ──
 
   if (req.url === '/api/human_work/create' && req.method === 'POST') {
     if (!requestAuthorized(req, res)) return
@@ -884,6 +884,91 @@ const server = createServer((req, res) => {
         res.end(JSON.stringify({
           actor_id: result.actor_id ?? actorId,
           items: result.items ?? [],
+        }))
+      })
+      .catch(err => {
+        res.writeHead(502, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: String(err) }))
+      })
+    return
+  }
+
+  // ── Provenance timeline (v0.4 learning/provenance surface) ──────
+  // GET /api/provenance-timeline?run_id=...|ref=...|tenant_id=...
+  // Optional project_id must be paired with tenant_id unless run_id anchors scope.
+  // Thin read proxy to GET /kernel/provenance-timeline. This route is
+  // intentionally projection-only: it does not create work, rank next steps,
+  // approve proposals, or mutate workflow state.
+  if (req.url?.startsWith('/api/provenance-timeline') && req.method === 'GET') {
+    const url = new URL(req.url, `http://${req.headers.host}`)
+    const params = new URLSearchParams()
+    for (const key of ['run_id', 'ref', 'tenant_id', 'project_id']) {
+      const value = url.searchParams.get(key)?.trim()
+      if (value) params.set(key, value)
+    }
+    if (!Array.from(params.keys()).length) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        ok: false,
+        error: 'provenance timeline requires run_id, ref, tenant_id, or tenant_id with project_id',
+      }))
+      return
+    }
+    if (params.has('project_id') && !params.has('tenant_id') && !params.has('run_id')) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        ok: false,
+        error: 'project_id provenance queries require tenant_id or run_id',
+      }))
+      return
+    }
+    getKernelService(`/kernel/provenance-timeline?${params.toString()}`)
+      .then(body => {
+        const result = body.result ?? body
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          timeline: result.timeline ?? result,
+        }))
+      })
+      .catch(err => {
+        res.writeHead(502, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: String(err) }))
+      })
+    return
+  }
+
+  // GET /api/provenance-report?run_id=...|ref=...|tenant_id=...
+  // Same read-only selector discipline as the timeline route, returning the
+  // portable provenance handoff report used by other surfaces.
+  if (req.url?.startsWith('/api/provenance-report') && req.method === 'GET') {
+    const url = new URL(req.url, `http://${req.headers.host}`)
+    const params = new URLSearchParams()
+    for (const key of ['run_id', 'ref', 'tenant_id', 'project_id', 'event_limit']) {
+      const value = url.searchParams.get(key)?.trim()
+      if (value) params.set(key, value)
+    }
+    if (!Array.from(params.keys()).some(key => key !== 'event_limit')) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        ok: false,
+        error: 'provenance report requires run_id, ref, tenant_id, or tenant_id with project_id',
+      }))
+      return
+    }
+    if (params.has('project_id') && !params.has('tenant_id') && !params.has('run_id')) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        ok: false,
+        error: 'project_id provenance queries require tenant_id or run_id',
+      }))
+      return
+    }
+    getKernelService(`/kernel/provenance-report?${params.toString()}`)
+      .then(body => {
+        const result = body.result ?? body
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          report: result.report ?? result,
         }))
       })
       .catch(err => {

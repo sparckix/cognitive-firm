@@ -21,6 +21,7 @@ import { BatchGateReview } from './components/BatchGateReview'
 import { ChatPane } from './components/ChatPane'
 import { HumanWorkPane } from './components/HumanWorkPane'
 import { NeedsMePane } from './components/NeedsMePane'
+import { ProvenanceTimelinePane } from './components/ProvenanceTimelinePane'
 import { WorkInboxPane } from './components/WorkInboxPane'
 
 const SpatialCanvas = lazy(() =>
@@ -100,7 +101,7 @@ export function App() {
         </h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 12, color: '#6b7394' }}>
           <span>
-            System of record: <code style={{ color: '#4f8ff7' }}>org/</code>
+            System of record: <code style={{ color: '#4f8ff7' }}>kernel state</code>
           </span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{
@@ -429,6 +430,14 @@ export function App() {
               work-to-do list here. */}
           <div style={{ marginTop: 24 }}>
             <WorkInboxPane />
+          </div>
+
+          {/* Provenance timeline — read-only joined view over proposals,
+              attestations, human work, checkpoints, learning, and
+              learning-use receipts. It explains governed work without
+              becoming an orchestration surface. */}
+          <div style={{ marginTop: 24 }}>
+            <ProvenanceTimelinePane />
           </div>
         </div>
 

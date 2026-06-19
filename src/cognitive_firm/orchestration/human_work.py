@@ -55,6 +55,22 @@ Observability = Literal["digital_artifact", "external_system", "human_attested",
 ReceiptType = Literal["note", "artifact_ref", "external_ref", "witness", "none"]
 Confidence = Literal["low", "medium", "high"]
 InteractionSurface = Literal["offline", "cli", "orbit", "telegram", "external_system", "mixed"]
+RiskTier = Literal["low", "medium", "high", "irreversible"]
+DeploymentClass = Literal[
+    "local",
+    "internal",
+    "customer_facing",
+    "regulated",
+    "physical_world",
+    "external_write",
+]
+HumanSpeedClass = Literal[
+    "agent_speed",
+    "sampled_review",
+    "batched_human_review",
+    "gate_before_action",
+    "accountable_closure",
+]
 
 DEFAULT_HUMAN_WORK_LOG = ORG_ROOT_DIR / "human_work" / "human_work.jsonl"
 VALID_STATES = {
@@ -91,6 +107,22 @@ VALID_OBSERVABILITY = {"digital_artifact", "external_system", "human_attested", 
 VALID_RECEIPT_TYPES = {"note", "artifact_ref", "external_ref", "witness", "none"}
 VALID_CONFIDENCE = {"low", "medium", "high"}
 VALID_INTERACTION_SURFACES = {"offline", "cli", "orbit", "telegram", "external_system", "mixed"}
+VALID_RISK_TIERS = {"low", "medium", "high", "irreversible"}
+VALID_DEPLOYMENT_CLASSES = {
+    "local",
+    "internal",
+    "customer_facing",
+    "regulated",
+    "physical_world",
+    "external_write",
+}
+VALID_HUMAN_SPEED_CLASSES = {
+    "agent_speed",
+    "sampled_review",
+    "batched_human_review",
+    "gate_before_action",
+    "accountable_closure",
+}
 TERMINAL_STATES = {"abandoned", "integrated"}
 A2H_WAITING_ON_HUMAN_STATES = {"requested", "claimed", "in_progress", "blocked"}
 A2H_READY_FOR_AGENT_STATES = {"handed_off", "completed"}
@@ -178,6 +210,48 @@ class A2HWorkPressure:
     stale_count: int
     session_ids: list[str]
     recommendation: str
+
+
+@dataclass(frozen=True)
+class HumanSpeedEnvelope:
+    """Read-only guidance for matching work speed to accountability needs."""
+
+    schema: str
+    speed_class: HumanSpeedClass
+    cadence: str
+    required_record: str
+    receipt_required: bool
+    sample_for_review: bool
+    sample_rate: float | None
+    gate_required: bool
+    accountability_case_recommended: bool
+    rationale: str
+    review_questions: list[str]
+    inputs: dict[str, Any]
+    boundary: dict[str, bool]
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class HumanSpeedFieldPilotSummary:
+    """Read-only field-pilot summary for human-speed envelope outcomes."""
+
+    schema: str
+    n_total: int
+    min_records: int
+    enough_records: bool
+    measurement_status: str
+    expected_matches: int
+    expected_mismatches: list[dict[str, Any]]
+    by_speed_class: dict[str, dict[str, Any]]
+    sample_policy: dict[str, Any]
+    review_reasons: list[str]
+    boundary: dict[str, bool]
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 def _now_iso() -> str:
@@ -509,6 +583,415 @@ def summarize_a2h_work_pressure(
             )
         )
     return pressure
+
+
+def build_human_speed_envelope(
+    *,
+    risk_tier: RiskTier | str = "medium",
+    bottleneck_class: BottleneckClass | str = "other",
+    deployment_class: DeploymentClass | str = "internal",
+    reversible: bool = True,
+    external_side_effect: bool = False,
+    repeated_similar: bool = False,
+    private_context: bool = False,
+    harm_occurred: bool = False,
+    residual_risk_accepted: bool = False,
+) -> HumanSpeedEnvelope:
+    """Classify the accountable speed for a proposed human/agent work item.
+
+    This is a projection over stated facts. It does not authorize work, open
+    gates, schedule review, or sample anything.
+    """
+
+    risk = _validate(str(risk_tier), VALID_RISK_TIERS, "risk_tier")
+    bottleneck = _validate(str(bottleneck_class), VALID_BOTTLENECKS, "bottleneck_class")
+    deployment = _validate(
+        str(deployment_class),
+        VALID_DEPLOYMENT_CLASSES,
+        "deployment_class",
+    )
+    high_exposure = (
+        risk in {"high", "irreversible"}
+        or deployment in {"regulated", "physical_world", "external_write"}
+        or (deployment == "customer_facing" and external_side_effect)
+    )
+    pre_action_gate_needed = (
+        risk == "irreversible"
+        or (high_exposure and not reversible)
+        or deployment in {"regulated", "physical_world", "external_write"}
+        or (deployment == "customer_facing" and external_side_effect)
+        or (risk == "high" and external_side_effect)
+    )
+    human_judgment_boundary = (
+        private_context
+        or bottleneck in {"authority", "taste", "relationship", "safety"}
+    )
+
+    if harm_occurred or residual_risk_accepted:
+        speed_class: HumanSpeedClass = "accountable_closure"
+        cadence = "closure_review"
+        required_record = "accountability_case"
+        receipt_required = True
+        sample_for_review = False
+        sample_rate = None
+        gate_required = False
+        accountability_case_recommended = True
+        rationale = (
+            "Harm or accepted residual risk needs owner, recourse, evidence, "
+            "and closure rather than faster execution."
+        )
+    elif pre_action_gate_needed:
+        speed_class = "gate_before_action"
+        cadence = "pre_action_gate"
+        required_record = "policy_decision_or_gate_plus_lease"
+        receipt_required = True
+        sample_for_review = False
+        sample_rate = None
+        gate_required = True
+        accountability_case_recommended = False
+        rationale = (
+            "Irreversible or high-exposure work should be gated before the "
+            "side effect, not sampled after the fact."
+        )
+    elif human_judgment_boundary:
+        speed_class = "batched_human_review"
+        cadence = "accountable_human_batch"
+        required_record = "human_work_session_with_receipt"
+        receipt_required = True
+        sample_for_review = bottleneck in {"taste", "relationship", "safety"}
+        sample_rate = 1.0 if sample_for_review else None
+        gate_required = False
+        accountability_case_recommended = False
+        rationale = (
+            "The bottleneck depends on human authority, taste, relationship, "
+            "safety, or private context; preserve that boundary but batch the "
+            "work when per-item review would add waste."
+        )
+    elif repeated_similar or risk == "medium" or deployment == "customer_facing":
+        speed_class = "sampled_review"
+        cadence = "agent_speed_with_sampled_review"
+        required_record = "action_attestations_plus_sample_policy"
+        receipt_required = False
+        sample_for_review = True
+        sample_rate = 0.1 if risk == "low" else 0.2
+        gate_required = False
+        accountability_case_recommended = False
+        rationale = (
+            "The work can proceed without per-item gates, but similar or "
+            "moderate-risk actions should be sampled so errors become visible."
+        )
+    else:
+        speed_class = "agent_speed"
+        cadence = "agent_tick"
+        required_record = "transition_or_action_attestation"
+        receipt_required = False
+        sample_for_review = False
+        sample_rate = None
+        gate_required = False
+        accountability_case_recommended = False
+        rationale = (
+            "The action is reversible, bounded, low-risk, and does not require "
+            "private human context."
+        )
+
+    return HumanSpeedEnvelope(
+        schema="human_speed_envelope.v1",
+        speed_class=speed_class,
+        cadence=cadence,
+        required_record=required_record,
+        receipt_required=receipt_required,
+        sample_for_review=sample_for_review,
+        sample_rate=sample_rate,
+        gate_required=gate_required,
+        accountability_case_recommended=accountability_case_recommended,
+        rationale=rationale,
+        review_questions=_speed_envelope_review_questions(speed_class),
+        inputs={
+            "risk_tier": risk,
+            "bottleneck_class": bottleneck,
+            "deployment_class": deployment,
+            "reversible": bool(reversible),
+            "external_side_effect": bool(external_side_effect),
+            "repeated_similar": bool(repeated_similar),
+            "private_context": bool(private_context),
+            "harm_occurred": bool(harm_occurred),
+            "residual_risk_accepted": bool(residual_risk_accepted),
+        },
+        boundary={
+            "does_not_authorize_work": True,
+            "does_not_dispatch_work": True,
+            "does_not_schedule_review": True,
+            "does_not_sample_records": True,
+            "does_not_approve_policy": True,
+        },
+    )
+
+
+def _speed_envelope_review_questions(speed_class: HumanSpeedClass) -> list[str]:
+    common = [
+        "What evidence would prove this speed choice was safe?",
+        "What would make this work move to a slower or more accountable class?",
+    ]
+    if speed_class == "agent_speed":
+        return [
+            "Is the action reversible and bounded to the stated scope?",
+            "Will a transition or attestation make the fast action replayable?",
+            *common,
+        ]
+    if speed_class == "sampled_review":
+        return [
+            "What sample rate and error threshold should trigger escalation?",
+            "Does the sample cover the cases most likely to hide externalities?",
+            *common,
+        ]
+    if speed_class == "batched_human_review":
+        return [
+            "Which part of the work is essential human judgment rather than avoidable toil?",
+            "Can similar items be batched without erasing relationship, taste, safety, or authority context?",
+            *common,
+        ]
+    if speed_class == "gate_before_action":
+        return [
+            "Which authority, policy decision, or lease must exist before the side effect?",
+            "What rollback or recourse path exists if the gate is wrong?",
+            *common,
+        ]
+    return [
+        "Who owns closure, recourse, and future review?",
+        "Which future work should encounter this residual risk or harm record?",
+        *common,
+    ]
+
+
+def summarize_human_speed_field_pilot(
+    rows: list[dict[str, Any]],
+    *,
+    min_records: int = 0,
+    default_expected_sample_rate: float = 0.1,
+) -> HumanSpeedFieldPilotSummary:
+    """Summarize measured outcomes for chosen human-speed envelope classes.
+
+    This is a field-pilot read model. It checks whether the chosen class
+    matched the classifier and whether measured outcomes need review. It does
+    not change routing, dispatch work, approve policy, or sample records.
+    """
+
+    by_class: dict[str, dict[str, Any]] = {}
+    review_reasons: list[str] = []
+    expected_mismatches: list[dict[str, Any]] = []
+    expected_matches = 0
+    sampled_review_rows = 0
+    sampled_review_samples = 0
+    sampled_expected_rate = default_expected_sample_rate
+
+    for index, row in enumerate(rows, start=1):
+        row_id = str(
+            row.get("row_id")
+            or row.get("action_id")
+            or row.get("decision_id")
+            or f"row-{index}"
+        )
+        expected = _expected_speed_envelope_for_pilot_row(row)
+        chosen = str(
+            row.get("chosen_speed_class")
+            or row.get("speed_class")
+            or (expected.speed_class if expected is not None else "unclassified")
+        )
+        if chosen not in VALID_HUMAN_SPEED_CLASSES and chosen != "unclassified":
+            review_reasons.append(f"{row_id}: invalid speed_class {chosen!r}")
+        stats = by_class.setdefault(chosen, _empty_speed_pilot_stats())
+        stats["n_total"] += 1
+
+        if expected is None:
+            stats["missing_envelope_inputs"] += 1
+            review_reasons.append(f"{row_id}: missing envelope input facts")
+        elif chosen == expected.speed_class:
+            expected_matches += 1
+        else:
+            stats["expected_mismatches"] += 1
+            mismatch = {
+                "row_id": row_id,
+                "chosen_speed_class": chosen,
+                "expected_speed_class": expected.speed_class,
+                "required_record": expected.required_record,
+            }
+            expected_mismatches.append(mismatch)
+            review_reasons.append(
+                f"{row_id}: chosen {chosen} differs from expected {expected.speed_class}"
+            )
+
+        if _pilot_bool(row, "error_occurred") or _pilot_bool(row, "decision_error"):
+            stats["errors"] += 1
+        if _pilot_bool(row, "rework_required"):
+            stats["rework"] += 1
+        if _pilot_bool(row, "hidden_burden_detected"):
+            stats["hidden_burden"] += 1
+        if _pilot_bool(row, "harm_occurred"):
+            stats["harm"] += 1
+            review_reasons.append(f"{row_id}: harm occurred under {chosen}")
+        if _pilot_bool(row, "residual_risk_open"):
+            stats["residual_risk_open"] += 1
+            review_reasons.append(f"{row_id}: residual risk remains open")
+
+        receipt_present = _pilot_bool(row, "receipt_present", default=True)
+        if chosen in {"gate_before_action", "accountable_closure"} and not receipt_present:
+            stats["missing_receipts"] += 1
+            review_reasons.append(f"{row_id}: {chosen} missing receipt")
+
+        sampled = _pilot_bool(row, "sampled_for_review")
+        if sampled:
+            stats["sampled_for_review"] += 1
+        if chosen == "sampled_review":
+            sampled_review_rows += 1
+            if sampled:
+                sampled_review_samples += 1
+            if expected and expected.sample_rate is not None:
+                sampled_expected_rate = max(sampled_expected_rate, expected.sample_rate)
+            row_expected = _pilot_float(row, "expected_sample_rate")
+            if row_expected is not None:
+                sampled_expected_rate = max(sampled_expected_rate, row_expected)
+
+        cycle_time = _pilot_float(row, "cycle_time_hours")
+        if cycle_time is not None:
+            stats["_cycle_time_sum"] += cycle_time
+            stats["_cycle_time_count"] += 1
+        touchpoints = _pilot_float(row, "human_touchpoints")
+        if touchpoints is not None:
+            stats["_human_touchpoints_sum"] += touchpoints
+            stats["_human_touchpoints_count"] += 1
+
+    for stats in by_class.values():
+        stats["error_rate"] = _rate(stats["errors"], stats["n_total"])
+        stats["rework_rate"] = _rate(stats["rework"], stats["n_total"])
+        stats["hidden_burden_rate"] = _rate(stats["hidden_burden"], stats["n_total"])
+        stats["residual_risk_open_rate"] = _rate(
+            stats["residual_risk_open"],
+            stats["n_total"],
+        )
+        stats["sample_rate_observed"] = _rate(
+            stats["sampled_for_review"],
+            stats["n_total"],
+        )
+        stats["mean_cycle_time_hours"] = _mean_or_none(
+            stats.pop("_cycle_time_sum"),
+            stats.pop("_cycle_time_count"),
+        )
+        stats["mean_human_touchpoints"] = _mean_or_none(
+            stats.pop("_human_touchpoints_sum"),
+            stats.pop("_human_touchpoints_count"),
+        )
+
+    observed_sample_rate = _rate(sampled_review_samples, sampled_review_rows)
+    if sampled_review_rows and observed_sample_rate < sampled_expected_rate:
+        review_reasons.append(
+            "sampled_review observed sample rate "
+            f"{observed_sample_rate:.3f} below expected {sampled_expected_rate:.3f}"
+        )
+
+    enough_records = len(rows) >= min_records
+    if not enough_records:
+        measurement_status = "insufficient_evidence"
+    elif review_reasons:
+        measurement_status = "needs_review"
+    else:
+        measurement_status = "stable"
+
+    return HumanSpeedFieldPilotSummary(
+        schema="human_speed_field_pilot_summary.v1",
+        n_total=len(rows),
+        min_records=min_records,
+        enough_records=enough_records,
+        measurement_status=measurement_status,
+        expected_matches=expected_matches,
+        expected_mismatches=expected_mismatches,
+        by_speed_class={key: by_class[key] for key in sorted(by_class)},
+        sample_policy={
+            "sampled_review_rows": sampled_review_rows,
+            "sampled_review_samples": sampled_review_samples,
+            "observed_sample_rate": observed_sample_rate,
+            "expected_sample_rate": sampled_expected_rate if sampled_review_rows else None,
+        },
+        review_reasons=review_reasons,
+        boundary={
+            "does_not_authorize_work": True,
+            "does_not_dispatch_work": True,
+            "does_not_schedule_review": True,
+            "does_not_sample_records": True,
+            "does_not_approve_policy": True,
+        },
+    )
+
+
+def _expected_speed_envelope_for_pilot_row(
+    row: dict[str, Any],
+) -> HumanSpeedEnvelope | None:
+    if not all(key in row for key in ("risk_tier", "bottleneck_class", "deployment_class")):
+        return None
+    return build_human_speed_envelope(
+        risk_tier=str(row["risk_tier"]),
+        bottleneck_class=str(row["bottleneck_class"]),
+        deployment_class=str(row["deployment_class"]),
+        reversible=_pilot_bool(row, "reversible", default=True),
+        external_side_effect=_pilot_bool(row, "external_side_effect"),
+        repeated_similar=_pilot_bool(row, "repeated_similar"),
+        private_context=_pilot_bool(row, "private_context"),
+        harm_occurred=_pilot_bool(row, "harm_occurred"),
+        residual_risk_accepted=_pilot_bool(row, "residual_risk_accepted"),
+    )
+
+
+def _empty_speed_pilot_stats() -> dict[str, Any]:
+    return {
+        "n_total": 0,
+        "expected_mismatches": 0,
+        "missing_envelope_inputs": 0,
+        "errors": 0,
+        "rework": 0,
+        "hidden_burden": 0,
+        "harm": 0,
+        "residual_risk_open": 0,
+        "missing_receipts": 0,
+        "sampled_for_review": 0,
+        "_cycle_time_sum": 0.0,
+        "_cycle_time_count": 0,
+        "_human_touchpoints_sum": 0.0,
+        "_human_touchpoints_count": 0,
+    }
+
+
+def _pilot_bool(row: dict[str, Any], key: str, *, default: bool = False) -> bool:
+    value = row.get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if value is None:
+        return default
+    lowered = str(value).strip().lower()
+    if lowered in {"1", "true", "yes", "y"}:
+        return True
+    if lowered in {"0", "false", "no", "n"}:
+        return False
+    return default
+
+
+def _pilot_float(row: dict[str, Any], key: str) -> float | None:
+    value = row.get(key)
+    if value is None or value == "":
+        return None
+    return float(value)
+
+
+def _rate(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 0.0
+    return numerator / denominator
+
+
+def _mean_or_none(total: float, count: int) -> float | None:
+    if count <= 0:
+        return None
+    return total / count
 
 
 def _replace_session(path: Path, session_id: str, mutate) -> HumanWorkSession:
@@ -883,6 +1366,11 @@ def main(argv: list[str] | None = None) -> int:
     list_parser.add_argument("--log-path", type=Path)
     list_parser.add_argument("--resource", action="store_true", help="render resource envelopes")
 
+    followup_parser = sub.add_parser("followup")
+    followup_parser.add_argument("--agent-counterparty-role")
+    followup_parser.add_argument("--log-path", type=Path)
+    followup_parser.add_argument("--resource", action="store_true", help="render resource envelopes")
+
     create_parser = sub.add_parser("create")
     create_parser.add_argument("--requested-by", required=True)
     create_parser.add_argument("--human-actor", required=True)
@@ -982,6 +1470,22 @@ def main(argv: list[str] | None = None) -> int:
             obligation_id=args.obligation_id,
             agent_followup_required=args.agent_followup_required,
             interaction_surface=args.interaction_surface,
+            log_path=args.log_path,
+        )
+        for session in sessions:
+            if args.resource:
+                print(
+                    json.dumps(
+                        human_work_resource(session).as_dict(),
+                        sort_keys=True,
+                    )
+                )
+            else:
+                print(json.dumps(human_work_summary(session), sort_keys=True))
+        return 0
+    if args.cmd == "followup":
+        sessions = list_agent_followup_human_work_sessions(
+            agent_counterparty_role=args.agent_counterparty_role,
             log_path=args.log_path,
         )
         for session in sessions:

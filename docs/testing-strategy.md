@@ -10,15 +10,17 @@ checks. Each layer asks a different question.
 |---|---|---|
 | Primitive tests | Does one kernel primitive enforce its local contract? | `tests/test_work_items.py`, `tests/test_formal_verification.py` |
 | Property tests | Does a contract hold across generated inputs? | `tests/test_invariants_property_based.py` |
-| Command-path selftests | Does the public command exercise the shipped path and expose the intended operator knobs? | `make a2h-command-conformance`, `make adoption-demo`, `make smoke-public`, `tests/test_self_evolving_make_targets.py` |
+| Command-path selftests | Does the public command exercise the shipped path and expose the intended operator knobs? | `make runtime-interrupt-command-conformance`, `make a2h-command-conformance`, `make a2a-delegation-command-conformance`, `make a2a-h2a-command-conformance`, `make saga-command-conformance`, `make agent-fleet-review-packet`, `make langgraph-adapter-policy-preview`, `make adoption-demo`, `make adoption-onramp-packet`, `make adoption-onramp-full-replay`, `make smoke-public`, `tests/test_self_evolving_make_targets.py` |
 | Public claim discipline | Do public docs avoid production/compliance/enterprise overclaims and keep required caveats visible? | `make public-claims-check`, `tests/test_public_claims_check.py` |
 | Release hygiene | Is private, generated, or local runtime state absent from tracked, staged, and unignored release state? | `make release-hygiene-check`, `tests/test_release_hygiene_check.py` |
 | Release diff audit | Is the current broad worktree diff classified into reviewable buckets, with unknown paths visible? | `make release-diff-audit`, `tests/test_release_diff_audit.py` |
 | Release candidate gate | Do the public deterministic suite, clean-container boot, and diff audit compose into one tag-candidate command? | `make release-candidate-check` |
 | Governance fault fixtures | Does the kernel block, flag, or route expected bad states? | `make governance-failure-benchmark` |
-| Decision-log replay | Can saved action-impact logs reconstruct a candidate proposal, evaluation, and review packet? | `make decision-log-replay-demo` |
+| Decision-log replay | Can saved action-impact logs reconstruct a candidate proposal, evaluation, review packet, and governed-run bundle? | `make decision-log-replay-demo` |
 | Field-pilot action-impact | Can a pilot folder carry measured action-impact rows and produce a review packet? | `make field-pilot-action-impact-demo` |
-| Adapter conformance | Does an external runtime or app adapter preserve the kernel boundary? | `tests/test_adapter_conformance.py`, `scripts/app_integration_conformance.py` |
+| Adoption on-ramp | Can the first reviewer collect observed no-cost evidence, including adapter-policy preview proof, attach externally produced live/release proof, and render a Markdown handoff without running a workflow engine? Can that same path replay from a clean public copy without internal or author-local state? | `make adoption-onramp-packet`, `make adoption-onramp-replay`, `make adoption-onramp-full-replay`, `tests/test_adoption_onramp_packet_script.py`, `tests/test_adoption_onramp_replay_script.py` |
+| Adapter conformance | Does an external runtime, app, or provider adapter preserve the kernel boundary? | `tests/test_adapter_conformance.py`, `make runtime-adapter-proof-pack`, `make formal-provider-proof-pack`, `scripts/app_integration_conformance.py` |
+| Adapter-policy package preview | Can a first-party runtime adapter policy overlay preview as authority-neutral without installing runtime code or writing governance state? | `make langgraph-adapter-policy-preview`, `tests/test_langgraph_adapter_policy_preview.py` |
 | Formal verification records | Can a certificate from Lean, SMT, Isabelle, Coq, Alloy, TLA+, or another checker be recorded and joined into a governed run? | `formal_verification`, governed-run bundle tests |
 | Formal provider bundle | Does signed provider evidence clear the bundle while missing provider trust evidence stays caveated? | `make formal-provider-bundle-demo` |
 | Production work execution | Does a governed run carry linked claimable work-item state, including completed, missing, and failed execution cases? | `tests/test_work_items.py`, governed-run bundle tests, `scripts/native_e2e_demo.py` |
@@ -112,6 +114,35 @@ A governance fixture is worth keeping only if all of the following are true:
 This keeps the benchmark closer to a conformance and fault-injection suite than
 to a demonstration-only script.
 
+## Runtime Interrupt Command Conformance
+
+`make runtime-interrupt-command-conformance` checks the external-runtime
+interrupt seam through the public `runtime_adapters` CLI. It proves that
+checkpoints cannot be imported before a run exists, incomplete interrupt events
+are rejected, `started` imports are idempotent, and a valid `interrupted` event
+projects a paused run plus one receipt-required A2H human-work session with the
+runtime `resume_ref` preserved for follow-up.
+
+The fixture is an adapter-boundary proof. It does not execute the graph,
+schedule a human, resume the runtime, or decide the human answer.
+
+## Runtime Adapter Proof Pack
+
+`make runtime-adapter-proof-pack` checks whether the no-cost native kernel demo
+and the LangGraph-style runtime demo satisfy the same governed-run summary
+contract. It validates the bundled `langgraph-runtime-adapter` manifest and
+conformance config, runs the deterministic full-JSON demos in temporary
+workspaces, then emits `runtime_adapter_proof_pack.v1`.
+
+The proof pack checks that both substrates have a passing governed-run bundle,
+resolved authority, bounded human work, action attestation, outcome evidence,
+accountability closure, and the same summary keys. It also checks that the
+runtime projection carries external run identity, an opaque resume ref, and
+evidence refs as runtime-owned facts.
+
+The checker packages evidence. It does not install LangGraph, execute a graph,
+approve adapter support, schedule work, or mutate durable kernel state.
+
 ## A2H Command Conformance
 
 `make a2h-command-conformance` checks the A2H receipt rule through the public
@@ -125,6 +156,47 @@ Primitive tests also cover structured human-work receipts. A receipt-required
 session can be integrated only after a bounded receipt records the actor,
 claim, receipt type/ref, subject refs, and artifact refs that make the claim
 reviewable.
+
+## A2A Delegation Command Conformance
+
+`make a2a-delegation-command-conformance` checks standalone role-to-role
+delegation and handoff policy through the kernel-service A2A routes. It proves
+that unlinked role edges fail closed without writing message envelopes, linked
+handoffs start as pending obligations, envelope acknowledgement does not accept
+the work, direct `pending -> fulfilled` completion is rejected, terminal
+obligations cannot be reopened, non-obligating `inform` messages cannot carry
+work state, and thread/depth guards reject unbounded chains.
+
+The fixture is a role-policy and lifecycle trace. It does not synthesize a
+route, schedule work, run an agent, bridge to human work, or own a workflow.
+
+## A2A/H2A Command Conformance
+
+`make a2a-h2a-command-conformance` checks the seam between role-to-role
+obligations and bounded human work. It creates an A2A handoff through the
+kernel-service route, proves `pending -> fulfilled` is rejected, moves the
+obligation to `blocked_input`, links an A2H human-work session by
+`obligation_id`, enforces receipt-before-integration through the public
+`human_work` CLI, then moves the A2A obligation through `in_progress` to
+`fulfilled` only after the human receipt is integrated.
+
+The fixture is a fixed trace over existing primitives. It does not select the
+next actor, schedule review, run an agent, resume a runtime, or decide whether
+the human output is substantively correct.
+
+## Saga Command Conformance
+
+`make saga-command-conformance` checks saga compensation through the public
+`saga_compensation` CLI. It creates a fulfilled parent obligation and a refused
+child obligation, proves that compensation cannot be triggered from the
+non-terminal parent, emits one compensation request from the terminal child
+failure, checks that the saga is visible while compensation is pending, and
+checks that the active view clears after the compensation obligation is
+fulfilled.
+
+The fixture is a protocol trace, not a workflow runner. It does not select the
+next actor, dispatch work, decide how to compensate, or mark compensation
+complete on behalf of a role.
 
 ## Formal Verification
 
@@ -147,6 +219,13 @@ signed provider payload, installed trust policy, formal-verification row, action
 attestation, and governed-run bundle. It also keeps the negative case: a
 provider-backed row without required trust evidence remains an incomplete
 bundle, not clean evidence.
+
+`make formal-provider-proof-pack` packages that same evidence as
+`formal_provider_proof_pack.v1`. The packet validates the bundled LeanMill
+manifest/config/trust-policy declarations, proves the signed provider path, and
+keeps the missing-evidence path as a falsifier. It is an adoption receipt; it
+does not execute LeanMill, install provider code, approve trust, or mutate
+durable kernel state.
 
 ## Costly Fixtures
 

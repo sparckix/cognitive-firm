@@ -343,6 +343,9 @@ def replay_learning_events(
     tenant_id: str | None = None,
     project_id: str | None = None,
     cue: str | None = None,
+    cue_signature: str | None = None,
+    resource_refs: list[str] | None = None,
+    topology_refs: list[str] | None = None,
     source_ref: str | None = None,
     tag: str | None = None,
     log_path: Path | None = None,
@@ -354,7 +357,13 @@ def replay_learning_events(
     """
     events = list_learning_events(status="active", log_path=log_path)
     out: list[ApprovedLearningEvent] = []
-    cue_text = cue.lower() if cue else None
+    cue_text = cue.strip().lower() if cue and cue.strip() else None
+    cue_signature_values = _clean_optional_strings(
+        [cue_signature] if cue_signature is not None else []
+    )
+    cue_signature = cue_signature_values[0] if cue_signature_values else None
+    resource_ref_set = set(_clean_optional_strings(resource_refs or []))
+    topology_ref_set = set(_clean_optional_strings(topology_refs or []))
     for event in events:
         if tenant_id is None and event.tenant_id is not None:
             continue
@@ -370,7 +379,21 @@ def replay_learning_events(
             continue
         if tag is not None and tag not in _learning_event_tags(event):
             continue
+        if cue_signature is not None:
+            if cue_signature not in _learning_event_cue_signatures(event):
+                continue
+        if resource_ref_set:
+            if not resource_ref_set.intersection(_learning_event_resource_refs(event)):
+                continue
+        if topology_ref_set:
+            if not topology_ref_set.intersection(_learning_event_topology_refs(event)):
+                continue
+        negative_cues = _learning_event_negative_cues(event)
+        if cue_signature and cue_signature in negative_cues:
+            continue
         if cue_text:
+            if any(negative.lower() in cue_text for negative in negative_cues):
+                continue
             haystack = " ".join(
                 [
                     event.future_application_cue,
@@ -411,6 +434,34 @@ def _learning_event_tags(event: ApprovedLearningEvent) -> set[str]:
     for key in ("tag", "tags", "labels", "capability_tags"):
         tags.update(_string_list(event.metadata.get(key)))
     return tags
+
+
+def _learning_event_cue_signatures(event: ApprovedLearningEvent) -> set[str]:
+    signatures: set[str] = set()
+    for key in ("cue_signature", "cue_signatures"):
+        signatures.update(_string_list(event.metadata.get(key)))
+    return signatures
+
+
+def _learning_event_resource_refs(event: ApprovedLearningEvent) -> set[str]:
+    refs: set[str] = set()
+    for key in ("resource_ref", "resource_refs"):
+        refs.update(_string_list(event.metadata.get(key)))
+    return refs
+
+
+def _learning_event_topology_refs(event: ApprovedLearningEvent) -> set[str]:
+    refs: set[str] = set()
+    for key in ("topology_ref", "topology_refs"):
+        refs.update(_string_list(event.metadata.get(key)))
+    return refs
+
+
+def _learning_event_negative_cues(event: ApprovedLearningEvent) -> set[str]:
+    cues: set[str] = set()
+    for key in ("negative_cue", "negative_cues"):
+        cues.update(_string_list(event.metadata.get(key)))
+    return cues
 
 
 def record_learning_event_encounter(
@@ -485,6 +536,72 @@ def record_learning_event_encounter(
     )
     _append_jsonl(path, encounter.as_dict())
     return encounter
+
+
+def verify_learning_event_context_packet_use(
+    *,
+    learning_event_id: str,
+    context_packet: dict[str, Any],
+    context_packet_ref: str | None = None,
+) -> dict[str, Any]:
+    """Verify a context packet can support a learning-use receipt.
+
+    This is a read-only receipt-integrity check. It verifies the packet digest
+    and confirms the packet basis names the learning event being encountered;
+    it does not replay current logs, apply learning, or authorize work.
+    """
+    from cognitive_firm.orchestration.work_discovery import verify_context_packet
+
+    if not isinstance(context_packet, dict):
+        return {
+            "ok": False,
+            "issues": ["context_packet must be an object"],
+            "packet_ok": False,
+            "read_only": True,
+            "verification_policy": "context_packet_digest_basis_includes_learning_event",
+        }
+
+    packet_verification = verify_context_packet(context_packet)
+    issues = list(packet_verification.get("issues") or [])
+    packet_ref = packet_verification.get("context_packet_id")
+    basis = packet_verification.get("basis") or {}
+    learning_event_ids = basis.get("learning_event_ids")
+
+    if packet_verification.get("ok"):
+        if not isinstance(learning_event_ids, list) or learning_event_id not in {
+            str(item) for item in learning_event_ids
+        }:
+            issues.append(
+                "context_packet does not include learning_event_id "
+                f"{learning_event_id}"
+            )
+        if context_packet_ref and context_packet_ref != packet_ref:
+            issues.append("context_packet_ref does not match context_packet id")
+
+    ok = not issues
+    return {
+        "ok": ok,
+        "issues": issues,
+        "packet_ok": bool(packet_verification.get("ok")),
+        "context_packet_ref": packet_ref,
+        "digest": packet_verification.get("digest"),
+        "basis_learning_event_ids": [
+            str(item) for item in learning_event_ids
+        ]
+        if isinstance(learning_event_ids, list)
+        else [],
+        "receipt_metadata": {
+            "context_packet_verification": "digest_basis_includes_learning_event",
+            "context_packet_digest": packet_verification.get("digest"),
+            "context_packet_verification_policy": packet_verification.get(
+                "verification_policy"
+            ),
+        }
+        if ok
+        else {},
+        "read_only": True,
+        "verification_policy": "context_packet_digest_basis_includes_learning_event",
+    }
 
 
 def list_learning_event_encounters(
@@ -597,6 +714,164 @@ def summarize_learning_events(
             events_with_encounters=len(events_with_encounters),
         ),
     )
+
+
+def learning_event_loop_projection(
+    learning_event_id: str,
+    *,
+    log_path: Path | None = None,
+    encounters_log_path: Path | None = None,
+    outcome_links_log_path: Path | None = None,
+    routine_reviews_log_path: Path | None = None,
+) -> dict[str, Any]:
+    """Return one approved learning unit's read-only compounding loop.
+
+    This is the operator-facing join for v0.4: what was learned, what evidence
+    justified it, what future context will see it, how it has been used, what
+    outcomes measured it, and when the routine is due for review. It owns no
+    facts and does not promote, apply, rank, or dispatch learning.
+    """
+
+    event = next(
+        (
+            row
+            for row in list_learning_events(log_path=log_path)
+            if row.learning_event_id == learning_event_id
+        ),
+        None,
+    )
+    if event is None:
+        raise KeyError(f"learning event not found: {learning_event_id}")
+
+    encounters = list_learning_event_encounters(
+        learning_event_id=learning_event_id,
+        log_path=encounters_log_path,
+    )
+    from cognitive_firm.orchestration.outcome_links import list_outcome_links
+    from cognitive_firm.orchestration.routine_reviews import list_routine_reviews
+
+    outcome_links = list_outcome_links(
+        learning_event_id=learning_event_id,
+        log_path=outcome_links_log_path,
+    )
+    routine_reviews = list_routine_reviews(
+        learning_event_id=learning_event_id,
+        log_path=routine_reviews_log_path,
+    )
+
+    encounter_counts = {
+        outcome: 0 for outcome in sorted(VALID_ENCOUNTER_OUTCOMES)
+    }
+    for encounter in encounters:
+        encounter_counts[encounter.outcome] = encounter_counts.get(
+            encounter.outcome,
+            0,
+        ) + 1
+    verdict_counts: dict[str, int] = {}
+    for link in outcome_links:
+        verdict = link.verdict or "awaiting_verdict"
+        verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
+    non_voided_links = [link for link in outcome_links if link.status != "voided"]
+    verdict_coverage = (
+        len([link for link in non_voided_links if link.verdict is not None])
+        / len(non_voided_links)
+        if non_voided_links
+        else 0.0
+    )
+    overdue_review_ids = [
+        review.review_id for review in routine_reviews if review.is_overdue()
+    ]
+    context_packet_refs = sorted(
+        {
+            ref
+            for ref in (encounter.context_packet_ref for encounter in encounters)
+            if ref
+        }
+    )
+    verified_context_packet_refs = sorted(
+        {
+            encounter.context_packet_ref
+            for encounter in encounters
+            if encounter.context_packet_ref
+            and encounter.metadata.get("context_packet_verification")
+            == "digest_basis_includes_learning_event"
+        }
+    )
+    evidence_refs = list(
+        dict.fromkeys(
+            [
+                event.approval_ref,
+                *event.source_carrier_refs,
+                *(link.outcome_link_id for link in outcome_links),
+                *(review.review_id for review in routine_reviews),
+                *[
+                    ref
+                    for encounter in encounters
+                    for ref in encounter.evidence_refs
+                ],
+            ]
+        )
+    )
+
+    if event.status != "active":
+        loop_state = event.status
+        recommendation = "learning unit is no longer active"
+    elif not outcome_links:
+        loop_state = "needs_outcome_link"
+        recommendation = "attach an outcome link to measure this learning unit"
+    elif verdict_coverage < 1.0:
+        loop_state = "awaiting_outcome_verdict"
+        recommendation = "record verdicts for open outcome links"
+    elif overdue_review_ids:
+        loop_state = "review_overdue"
+        recommendation = "review or retire overdue learning routine"
+    elif not encounters:
+        loop_state = "not_yet_used"
+        recommendation = "watch future work for an encounter/use receipt"
+    else:
+        loop_state = "closed_loop_active"
+        recommendation = "learning unit has evidence, future-use receipts, outcomes, and review coverage"
+
+    return {
+        "learning_event_id": learning_event_id,
+        "read_only": True,
+        "loop_state": loop_state,
+        "recommendation": recommendation,
+        "learned": {
+            "decision_use": event.decision_use,
+            "future_application_cue": event.future_application_cue,
+            "learning_unit_kind": event.learning_unit_kind,
+            "status": event.status,
+            "approved_by": event.approved_by,
+            "approval_ref": event.approval_ref,
+            "owner_role": event.owner_role,
+            "tenant_id": event.tenant_id,
+            "project_id": event.project_id,
+            "review_after_utc": event.review_after_utc,
+        },
+        "future_context": {
+            "owner_role": event.owner_role,
+            "cue": event.future_application_cue,
+            "cue_signatures": sorted(_learning_event_cue_signatures(event)),
+            "resource_refs": sorted(_learning_event_resource_refs(event)),
+            "topology_refs": sorted(_learning_event_topology_refs(event)),
+            "negative_cues": sorted(_learning_event_negative_cues(event)),
+            "context_packet_refs": context_packet_refs,
+            "verified_context_packet_refs": verified_context_packet_refs,
+        },
+        "evidence_refs": evidence_refs,
+        "source_carrier_refs": event.source_carrier_refs,
+        "derived_from_learning_event_ids": event.derived_from_learning_event_ids,
+        "encounter_counts": encounter_counts,
+        "encounters": [encounter.as_dict() for encounter in encounters],
+        "outcome_link_count": len(outcome_links),
+        "outcome_verdict_coverage": verdict_coverage,
+        "outcome_verdict_counts": verdict_counts,
+        "outcome_links": [link.as_dict() for link in outcome_links],
+        "routine_review_count": len(routine_reviews),
+        "overdue_review_ids": overdue_review_ids,
+        "routine_reviews": [review.as_dict() for review in routine_reviews],
+    }
 
 
 def learning_event_from_candidate(
@@ -783,9 +1058,17 @@ def _append_jsonl(path: Path, row: dict[str, Any]) -> None:
 
 def _string_list(payload: Any) -> list[str]:
     if isinstance(payload, list):
-        return [str(item) for item in payload if item]
+        out: list[str] = []
+        for item in payload:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if text:
+                out.append(text)
+        return out
     if payload:
-        return [str(payload)]
+        text = str(payload).strip()
+        return [text] if text else []
     return []
 
 
@@ -796,6 +1079,15 @@ def _clean_unique_strings(values: list[str], *, label: str) -> list[str]:
         if not text:
             raise ValueError(f"{label} entries must be non-empty")
         if text not in out:
+            out.append(text)
+    return out
+
+
+def _clean_optional_strings(values: list[str]) -> list[str]:
+    out: list[str] = []
+    for value in values:
+        text = str(value).strip()
+        if text and text not in out:
             out.append(text)
     return out
 

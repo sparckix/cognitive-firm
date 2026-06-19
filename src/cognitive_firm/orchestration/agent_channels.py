@@ -398,8 +398,13 @@ def send_agent_message(
     return message
 
 
-def read_agent_message(*, role_id: str, message_id: str) -> AgentMessage | None:
-    path = _message_path(role_id, message_id)
+def read_agent_message(
+    *,
+    role_id: str,
+    message_id: str,
+    channels_dir: Path | None = None,
+) -> AgentMessage | None:
+    path = _message_path(role_id, message_id, channels_dir=channels_dir)
     if not path.exists():
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -532,20 +537,25 @@ def update_obligation_state(
     return AgentMessage(**data)
 
 
-def list_blocked_obligations(role_id: str | None = None) -> list[AgentMessage]:
+def list_blocked_obligations(
+    role_id: str | None = None,
+    *,
+    channels_dir: Path | None = None,
+) -> list[AgentMessage]:
     """Return messages whose obligation_state is `blocked_input` — the
     structurally-visible "B is blocked waiting" view that Orbit and the
     manager-role daemon render to the principal.
 
     If role_id is None, scan all role inboxes; otherwise only that role's.
     """
-    if not CHANNELS_DIR.exists():
+    root = channels_dir or CHANNELS_DIR
+    if not root.exists():
         return []
     targets: list[Path]
     if role_id:
-        targets = [_role_inbox(role_id)]
+        targets = [_role_inbox(role_id, channels_dir=root)]
     else:
-        targets = [p / "inbox" for p in CHANNELS_DIR.iterdir() if p.is_dir()]
+        targets = [p / "inbox" for p in root.iterdir() if p.is_dir()]
 
     out: list[AgentMessage] = []
     for inbox in targets:

@@ -39,6 +39,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 from cognitive_firm.common.paths import ORG_ROOT_DIR
+from cognitive_firm.orchestration.authority_domains import (
+    AuthorityDomain,
+    resolve_authority_assignment_for_scope,
+)
 from cognitive_firm.orchestration.kernel_events import record_kernel_event
 from cognitive_firm.orchestration.resource_envelope import KernelResource, make_resource
 
@@ -57,6 +61,12 @@ VALID_REVIEW_OUTCOMES = {"endorsed", "corrected", "escalated", "promote_to_manda
 
 DEFAULT_RESIDUAL_RIGHTS_LOG = ORG_ROOT_DIR / "decision_rights" / "residual_right_assignments.jsonl"
 DEFAULT_RESIDUAL_DECISIONS_LOG = ORG_ROOT_DIR / "decision_rights" / "residual_decisions.jsonl"
+
+HolderResolutionSource = Literal[
+    "residual_right_assignment",
+    "authority_domain",
+    "unassigned",
+]
 
 
 @dataclass(frozen=True)
@@ -122,6 +132,40 @@ class ResidualDecision:
         return (self.scope_kind, self.scope_ref)
 
 
+@dataclass(frozen=True)
+class ResidualRightHolderResolution:
+    """Read-side accountable-holder view for one residual-right scope.
+
+    Explicit residual-right assignments remain the canonical authorization
+    surface. Authority-domain fallback is projection-only: it explains the
+    accountable role when an assignment is missing, but it does not create an
+    assignment or authorize a residual decision by itself.
+    """
+
+    scope_kind: ScopeKind
+    scope_ref: str
+    source: HolderResolutionSource
+    holder_role: str | None = None
+    holder_actor: str | None = None
+    holder_actors: list[str] = field(default_factory=list)
+    assignment_id: str | None = None
+    authority_domain_id: str | None = None
+    authority_scope_kind: str | None = None
+    authority_scope_id: str | None = None
+    basis: str = ""
+    issues: list[str] = field(default_factory=list)
+    explicit_assignment: bool = False
+    authoritative_for_decision_recording: bool = False
+    projection_only: bool = True
+
+    @property
+    def resolved(self) -> bool:
+        return self.holder_role is not None
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self) | {"resolved": self.resolved}
+
+
 # ---------------------------------------------------------------------------
 # time + io helpers (kept module-local, matching the kernel's primitive style)
 # ---------------------------------------------------------------------------
@@ -177,6 +221,43 @@ def _validate(value: str, allowed: set[str], label: str) -> str:
 
 def _scope_ref_for(scope_kind: str, scope_ref: str) -> str:
     return f"{scope_kind}:{scope_ref}"
+
+
+def _role_ref(role_id: str | None) -> str | None:
+    if role_id is None:
+        return None
+    role_id = str(role_id).strip()
+    if not role_id:
+        return None
+    if role_id.startswith("role."):
+        return role_id
+    return f"role.{role_id}"
+
+
+def _authority_scope_kwargs(
+    scope_kind: str,
+    scope_ref: str,
+    *,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    operating_unit_id: str | None = None,
+) -> dict[str, str | None]:
+    kwargs: dict[str, str | None] = {
+        "tenant_id": tenant_id,
+        "project_id": project_id,
+        "operating_unit_id": operating_unit_id,
+        "resource_class": None,
+        "decision_class": None,
+    }
+    if scope_kind == "project":
+        kwargs["project_id"] = scope_ref
+    elif scope_kind == "operating_unit":
+        kwargs["operating_unit_id"] = scope_ref
+    elif scope_kind == "resource_class":
+        kwargs["resource_class"] = scope_ref
+    elif scope_kind == "decision_class":
+        kwargs["decision_class"] = scope_ref
+    return kwargs
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +418,112 @@ def get_residual_right_holder(
     ):
         return assignment
     return None
+
+
+def resolve_residual_right_holder(
+    scope_kind: ScopeKind | str,
+    scope_ref: str,
+    *,
+    log_path: Path | None = None,
+    authority_domains: list[AuthorityDomain] | None = None,
+    actor_membership_log: Path | None = None,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    operating_unit_id: str | None = None,
+    now: datetime | None = None,
+) -> ResidualRightHolderResolution:
+    """Resolve the accountable holder view for one residual-right scope.
+
+    The canonical answer is still an active residual-right assignment. If the
+    scope has no assignment, authority domains can provide a projection-only
+    accountable role so operators can see who should close the gap without
+    silently granting residual decision rights.
+    """
+    scope_kind = _validate(str(scope_kind), VALID_SCOPE_KINDS, "scope_kind")
+    scope_ref = str(scope_ref).strip()
+    if not scope_ref:
+        raise ValueError("scope_ref is required")
+
+    assignment = get_residual_right_holder(
+        scope_kind,
+        scope_ref,
+        log_path=log_path,
+    )
+    if assignment is not None:
+        holder_actors = [assignment.holder_actor] if assignment.holder_actor else []
+        return ResidualRightHolderResolution(
+            scope_kind=scope_kind,  # type: ignore[arg-type]
+            scope_ref=scope_ref,
+            source="residual_right_assignment",
+            holder_role=assignment.holder_role,
+            holder_actor=assignment.holder_actor,
+            holder_actors=holder_actors,
+            assignment_id=assignment.assignment_id,
+            basis=assignment.basis,
+            explicit_assignment=True,
+            authoritative_for_decision_recording=True,
+            projection_only=False,
+        )
+
+    issues = ["no active residual-right assignment for scope"]
+    if authority_domains is None:
+        issues.append("authority domains were not supplied")
+        return ResidualRightHolderResolution(
+            scope_kind=scope_kind,  # type: ignore[arg-type]
+            scope_ref=scope_ref,
+            source="unassigned",
+            issues=issues,
+        )
+    if not authority_domains:
+        issues.append("authority domains were empty")
+        return ResidualRightHolderResolution(
+            scope_kind=scope_kind,  # type: ignore[arg-type]
+            scope_ref=scope_ref,
+            source="unassigned",
+            issues=issues,
+        )
+
+    resolution = resolve_authority_assignment_for_scope(
+        authority_domains,
+        actor_membership_log=actor_membership_log,
+        now=now,
+        **_authority_scope_kwargs(
+            scope_kind,
+            scope_ref,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            operating_unit_id=operating_unit_id,
+        ),
+    )
+    holder_role = _role_ref(resolution.authority_role_id)
+    if holder_role is None:
+        issues.append("no authority domain resolved for residual-right scope")
+        return ResidualRightHolderResolution(
+            scope_kind=scope_kind,  # type: ignore[arg-type]
+            scope_ref=scope_ref,
+            source="unassigned",
+            issues=issues,
+        )
+    holder_actors = list(resolution.actor_ids)
+    return ResidualRightHolderResolution(
+        scope_kind=scope_kind,  # type: ignore[arg-type]
+        scope_ref=scope_ref,
+        source="authority_domain",
+        holder_role=holder_role,
+        holder_actor=holder_actors[0] if len(holder_actors) == 1 else None,
+        holder_actors=holder_actors,
+        authority_domain_id=resolution.domain_id,
+        authority_scope_kind=resolution.scope_kind,
+        authority_scope_id=resolution.scope_id,
+        basis=(
+            "projection from authority domain; create an explicit "
+            "residual-right assignment to make it canonical"
+        ),
+        issues=issues,
+        explicit_assignment=False,
+        authoritative_for_decision_recording=False,
+        projection_only=True,
+    )
 
 
 def residual_right_assignment_resource(
@@ -753,6 +940,16 @@ def main(argv: list[str] | None = None) -> int:
     holder.add_argument("--scope-kind", required=True)
     holder.add_argument("--scope-ref", required=True)
     holder.add_argument("--log-path", type=Path)
+    holder.add_argument(
+        "--resolve-authority",
+        action="store_true",
+        help="include authority-domain holder resolution when no assignment exists",
+    )
+    holder.add_argument("--org-root", type=Path)
+    holder.add_argument("--actor-membership-log", type=Path)
+    holder.add_argument("--tenant-id")
+    holder.add_argument("--project-id")
+    holder.add_argument("--operating-unit-id")
 
     list_assignments = sub.add_parser("list-assignments")
     list_assignments.add_argument("--scope-kind")
@@ -818,7 +1015,39 @@ def main(argv: list[str] | None = None) -> int:
         assignment = get_residual_right_holder(
             args.scope_kind, args.scope_ref, log_path=args.log_path
         )
-        print(json.dumps(assignment.as_dict() if assignment else {}, sort_keys=True))
+        if args.resolve_authority:
+            from cognitive_firm.orchestration.authority_domains import (
+                load_authority_domains,
+            )
+
+            resolution = resolve_residual_right_holder(
+                args.scope_kind,
+                args.scope_ref,
+                log_path=args.log_path,
+                authority_domains=load_authority_domains(args.org_root),
+                actor_membership_log=args.actor_membership_log,
+                tenant_id=args.tenant_id,
+                project_id=args.project_id,
+                operating_unit_id=args.operating_unit_id,
+            )
+            print(
+                json.dumps(
+                    {
+                        "holder": assignment.as_dict() if assignment else None,
+                        "holder_resolution": resolution.as_dict(),
+                        "boundary": {
+                            "authority_domain_fallback": "projection_only",
+                            "creates_residual_right_assignment": False,
+                            "authorizes_residual_decision": (
+                                resolution.authoritative_for_decision_recording
+                            ),
+                        },
+                    },
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(json.dumps(assignment.as_dict() if assignment else {}, sort_keys=True))
         return 0
     if args.cmd == "list-assignments":
         for assignment in list_residual_right_assignments(

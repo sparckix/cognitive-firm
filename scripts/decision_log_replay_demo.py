@@ -19,11 +19,31 @@ from pathlib import Path
 from typing import Any
 
 from cognitive_firm.kernel_service import KernelServiceConfig, dispatch_kernel_request
+from cognitive_firm.orchestration.action_attestation import (
+    create_action_attestation,
+    digest_text,
+)
 from cognitive_firm.orchestration.action_impact import (
     context_signature,
     load_summary_from_json,
 )
+from cognitive_firm.orchestration.artifact_bundle import (
+    build_governed_run_attestation_bundle,
+    governed_run_bundle_summary,
+    governed_run_bundle_to_dict,
+    validate_governed_run_bundle_payload,
+)
 from cognitive_firm.orchestration.business_function_bandit import propose_business_function_policy
+from cognitive_firm.orchestration.outcome_links import (
+    create_outcome_link,
+    record_metric_snapshot,
+    record_verdict,
+)
+from cognitive_firm.orchestration.run_checkpoints import (
+    append_checkpoint,
+    set_run_state,
+    start_run,
+)
 
 
 def _assert_status(actual: int, expected: int, label: str) -> None:
@@ -84,6 +104,9 @@ def _write_fixture_logs(root: Path) -> dict[str, Path]:
         "evaluations": root / "policy_evaluations.jsonl",
         "packets": root / "policy_promotion_packets.jsonl",
         "authority_diff": root / "authority_diff_enterprise_review.json",
+        "transitions": root / "transitions.jsonl",
+        "attestations": root / "action_attestations.jsonl",
+        "outcomes": root / "outcome_links.jsonl",
     }
     root.mkdir(parents=True, exist_ok=True)
     logs["summary"].write_text(
@@ -254,6 +277,7 @@ def run_replay(root: Path) -> dict[str, Any]:
         report = report_by_id[packet["evaluation_report"]["evaluation_id"]]
         packet_rows.append(
             {
+                "packet_id": packet["packet_id"],
                 "candidate_policy_id": packet["candidate_policy_id"],
                 "evaluation_status": report["status"],
                 "packet_status": packet["status"],
@@ -267,6 +291,126 @@ def run_replay(root: Path) -> dict[str, Any]:
 
     review_ready = sum(1 for row in packet_rows if row["packet_status"] == "review_ready")
     blocked = sum(1 for row in packet_rows if row["packet_status"] == "blocked")
+    run = start_run(
+        owner_role="role.support_manager",
+        objective="replay support action-impact logs into policy-review evidence",
+        tenant_id="tenant-northstar-support",
+        project_id="project-support-routing",
+        idempotency_key="decision-log-replay-demo",
+        run_id="run_decision_log_replay",
+        log_path=logs["transitions"],
+    )
+    append_checkpoint(
+        run.run_id,
+        actor="role.support_manager",
+        step_id="replay_policy_logs",
+        status="completed",
+        summary=(
+            "Replayed action-impact logs into one review-ready packet and one "
+            "blocked packet."
+        ),
+        payload_ref=str(logs["packets"]),
+        side_effect_key="decision-log-replay:policy-packets",
+        log_path=logs["transitions"],
+    )
+    packet_digest = digest_text(json.dumps(packet_rows, sort_keys=True))
+    attestation = create_action_attestation(
+        subject_kind="artifact",
+        subject_ref="decision-log-replay:policy-promotion-packets",
+        subject_digest=packet_digest,
+        producer="role.support_manager",
+        action_type="decision_log_replay",
+        runtime_ref="scripts/decision_log_replay_demo.py",
+        input_refs=[
+            str(logs["summary"]),
+            str(logs["safe_map"]),
+            str(logs["unsafe_map"]),
+            str(logs["evaluations"]),
+        ],
+        output_refs=[
+            f"policy_promotion_packet:{row['packet_id']}"
+            for row in packet_rows
+        ],
+        verification_status="verified",
+        verification_summary=(
+            "Replay reconstructed exactly two packet rows: one review-ready "
+            "and one blocked by guardrails."
+        ),
+        tenant_id="tenant-northstar-support",
+        project_id="project-support-routing",
+        run_id=run.run_id,
+        metadata={
+            "demo": "decision_log_replay",
+            "review_ready": review_ready,
+            "blocked": blocked,
+        },
+        log_path=logs["attestations"],
+    )
+    outcome = create_outcome_link(
+        change_ref=f"run:{run.run_id}",
+        change_kind="decision_log_replay_demo",
+        metric_name="replay_packet_reconstruction",
+        metric_unit="passed_check",
+        created_by="role.support_manager",
+        tenant_id="tenant-northstar-support",
+        project_id="project-support-routing",
+        owner_role="role.support_manager",
+        direction="increase",
+        metadata={"cognitive_run_id": run.run_id, "demo": "decision_log_replay"},
+        log_path=logs["outcomes"],
+    )
+    record_metric_snapshot(
+        outcome.outcome_link_id,
+        kind="baseline",
+        value=0,
+        captured_by="role.support_manager",
+        measurement_ref=str(logs["summary"]),
+        note="No replay proof before reconstructing packet rows.",
+        log_path=logs["outcomes"],
+    )
+    record_metric_snapshot(
+        outcome.outcome_link_id,
+        kind="post",
+        value=1,
+        captured_by="role.support_manager",
+        measurement_ref=f"attestation:{attestation.attestation_id}",
+        note="Replay proof reconstructed safe and blocked packet rows.",
+        log_path=logs["outcomes"],
+    )
+    record_verdict(
+        outcome.outcome_link_id,
+        verdict="improved",
+        recorded_by="role.support_manager",
+        rationale="The replay produced validated review evidence from logs alone.",
+        log_path=logs["outcomes"],
+    )
+    append_checkpoint(
+        run.run_id,
+        actor="role.support_manager",
+        step_id="attest_replay",
+        status="completed",
+        summary="Recorded replay attestation and outcome verdict.",
+        payload_ref=f"attestation:{attestation.attestation_id}",
+        side_effect_key="decision-log-replay:attestation",
+        log_path=logs["transitions"],
+    )
+    set_run_state(
+        run.run_id,
+        actor="role.support_manager",
+        state="completed",
+        log_path=logs["transitions"],
+    )
+    bundle = build_governed_run_attestation_bundle(
+        run.run_id,
+        transition_log_path=logs["transitions"],
+        action_attestation_log_path=logs["attestations"],
+        outcome_links_log_path=logs["outcomes"],
+        authority_root=root,
+    )
+    bundle_payload = governed_run_bundle_to_dict(bundle)
+    bundle_validation_errors = validate_governed_run_bundle_payload(bundle_payload)
+    bundle_summary = governed_run_bundle_summary(bundle)
+    bundle_ok = not bundle_validation_errors and bundle_summary["verdict"] == "passed"
     return {
         "demo": "decision_log_replay",
         "fictional_firm": "Northstar Support Co.",
@@ -278,7 +422,8 @@ def run_replay(root: Path) -> dict[str, Any]:
             "packets": len(replayed_packets),
             "review_ready": review_ready,
             "blocked": blocked,
-            "verdict": "passed" if review_ready == 1 and blocked == 1 else "failed",
+            "bundle_verdict": bundle_summary["verdict"],
+            "verdict": "passed" if review_ready == 1 and blocked == 1 and bundle_ok else "failed",
         },
         "candidate_proposer": {
             "safe_status": safe_proposal.status,
@@ -287,6 +432,12 @@ def run_replay(root: Path) -> dict[str, Any]:
             "unsafe_rejected_contexts": len(unsafe_proposal.rejected_contexts),
         },
         "replayed_packets": sorted(packet_rows, key=lambda row: row["candidate_policy_id"]),
+        "governed_run_bundle": bundle_summary,
+        "bundle_validation": {
+            "ok": not bundle_validation_errors,
+            "errors": bundle_validation_errors,
+        },
+        "governed_run_attestation": bundle_payload,
         "log_paths": {name: str(path) for name, path in logs.items()},
     }
 
@@ -321,6 +472,8 @@ def main(argv: list[str] | None = None) -> int:
             "logs_only_replay": payload["logs_only_replay"],
             "summary": payload["summary"],
             "candidate_proposer": payload["candidate_proposer"],
+            "governed_run_bundle": payload["governed_run_bundle"],
+            "bundle_validation": payload["bundle_validation"],
             "replayed_packets": [
                 {
                     "candidate_policy_id": row["candidate_policy_id"],

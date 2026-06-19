@@ -130,6 +130,20 @@ This keeps the boundary clean:
 - The closing role can query human work sessions by obligation id before
   moving the obligation to `fulfilled`.
 
+Command-path conformance:
+
+```bash
+make a2a-h2a-command-conformance
+```
+
+The fixture creates an A2A handoff through the kernel-service route, proves the
+"no skip" rule by rejecting `pending -> fulfilled`, moves the obligation to
+`blocked_input`, links bounded A2H human work by `obligation_id`, and closes
+the A2A obligation only after the human-work receipt is integrated. It proves
+the role-office/human-work seam without choosing actors, scheduling review,
+running agents, resuming a runtime, or judging the substance of the human
+output.
+
 ### Why this matters at T2
 
 Saga compensation (Phase C, see below) cannot be implemented without obligation state distinct from envelope state. You cannot compensate what you cannot lifecycle.
@@ -146,6 +160,22 @@ Saga compensation (Phase C, see below) cannot be implemented without obligation 
 Anything else raises `ChannelPolicyError`. The policy is intentionally simple:
 local channel hygiene, not enterprise RBAC. A control-plane policy compiler can
 replace it when adopters need richer authorization.
+
+Command-path conformance:
+
+```bash
+make a2a-delegation-command-conformance
+```
+
+The fixture exercises the same kernel-service routes an adapter would use. It
+proves that unlinked role edges fail closed without writing message envelopes,
+linked handoffs start as pending obligations, envelope acknowledgement does not
+accept the work, direct `pending -> fulfilled` completion is rejected, terminal
+obligations cannot be reopened, non-obligating `inform` messages cannot carry
+work state, and thread/depth guards reject unbounded chains.
+
+It is role-policy and lifecycle conformance. It does not synthesize routes,
+schedule work, run agents, bridge to human work, or own a workflow.
 
 ## Dependency primitive (Phase B): content-addressed artifact promises
 
@@ -213,6 +243,20 @@ Public API:
 - `compensate_failed_obligation(role_id, message_id, reason)` → returns the list of compensation messages emitted.
 - `list_active_sagas(window_hours)` → returns chains with at least one in-flight compensation; consumed by Orbit.
 - `check_compensation_freshness(stale_after_hours=24)` → returns compensation requests stuck in `pending` past their staleness window — these fire `saga_compensation_unfulfilled`.
+
+Command-path conformance:
+
+```bash
+make saga-command-conformance
+```
+
+The fixture exercises `python -m cognitive_firm.orchestration.saga_compensation`
+over an explicit temp channel/log state. It proves that compensation is
+terminal-failure-only, that a refused child obligation emits a compensation
+request for a fulfilled ancestor, that the active saga remains visible while
+compensation is pending, and that the active view clears after compensation is
+fulfilled. The command path does not choose actors, schedule work, decide the
+semantic inverse, or close compensation on the role's behalf.
 
 **Why it matters:** without saga, partial-failure recovery is manual git-revert. Acceptable for T1 (single principal, trusted hardware, low-stakes). Unacceptable for T2 (regulated enterprise, where some actions have external side effects that git cannot revert — Salesforce activity records, money movement, external notifications). T2 reactivation depends on this primitive.
 

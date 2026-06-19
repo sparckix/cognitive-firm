@@ -15,8 +15,10 @@ runtimes:
 
 ```text
 POST /kernel/governance-changes
+GET  /kernel/governance-change-template
 GET  /kernel/governance-changes
 GET  /kernel/governance-changes/{proposal_id}
+GET  /kernel/governance-changes/{proposal_id}/review-packet
 POST /kernel/governance-changes/{proposal_id}/decision
 POST /kernel/governance-changes/{proposal_id}/outcome-link
 POST /kernel/learning-transition-candidates/{candidate_id}/governance-change
@@ -25,6 +27,24 @@ POST /kernel/learning-transition-candidates/{candidate_id}/governance-change
 Creation records the proposal and its deterministic evidence checks. A decision
 records an approval or decline event; applying the referenced file, policy, or
 overlay remains a separate governed mutation.
+`GET /kernel/governance-change-template` returns a read-only request skeleton
+with the required evidence fields and invariant checks. It is an authoring aid,
+not a proposal record.
+`cognitive-firm-userland proposal <proposal_id>` renders one proposal's
+evidence and invariant checks without dumping raw JSON, while
+`cognitive-firm-userland proposal-packet <proposal_id>` exports a portable
+review handoff with evidence refs, invariant rows, selected provenance, review
+questions, follow-through status, and Markdown. The follow-through block is
+derived from selected provenance records: proposal-only, decision observed, or
+closed-loop evidence from outcome links, routine reviews, or learning-use
+receipts. It does not decide or mutate the proposal.
+`cognitive-firm-userland proposal-template` prints the same service-owned
+request skeleton for CLI users.
+`cognitive-firm-userland proposal-from-candidate <candidate_id>` calls the
+candidate-promotion route for terminal users. It is still a governance-change
+write: the candidate supplies rationale and source refs, while the caller must
+provide target, expected behavior change, risk, rollback, and invariant
+evidence. Missing evidence produces a blocked proposal, not approval.
 
 The candidate-promotion route is a convenience path for review queues. It
 copies a learning-transition candidate's rationale and source refs into a
@@ -83,6 +103,26 @@ A review-ready proposal must include:
 The computed `evidence_sufficiency` field records `status`, `missing`,
 `rationale`, and the evidence refs gathered from the proposal and invariant
 checks.
+
+## Formal Proof Obligation Projection
+
+High-risk policy/provider/adapter-shaped proposals often need formal evidence
+before a human review is credible. The review projection now includes
+`proof_obligations`, a read-only signal over the proposal's existing refs and
+metadata:
+
+- route, capability, gate, and tenant policy changes are treated as
+  proof-sensitive surfaces;
+- refs beginning with `formal_verification:` or `formal-verification:` count as
+  cited formal evidence;
+- `metadata.requires_formal_verification=true` makes a missing formal ref a
+  projection-level blocker;
+- otherwise a missing formal ref is reviewer attention, not an automatic
+  rejection.
+
+This does not run Lean, SMT, or another checker. It does not approve a proposal
+or make a formal-verification row authoritative by itself. It only prevents
+formal proof expectations from being hidden inside generic evidence refs.
 
 ## Predicted Effects
 
@@ -212,7 +252,8 @@ The projection includes:
 - `spec`: proposed change kind, title, target, rationale, source refs,
   expected behavior change, risk summary, rollback plan, and owner role;
 - `status`: proposal status, review-readiness, invariant checks, evidence
-  sufficiency result, approval ref, and creation time;
+  sufficiency result, proof-obligation projection, approval ref, and creation
+  time;
 - `links`: target, proposer, owner, approval, source refs, gathered evidence
   refs, and per-invariant evidence refs.
 

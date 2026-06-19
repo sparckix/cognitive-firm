@@ -317,6 +317,9 @@ def main(argv: list[str] | None = None) -> int:
 
         payload = (
             {
+                "demo": "langgraph_governance_projection",
+                "no_external_calls": True,
+                "summary": summary,
                 "run_projection": projection,
                 "human_work_sessions": sessions,
                 "governed_run_attestation": bundle,

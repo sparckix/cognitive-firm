@@ -27,7 +27,7 @@ The implementation source is `src/cognitive_firm/orchestration/state_surface_inv
 | `outcome_links` | canonical state | JSONL + resource projection | `create_outcome_link`, `record_metric_snapshot`, `record_verdict` | outcome-link summary, routine reviews, org surface, `outcome_link_resource` | `docs/protocols/outcome-links.md` |
 | `routine_reviews` | canonical state | JSONL + resource projection | `schedule_routine_review`, `record_review_outcome`, `retire_routine` | due-review surface, review queues, org surface, `routine_review_resource` | `docs/protocols/routine-reviews.md` |
 | `resource_allocation` | canonical state | JSONL | `record_allocation_decision`, `apply_allocation_decision`, `revert_allocation_decision` | allocation ledger, operating-unit dashboard, audit review | `docs/protocols/resource-allocation.md` |
-| `residual_right_assignments` | canonical state | JSONL + resource projection | `assign_residual_right` | residual-rights holder lookup, decision-rights summary, `residual_right_assignment_resource` | `docs/protocols/decision-rights.md` |
+| `residual_right_assignments` | canonical state | JSONL + resource projection | `assign_residual_right` | residual-rights holder lookup, authority-domain holder resolution, decision-rights summary, `residual_right_assignment_resource` | `docs/protocols/decision-rights.md` |
 | `residual_decisions` | canonical state | JSONL + resource projection | `record_residual_decision`, `review_residual_decision` | decision-rights summary, governance review, `residual_decision_resource` | `docs/protocols/decision-rights.md` |
 
 ## Event And Projection Surfaces

@@ -705,6 +705,9 @@ def discover_relevant_learning_events(
     tenant_id: str | None = None,
     project_id: str | None = None,
     cue: str | None = None,
+    cue_signature: str | None = None,
+    resource_refs: list[str] | None = None,
+    topology_refs: list[str] | None = None,
     max_per_source: int = 5,
     log_path: Path | None = None,
 ) -> list[Candidate]:
@@ -714,7 +717,12 @@ def discover_relevant_learning_events(
     future work must encounter before repeating a known failure mode or routing
     pattern.
     """
-    if not assigned_to:
+    cue = _clean_context_scalar(cue)
+    cue_signature = _clean_context_scalar(cue_signature)
+    resource_refs = _clean_context_refs(resource_refs or [])
+    topology_refs = _clean_context_refs(topology_refs or [])
+    has_structured_query = bool(cue_signature or resource_refs or topology_refs)
+    if not assigned_to and not has_structured_query:
         return []
 
     try:
@@ -725,6 +733,9 @@ def discover_relevant_learning_events(
             tenant_id=tenant_id,
             project_id=project_id,
             cue=cue,
+            cue_signature=cue_signature,
+            resource_refs=resource_refs,
+            topology_refs=topology_refs,
             log_path=log_path,
         )
     except Exception:  # noqa: BLE001
@@ -906,6 +917,9 @@ def discover_all(
     tenant_id: str | None = None,
     project_id: str | None = None,
     cue: str | None = None,
+    cue_signature: str | None = None,
+    resource_refs: list[str] | None = None,
+    topology_refs: list[str] | None = None,
     record_learning_encounters: bool = False,
     learning_events_log_path: Path | None = None,
 ) -> list[Candidate]:
@@ -935,12 +949,15 @@ def discover_all(
         assigned_to=assigned_to, max_per_source=max_per_source))
     out.extend(discover_agent_channel_messages(
         assigned_to=assigned_to, max_per_source=max_per_source))
-    if cue:
+    if cue or cue_signature or resource_refs or topology_refs:
         out.extend(discover_relevant_learning_events(
             assigned_to=assigned_to,
             tenant_id=tenant_id,
             project_id=project_id,
             cue=cue,
+            cue_signature=cue_signature,
+            resource_refs=resource_refs,
+            topology_refs=topology_refs,
             max_per_source=max_per_source,
             log_path=learning_events_log_path,
         ))
@@ -977,6 +994,9 @@ def build_role_learning_context(
     tenant_id: str | None = None,
     project_id: str | None = None,
     cue: str | None = None,
+    cue_signature: str | None = None,
+    resource_refs: list[str] | None = None,
+    topology_refs: list[str] | None = None,
     max_per_source: int = 5,
     include_work_candidates: bool = True,
     learning_events_log_path: Path | None = None,
@@ -992,15 +1012,23 @@ def build_role_learning_context(
     from cognitive_firm.orchestration.outcome_links import list_outcome_links
     from cognitive_firm.orchestration.routine_reviews import list_routine_reviews
 
+    cue = _clean_context_scalar(cue)
+    cue_signature = _clean_context_scalar(cue_signature)
+    resource_refs = _clean_context_refs(resource_refs or [])
+    topology_refs = _clean_context_refs(topology_refs or [])
+    has_context_query = bool(assigned_to or cue_signature or resource_refs or topology_refs)
     events = (
         replay_learning_events(
             role=assigned_to,
             tenant_id=tenant_id,
             project_id=project_id,
             cue=cue,
+            cue_signature=cue_signature,
+            resource_refs=resource_refs,
+            topology_refs=topology_refs,
             log_path=learning_events_log_path,
         )
-        if assigned_to
+        if has_context_query
         else []
     )
     learning_context: list[dict[str, Any]] = []
@@ -1028,17 +1056,21 @@ def build_role_learning_context(
             "approval_ref": event.approval_ref,
         })
 
+    include_scoped_work_candidates = include_work_candidates and bool(assigned_to)
     work_candidates = (
         discover_all(
             assigned_to=assigned_to,
             tenant_id=tenant_id,
             project_id=project_id,
             cue=cue,
+            cue_signature=cue_signature,
+            resource_refs=resource_refs,
+            topology_refs=topology_refs,
             max_per_source=max_per_source,
             record_learning_encounters=False,
             learning_events_log_path=learning_events_log_path,
         )
-        if include_work_candidates
+        if include_scoped_work_candidates
         else []
     )
     packet_basis = {
@@ -1046,6 +1078,9 @@ def build_role_learning_context(
         "tenant_id": tenant_id,
         "project_id": project_id,
         "cue": cue,
+        "cue_signature": cue_signature,
+        "resource_refs": list(resource_refs),
+        "topology_refs": list(topology_refs),
         "learning_event_ids": [
             row["learning_event"]["learning_event_id"] for row in learning_context
         ],
@@ -1065,15 +1100,17 @@ def build_role_learning_context(
             for review_id in row["overdue_review_ids"]
         ],
         "work_candidate_refs": [_candidate_work_ref(candidate) for candidate in work_candidates],
+        "work_candidates_included": include_scoped_work_candidates,
     }
-    packet_digest = hashlib.sha256(
-        json.dumps(packet_basis, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    packet_digest = compute_context_packet_digest(packet_basis)
     return {
         "assigned_to": assigned_to,
         "tenant_id": tenant_id,
         "project_id": project_id,
         "cue": cue,
+        "cue_signature": cue_signature,
+        "resource_refs": list(resource_refs),
+        "topology_refs": list(topology_refs),
         "read_only": True,
         "context_packet": {
             "context_packet_id": f"ctx_{packet_digest[:16]}",
@@ -1095,6 +1132,87 @@ def build_role_learning_context(
             "no_auto_application": True,
         },
     }
+
+
+def compute_context_packet_digest(basis: dict[str, Any]) -> str:
+    """Return the canonical digest for a work-discovery context-packet basis."""
+    return hashlib.sha256(
+        json.dumps(basis, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def verify_context_packet(context_packet: dict[str, Any]) -> dict[str, Any]:
+    """Verify that a context packet id and digest match its embedded basis.
+
+    This is a no-write integrity check over a captured projection. It does not
+    replay current logs, authorize a learning-use receipt, or prove that the
+    packet is still current.
+    """
+    issues: list[str] = []
+    if not isinstance(context_packet, dict):
+        return {
+            "ok": False,
+            "issues": ["context_packet must be an object"],
+            "verification_policy": "digest_only_no_log_lookup",
+        }
+
+    basis = context_packet.get("basis")
+    expected_digest: str | None = None
+    expected_context_packet_id: str | None = None
+    if not isinstance(basis, dict):
+        issues.append("context_packet.basis must be an object")
+    else:
+        expected_digest = compute_context_packet_digest(basis)
+        expected_context_packet_id = f"ctx_{expected_digest[:16]}"
+
+    digest = context_packet.get("digest")
+    context_packet_id = context_packet.get("context_packet_id")
+    if not isinstance(digest, str) or not digest.strip():
+        issues.append("context_packet.digest is required")
+    elif expected_digest is not None and digest != expected_digest:
+        issues.append("context_packet.digest does not match basis")
+
+    if not isinstance(context_packet_id, str) or not context_packet_id.strip():
+        issues.append("context_packet.context_packet_id is required")
+    elif expected_context_packet_id is not None and context_packet_id != expected_context_packet_id:
+        issues.append("context_packet.context_packet_id does not match digest")
+
+    write_policy = context_packet.get("write_policy")
+    if write_policy != "projection_only":
+        issues.append("context_packet.write_policy must be projection_only")
+
+    if context_packet.get("canonical_store") is not None:
+        issues.append("context_packet.canonical_store must be null for projection-only packets")
+
+    return {
+        "ok": not issues,
+        "issues": issues,
+        "context_packet_id": context_packet_id,
+        "expected_context_packet_id": expected_context_packet_id,
+        "digest": digest,
+        "expected_digest": expected_digest,
+        "write_policy": write_policy,
+        "canonical_store": context_packet.get("canonical_store"),
+        "basis": basis if isinstance(basis, dict) else None,
+        "verification_policy": "digest_only_no_log_lookup",
+        "read_only": True,
+    }
+
+
+def _clean_context_scalar(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _clean_context_refs(values: list[str]) -> list[str]:
+    out: list[str] = []
+    for value in values:
+        text = str(value).strip()
+        if text and text not in out:
+            out.append(text)
+    return out
 
 
 def format_candidate_for_inbox(c: Candidate) -> str:

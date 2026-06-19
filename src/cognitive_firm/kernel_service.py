@@ -85,6 +85,11 @@ from cognitive_firm.orchestration.capability_signals import (
     route_capability_signal,
     summarize_capability_signals,
 )
+from cognitive_firm.orchestration.command_surface import (
+    command_operator_path,
+    command_surface_hint,
+    command_surface_match_records,
+)
 from cognitive_firm.orchestration.evidence_gaps import DEFAULT_EVIDENCE_GAPS_LOG
 from cognitive_firm.orchestration.forecast_market import DEFAULT_FORECAST_MARKET_ROOT
 from cognitive_firm.orchestration.formal_verification import (
@@ -94,31 +99,48 @@ from cognitive_firm.orchestration.formal_verification import (
 )
 from cognitive_firm.orchestration.governed_run_recipes import (
     ExecutionEvidenceRouteInput,
+    GovernedActionCompositionInput,
     PredictedMutationOutcomeInput,
     PredictedMutationReversalReviewInput,
     build_execution_evidence_route_packet,
+    build_governed_action_composition_packet,
     build_predicted_mutation_outcome_link_request,
     build_predicted_mutation_reversal_review_request,
 )
 from cognitive_firm.orchestration.human_work import (
     DEFAULT_HUMAN_WORK_LOG,
     append_human_work_interaction,
+    append_human_work_receipt,
+    build_human_speed_envelope,
     create_agent_requested_human_work_session,
     create_human_work_session,
+    list_human_work_sessions,
+    summarize_a2h_work_pressure,
     update_human_work_state,
 )
-from cognitive_firm.orchestration.leases import DEFAULT_LEASES_LOG, acquire_lease, release_lease, verify_lease
+from cognitive_firm.orchestration.leases import (
+    DEFAULT_LEASES_LOG,
+    LeaseRecord,
+    acquire_lease,
+    lease_resource,
+    list_leases,
+    release_lease,
+    verify_lease,
+)
 from cognitive_firm.orchestration.learning_events import (
     DEFAULT_LEARNING_ENCOUNTERS_LOG,
     DEFAULT_LEARNING_EVENTS_LOG,
     create_learning_event,
+    learning_event_loop_projection,
     learning_event_resource,
     list_learning_events,
     record_learning_event_encounter,
     replay_learning_events,
     summarize_learning_events,
+    verify_learning_event_context_packet_use,
 )
 from cognitive_firm.orchestration.learning_transition_compiler import (
+    compile_attention_transition_candidates,
     compile_learning_transitions,
 )
 from cognitive_firm.orchestration.multi_agent_trace_attribution import (
@@ -178,6 +200,11 @@ from cognitive_firm.orchestration.protocol_experiments import (
     record_protocol_observation,
     start_protocol_experiment,
 )
+from cognitive_firm.orchestration.provenance_timeline import (
+    build_provenance_graph,
+    build_provenance_report,
+    build_provenance_timeline,
+)
 from cognitive_firm.orchestration.routine_reviews import (
     DEFAULT_ROUTINE_REVIEWS_LOG,
     list_due_reviews,
@@ -212,6 +239,7 @@ from cognitive_firm.orchestration.decision_rights import (
     assign_residual_right,
     get_residual_right_holder,
     record_residual_decision,
+    resolve_residual_right_holder,
     review_residual_decision,
     summarize_decision_rights,
 )
@@ -245,7 +273,10 @@ from cognitive_firm.orchestration.work_items import (
     start_work_item,
     work_item_resource,
 )
-from cognitive_firm.orchestration.work_discovery import build_role_learning_context
+from cognitive_firm.orchestration.work_discovery import (
+    build_role_learning_context,
+    verify_context_packet,
+)
 
 
 @dataclass(frozen=True)
@@ -356,8 +387,10 @@ def _learning_transition_candidates_payload(
     valid_sources = {
         "all",
         "org_surface",
+        "human_work",
         "execution",
         "attribution",
+        "attention",
         "capability",
         "phase_execution",
         "protocol_experiment",
@@ -368,16 +401,29 @@ def _learning_transition_candidates_payload(
     candidates: list[dict[str, Any]] = []
     source_counts = {
         "org_surface": 0,
+        "human_work": 0,
         "attribution": 0,
+        "attention": 0,
         "capability": 0,
         "phase_execution": 0,
         "protocol_experiment": 0,
     }
-    if source in {"all", "org_surface"}:
+    if source in {"all", "org_surface", "human_work"}:
         plan = compile_learning_transitions(_configured_org_surface(config))
+        org_rows = [candidate.as_dict() for candidate in plan.candidates]
+        human_work_rows = [
+            row for row in org_rows if row.get("source_kind") == "a2h_pressure"
+        ]
+        rows = human_work_rows if source == "human_work" else org_rows
+        candidates.extend(rows)
+        source_counts["org_surface"] = len(org_rows) if source != "human_work" else 0
+        source_counts["human_work"] = len(human_work_rows)
+
+    if source in {"all", "attention"}:
+        plan = compile_attention_transition_candidates(_attention_feed(config))
         rows = [candidate.as_dict() for candidate in plan.candidates]
         candidates.extend(rows)
-        source_counts["org_surface"] = len(rows)
+        source_counts["attention"] = len(rows)
 
     if source in {"all", "execution", "attribution"}:
         packets = list_failure_attribution_packets(
@@ -588,6 +634,31 @@ def _query_bool(query: dict[str, list[str]], key: str) -> bool:
     return (query.get(key, ["false"])[0] or "").lower() in {"1", "true", "yes"}
 
 
+def _query_bool_default(query: dict[str, list[str]], key: str, default: bool) -> bool:
+    if key not in query:
+        return default
+    return (query.get(key, [str(default)])[0] or "").lower() in {"1", "true", "yes"}
+
+
+def _lease_payload(lease: LeaseRecord | dict[str, Any]) -> dict[str, Any]:
+    """Return a backend-neutral lease payload with effective expiry state."""
+    payload = asdict(lease) if isinstance(lease, LeaseRecord) else dict(lease)
+    if not isinstance(payload.get("metadata"), dict):
+        payload["metadata"] = {}
+    if payload.get("state") == "active":
+        expires_at = str(payload.get("expires_at_utc") or "")
+        try:
+            expires = datetime.fromisoformat(expires_at)
+        except ValueError:
+            expires = None
+        if expires is not None:
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            if expires <= datetime.now(timezone.utc):
+                payload["state"] = "expired"
+    return payload
+
+
 def _query_optional_int(
     query: dict[str, list[str]],
     key: str,
@@ -606,11 +677,48 @@ def _query_optional_int(
     return value
 
 
+def _query_string_list(query: dict[str, list[str]], key: str) -> list[str]:
+    out: list[str] = []
+    for raw in query.get(key, []):
+        for item in str(raw).split(","):
+            text = item.strip()
+            if text and text not in out:
+                out.append(text)
+    return out
+
+
+def _query_has_any(query: dict[str, list[str]], keys: tuple[str, ...]) -> bool:
+    for key in keys:
+        if any(str(value).strip() for value in query.get(key, [])):
+            return True
+    return False
+
+
+def _project_scope_requires_tenant(query: dict[str, list[str]]) -> bool:
+    """Return whether a provenance query uses project scope without tenant.
+
+    Project ids are tenant-scoped in the public kernel unless a run id anchors
+    the query and supplies tenant/project scope from the run record.
+    """
+
+    has_project = any(str(value).strip() for value in query.get("project_id", []))
+    has_tenant = any(str(value).strip() for value in query.get("tenant_id", []))
+    has_run = any(str(value).strip() for value in query.get("run_id", []))
+    return has_project and not has_tenant and not has_run
+
+
+PROVENANCE_SELECTOR_REQUIREMENT = (
+    "run_id, ref, tenant_id, or tenant_id with project_id"
+)
+
+
 READ_ONLY_POST_ROUTES = {
+    "/kernel/governed-action-composition",
     "/kernel/governed-run-bundles/build",
     "/kernel/governed-run-bundles/validate",
     "/kernel/mutation-proofs/build",
     "/kernel/mutation-proofs/validate",
+    "/kernel/work-discovery/context-packet/verify",
 }
 
 
@@ -669,8 +777,94 @@ def dispatch_kernel_request(
         if method == "GET" and route == "/kernel/vocabulary":
             return _ok(_vocabulary_payload())
 
+        if method == "GET" and route == "/kernel/command-surface":
+            query_text = query.get("query", query.get("q", [""]))[0]
+            if not str(query_text).strip():
+                return _error(400, "query is required")
+            source_role_id = query.get("role_id", [None])[0]
+            try:
+                from cognitive_firm.orchestration.authority_domains import (
+                    load_role_index,
+                    load_authority_domains,
+                )
+
+                authority_domains = load_authority_domains(config.org_dir)
+                authority_domain_issues: list[str] = []
+            except Exception as exc:
+                authority_domains = None
+                authority_domain_issues = [
+                    f"authority domains could not be loaded: {exc}"
+                ]
+            roles = None
+            if source_role_id:
+                try:
+                    roles = load_role_index(config.org_dir)
+                except Exception as exc:
+                    authority_domain_issues.append(
+                        f"role index could not be loaded: {exc}"
+                    )
+            matches = command_surface_match_records(
+                str(query_text),
+                authority_domains=authority_domains,
+                roles=roles,
+                source_role_id=source_role_id,
+            )
+            return _ok(
+                {
+                    "query": str(query_text),
+                    "source_role_id": source_role_id,
+                    "matches": matches,
+                    "hint": command_surface_hint(str(query_text)),
+                    "read_only": True,
+                    "projection_only": True,
+                    "authority_effects_are_projection_only": True,
+                    "authority_domain_issues": authority_domain_issues,
+                    "boundary": {
+                        "does_not_execute_commands": True,
+                        "does_not_schedule_work": True,
+                        "does_not_mutate_kernel_state": True,
+                    },
+                }
+            )
+
+        if method == "GET" and route == "/kernel/operator-path":
+            path_id = query.get("path_id", [""])[0]
+            if not str(path_id).strip():
+                return _error(400, "path_id is required")
+            path = command_operator_path(str(path_id))
+            if not path.get("steps"):
+                return _error(404, f"unknown operator path: {path_id}")
+            return _ok({"operator_path": path})
+
+        if method == "GET" and route == "/kernel/governance-change-template":
+            from cognitive_firm.orchestration.governance_changes import (
+                governance_change_request_template,
+            )
+
+            try:
+                template = governance_change_request_template(
+                    change_kind=query.get(
+                        "change_kind", ["route_policy_change"]
+                    )[0],
+                    title=query.get("title", [None])[0],
+                    proposed_by=query.get("proposed_by", [None])[0],
+                    target_ref=query.get("target_ref", [None])[0],
+                    tenant_id=query.get("tenant_id", [None])[0],
+                    project_id=query.get("project_id", [None])[0],
+                )
+            except ValueError as exc:
+                return _error(400, str(exc))
+            return _ok(
+                {
+                    "template": template,
+                    "submit_route": "POST /kernel/governance-changes",
+                    "read_only": True,
+                }
+            )
+
         if method == "GET" and route == "/kernel/governance-changes":
             from cognitive_firm.orchestration.governance_changes import (
+                governance_change_review_projection,
                 governance_change_resource,
                 list_governance_changes,
             )
@@ -679,6 +873,7 @@ def dispatch_kernel_request(
             change_kind_filter = query.get("change_kind", [None])[0]
             tenant_filter = query.get("tenant_id", [None])[0]
             project_filter = query.get("project_id", [None])[0]
+            view = query.get("view", [""])[0]
             proposals = list_governance_changes(
                 status=status_filter,
                 change_kind=change_kind_filter,
@@ -696,6 +891,20 @@ def dispatch_kernel_request(
                     }
                 )
             decided = _decided_governance_ids(config)
+            if view == "review":
+                return _ok(
+                    {
+                        "proposals": [
+                            governance_change_review_projection(
+                                proposal,
+                                decided=proposal.proposal_id in decided,
+                            )
+                            for proposal in proposals
+                        ],
+                        "view": "review",
+                        "read_only": True,
+                    }
+                )
             payload = []
             for proposal in proposals:
                 row = proposal.as_dict()
@@ -705,10 +914,60 @@ def dispatch_kernel_request(
 
         if (
             method == "GET"
+            and len(parts) == 4
+            and parts[:2] == ["kernel", "governance-changes"]
+            and parts[3] == "review-packet"
+        ):
+            from cognitive_firm.orchestration.governance_changes import (
+                governance_change_review_packet,
+                list_governance_changes,
+            )
+
+            proposal_id = parts[2]
+            proposals = {
+                proposal.proposal_id: proposal
+                for proposal in list_governance_changes(
+                    log_path=_governance_changes_log(config)
+                )
+            }
+            proposal = proposals.get(proposal_id)
+            if proposal is None:
+                return _error(404, f"no governance change {proposal_id!r}")
+            event_limit = _query_optional_int(query, "event_limit", default=8)
+            provenance = build_provenance_report(
+                ref=f"governance_change:{proposal_id}",
+                tenant_id=proposal.tenant_id,
+                project_id=proposal.project_id,
+                event_limit=event_limit or 0,
+                transition_log_path=config.transition_log,
+                kernel_events_log_path=(
+                    config.kernel_events_log or config.transition_log
+                ),
+                action_attestation_log_path=config.action_attestation_log,
+                human_work_log_path=config.human_work_log,
+                governance_changes_log_path=_governance_changes_log(config),
+                outcome_links_log_path=config.outcome_links_log,
+                routine_reviews_log_path=config.routine_reviews_log,
+                learning_events_log_path=config.learning_events_log,
+                learning_encounters_log_path=config.learning_encounters_log,
+            )
+            return _ok(
+                {
+                    "packet": governance_change_review_packet(
+                        proposal,
+                        decided=proposal_id in _decided_governance_ids(config),
+                        provenance_report=provenance,
+                    )
+                }
+            )
+
+        if (
+            method == "GET"
             and len(parts) == 3
             and parts[:2] == ["kernel", "governance-changes"]
         ):
             from cognitive_firm.orchestration.governance_changes import (
+                governance_change_review_projection,
                 governance_change_resource,
                 list_governance_changes,
             )
@@ -729,6 +988,17 @@ def dispatch_kernel_request(
                         "proposal": governance_change_resource(
                             proposal
                         ).as_dict()
+                    }
+                )
+            if query.get("view", [""])[0] == "review":
+                return _ok(
+                    {
+                        "proposal": governance_change_review_projection(
+                            proposal,
+                            decided=proposal_id in _decided_governance_ids(config),
+                        ),
+                        "view": "review",
+                        "read_only": True,
                     }
                 )
             row = proposal.as_dict()
@@ -802,6 +1072,78 @@ def dispatch_kernel_request(
                 }
             )
 
+        if method == "GET" and route == "/kernel/human-work-pressure":
+            threshold = _query_optional_int(
+                query, "concentration_threshold", default=3
+            )
+            stale_after_hours = _query_optional_int(
+                query, "stale_after_hours", default=24
+            )
+            tenant_id = query.get("tenant_id", [None])[0]
+            project_id = query.get("project_id", [None])[0]
+            sessions = list_human_work_sessions(
+                tenant_id=tenant_id,
+                project_id=project_id,
+                log_path=config.human_work_log,
+            )
+            pressure = summarize_a2h_work_pressure(
+                sessions=sessions,
+                stale_after_hours=float(stale_after_hours or 0),
+                concentration_threshold=threshold or 0,
+            )
+            role = query.get("agent_counterparty_role", [None])[0]
+            if role:
+                pressure = [
+                    group
+                    for group in pressure
+                    if group.agent_counterparty_role == role
+                ]
+            return _ok(
+                {
+                    "pressure": [asdict(group) for group in pressure],
+                    "read_only": True,
+                    "observer_only": True,
+                    "query": {
+                        "agent_counterparty_role": role,
+                        "tenant_id": tenant_id,
+                        "project_id": project_id,
+                        "stale_after_hours": stale_after_hours,
+                        "concentration_threshold": threshold,
+                    },
+                    "caveats": [
+                        "pressure groups are review signals, not automation or routing decisions",
+                        "taste, safety, relationship, and authority bottlenecks preserve human boundaries",
+                    ],
+                }
+            )
+
+        if method == "GET" and route == "/kernel/human-speed-envelope":
+            reversible = _query_bool_default(query, "reversible", True)
+            envelope = build_human_speed_envelope(
+                risk_tier=query.get("risk_tier", ["medium"])[0],
+                bottleneck_class=query.get("bottleneck_class", ["other"])[0],
+                deployment_class=query.get("deployment_class", ["internal"])[0],
+                reversible=reversible,
+                external_side_effect=_query_bool(query, "external_side_effect"),
+                repeated_similar=_query_bool(query, "repeated_similar"),
+                private_context=_query_bool(query, "private_context"),
+                harm_occurred=_query_bool(query, "harm_occurred"),
+                residual_risk_accepted=_query_bool(
+                    query, "residual_risk_accepted"
+                ),
+            )
+            return _ok(
+                {
+                    "envelope": envelope.as_dict(),
+                    "read_only": True,
+                    "observer_only": True,
+                    "caveats": [
+                        "speed envelopes guide accountable records; they do not authorize or dispatch work",
+                        "sampling, gates, leases, and accountability cases remain separate kernel records",
+                    ],
+                }
+            )
+
         if method == "POST" and route == "/kernel/human-work":
             _verify_mutation_lease("human_work:create", body, actor=actor, config=config)
             return _ok(
@@ -852,6 +1194,29 @@ def dispatch_kernel_request(
                 log_path=config.human_work_log,
             )
             return _ok({"session": asdict(session)})
+
+        if (
+            method == "POST"
+            and len(parts) == 4
+            and parts[:2] == ["kernel", "human-work"]
+            and parts[3] == "receipt"
+        ):
+            _verify_mutation_lease(f"human_work:{parts[2]}", body, actor=actor, config=config)
+            session = append_human_work_receipt(
+                parts[2],
+                actor=_required_str(body, "actor"),
+                summary=_required_str(body, "summary"),
+                receipt_type=str(body.get("receipt_type") or "note"),
+                receipt_ref=_optional_str(body, "receipt_ref"),
+                subject_refs=_list_str(body.get("subject_refs")),
+                artifact_refs=_list_str(body.get("artifact_refs")),
+                confidence=str(body.get("confidence") or "medium"),
+                observability=str(body.get("observability") or "human_attested"),
+                review_required=bool(body.get("review_required")),
+                metadata=dict(body.get("metadata") or {}),
+                log_path=config.human_work_log,
+            )
+            return _ok({"session": asdict(session)}, status=201)
 
         if method == "POST" and route == "/kernel/accountability-cases/from-damage-signal":
             _verify_mutation_lease("accountability_cases:create_from_damage_signal", body, actor=actor, config=config)
@@ -1050,6 +1415,12 @@ def dispatch_kernel_request(
                     f"governance change {proposal_id!r} has already been "
                     f"decided",
                 )
+            _verify_mutation_lease(
+                f"governance_change:{proposal_id}:decision",
+                body,
+                actor=actor,
+                config=config,
+            )
             verb = (
                 "governance_change.approved"
                 if decision == "approve"
@@ -1248,6 +1619,40 @@ def dispatch_kernel_request(
             )
             return _ok({"membership": membership.as_dict()})
 
+        if method == "GET" and route == "/kernel/leases":
+            resource_ref = query.get("resource_ref", [None])[0]
+            state = query.get("state", [None])[0]
+            if config.mutation_backend is not None:
+                raw_leases = [
+                    _lease_payload(lease)
+                    for lease in config.mutation_backend.list_leases(
+                        resource_ref=resource_ref
+                    )
+                ]
+            else:
+                raw_leases = [
+                    _lease_payload(lease)
+                    for lease in list_leases(
+                        resource_ref=resource_ref,
+                        log_path=config.leases_log,
+                    )
+                ]
+            leases = [
+                lease
+                for lease in raw_leases
+                if state is None or lease.get("state") == state
+            ]
+            if _query_bool(query, "resource"):
+                return _ok(
+                    {
+                        "leases": [
+                            lease_resource(LeaseRecord(**lease)).as_dict()
+                            for lease in leases
+                        ]
+                    }
+                )
+            return _ok({"leases": leases})
+
         if method == "POST" and route == "/kernel/leases":
             if config.mutation_backend is not None:
                 lease_record = config.mutation_backend.acquire_lease(
@@ -1324,6 +1729,116 @@ def dispatch_kernel_request(
                     "action_attestations": [
                         asdict(attestation) for attestation in attestations
                     ]
+                }
+            )
+
+        if method == "GET" and route == "/kernel/provenance-timeline":
+            if not _query_has_any(
+                query,
+                ("run_id", "ref", "tenant_id", "project_id"),
+            ):
+                return _error(
+                    400,
+                    f"provenance timeline requires {PROVENANCE_SELECTOR_REQUIREMENT}",
+                )
+            if _project_scope_requires_tenant(query):
+                return _error(
+                    400,
+                    "project_id provenance queries require tenant_id or run_id",
+                )
+            return _ok(
+                {
+                    "timeline": build_provenance_timeline(
+                        run_id=query.get("run_id", [None])[0],
+                        tenant_id=query.get("tenant_id", [None])[0],
+                        project_id=query.get("project_id", [None])[0],
+                        ref=query.get("ref", [None])[0],
+                        transition_log_path=config.transition_log,
+                        kernel_events_log_path=(
+                            config.kernel_events_log or config.transition_log
+                        ),
+                        action_attestation_log_path=config.action_attestation_log,
+                        human_work_log_path=config.human_work_log,
+                        governance_changes_log_path=_governance_changes_log(config),
+                        outcome_links_log_path=config.outcome_links_log,
+                        routine_reviews_log_path=config.routine_reviews_log,
+                        learning_events_log_path=config.learning_events_log,
+                        learning_encounters_log_path=config.learning_encounters_log,
+                    )
+                }
+            )
+
+        if method == "GET" and route == "/kernel/provenance-graph":
+            if not _query_has_any(
+                query,
+                ("run_id", "ref", "tenant_id", "project_id"),
+            ):
+                return _error(
+                    400,
+                    f"provenance graph requires {PROVENANCE_SELECTOR_REQUIREMENT}",
+                )
+            if _project_scope_requires_tenant(query):
+                return _error(
+                    400,
+                    "project_id provenance queries require tenant_id or run_id",
+                )
+            return _ok(
+                {
+                    "graph": build_provenance_graph(
+                        run_id=query.get("run_id", [None])[0],
+                        tenant_id=query.get("tenant_id", [None])[0],
+                        project_id=query.get("project_id", [None])[0],
+                        ref=query.get("ref", [None])[0],
+                        transition_log_path=config.transition_log,
+                        kernel_events_log_path=(
+                            config.kernel_events_log or config.transition_log
+                        ),
+                        action_attestation_log_path=config.action_attestation_log,
+                        human_work_log_path=config.human_work_log,
+                        governance_changes_log_path=_governance_changes_log(config),
+                        outcome_links_log_path=config.outcome_links_log,
+                        routine_reviews_log_path=config.routine_reviews_log,
+                        learning_events_log_path=config.learning_events_log,
+                        learning_encounters_log_path=config.learning_encounters_log,
+                    )
+                }
+            )
+
+        if method == "GET" and route == "/kernel/provenance-report":
+            if not _query_has_any(
+                query,
+                ("run_id", "ref", "tenant_id", "project_id"),
+            ):
+                return _error(
+                    400,
+                    f"provenance report requires {PROVENANCE_SELECTOR_REQUIREMENT}",
+                )
+            if _project_scope_requires_tenant(query):
+                return _error(
+                    400,
+                    "project_id provenance queries require tenant_id or run_id",
+                )
+            event_limit = _query_optional_int(query, "event_limit", default=12)
+            return _ok(
+                {
+                    "report": build_provenance_report(
+                        run_id=query.get("run_id", [None])[0],
+                        tenant_id=query.get("tenant_id", [None])[0],
+                        project_id=query.get("project_id", [None])[0],
+                        ref=query.get("ref", [None])[0],
+                        event_limit=event_limit or 0,
+                        transition_log_path=config.transition_log,
+                        kernel_events_log_path=(
+                            config.kernel_events_log or config.transition_log
+                        ),
+                        action_attestation_log_path=config.action_attestation_log,
+                        human_work_log_path=config.human_work_log,
+                        governance_changes_log_path=_governance_changes_log(config),
+                        outcome_links_log_path=config.outcome_links_log,
+                        routine_reviews_log_path=config.routine_reviews_log,
+                        learning_events_log_path=config.learning_events_log,
+                        learning_encounters_log_path=config.learning_encounters_log,
+                    )
                 }
             )
 
@@ -2088,6 +2603,31 @@ def dispatch_kernel_request(
                 status=201,
             )
 
+        if method == "POST" and route == "/kernel/governed-action-composition":
+            observed_result = body.get("observed_result")
+            if observed_result is None:
+                observed_result = body.get("result")
+            if not isinstance(observed_result, dict):
+                return _error(400, "observed_result must be an object")
+            return _ok(
+                {
+                    "composition_packet": build_governed_action_composition_packet(
+                        GovernedActionCompositionInput(
+                            action_label=_required_str(body, "action_label"),
+                            observed_result=observed_result,
+                            evidence_refs=_list_str(body.get("evidence_refs")),
+                            profile=_optional_str(body, "profile")
+                            or "first_gated_action",
+                            generated_at_utc=_optional_str(
+                                body,
+                                "generated_at_utc",
+                            ),
+                            metadata=dict(body.get("metadata") or {}),
+                        )
+                    )
+                }
+            )
+
         if method == "GET" and route == "/kernel/operating-units":
             units = list_operating_units(
                 status=query.get("status", [None])[0],
@@ -2384,6 +2924,24 @@ def dispatch_kernel_request(
             )
             return _ok({"summary": summary.as_dict()})
 
+        if (
+            method == "GET"
+            and len(parts) == 4
+            and parts[:2] == ["kernel", "learning-events"]
+            and parts[3] == "loop"
+        ):
+            try:
+                loop = learning_event_loop_projection(
+                    parts[2],
+                    log_path=config.learning_events_log,
+                    encounters_log_path=config.learning_encounters_log,
+                    outcome_links_log_path=config.outcome_links_log,
+                    routine_reviews_log_path=config.routine_reviews_log,
+                )
+            except KeyError as exc:
+                return _error(404, str(exc))
+            return _ok({"learning_loop": loop})
+
         if method == "GET" and route == "/kernel/learning-transition-candidates":
             payload = _learning_transition_candidates_payload(
                 config,
@@ -2480,6 +3038,9 @@ def dispatch_kernel_request(
                 tenant_id=query.get("tenant_id", [None])[0],
                 project_id=query.get("project_id", [None])[0],
                 cue=query.get("cue", [None])[0],
+                cue_signature=query.get("cue_signature", [None])[0],
+                resource_refs=_query_string_list(query, "resource_ref"),
+                topology_refs=_query_string_list(query, "topology_ref"),
                 source_ref=query.get("source_ref", [None])[0],
                 tag=query.get("tag", [None])[0],
                 log_path=config.learning_events_log,
@@ -2509,6 +3070,9 @@ def dispatch_kernel_request(
                     tenant_id=query.get("tenant_id", [None])[0],
                     project_id=query.get("project_id", [None])[0],
                     cue=query.get("cue", [None])[0],
+                    cue_signature=query.get("cue_signature", [None])[0],
+                    resource_refs=_query_string_list(query, "resource_ref"),
+                    topology_refs=_query_string_list(query, "topology_ref"),
                     max_per_source=max_per_source or 5,
                     include_work_candidates=not _query_bool(query, "learning_only"),
                     learning_events_log_path=config.learning_events_log,
@@ -2516,6 +3080,14 @@ def dispatch_kernel_request(
                     routine_reviews_log_path=config.routine_reviews_log,
                 )
             )
+
+        if method == "POST" and route == "/kernel/work-discovery/context-packet/verify":
+            packet = body.get("context_packet")
+            if packet is None:
+                packet = body.get("packet")
+            if not isinstance(packet, dict):
+                return _error(400, "context_packet must be an object")
+            return _ok({"verification": verify_context_packet(packet)})
 
         if method == "GET" and route == "/kernel/learning-events":
             events = list_learning_events(
@@ -2542,6 +3114,28 @@ def dispatch_kernel_request(
                 for event in list_learning_events(log_path=config.learning_events_log)
             ):
                 return _error(404, f"learning event not found: {learning_event_id}")
+            context_packet = body.get("context_packet")
+            if context_packet is not None:
+                if not isinstance(context_packet, dict):
+                    return _error(400, "context_packet must be an object")
+                packet_use = verify_learning_event_context_packet_use(
+                    learning_event_id=learning_event_id,
+                    context_packet=context_packet,
+                    context_packet_ref=_optional_str(body, "context_packet_ref"),
+                )
+                if not packet_use["ok"]:
+                    issues = "; ".join(str(item) for item in packet_use["issues"])
+                    if not packet_use["packet_ok"]:
+                        return _error(400, f"invalid context_packet: {issues}")
+                    return _error(400, issues)
+                packet_ref = str(packet_use["context_packet_ref"])
+                metadata = dict(body.get("metadata") or {})
+                metadata.update(packet_use["receipt_metadata"])
+                body = {
+                    **body,
+                    "context_packet_ref": packet_ref,
+                    "metadata": metadata,
+                }
             _verify_mutation_lease(
                 f"learning_event:{learning_event_id}:encounter",
                 body,
@@ -2618,12 +3212,12 @@ def dispatch_kernel_request(
         ):
             link_id = parts[2]
             action = parts[3]
-            lease_resource = (
+            lease_resource_ref = (
                 "routine_reviews:schedule"
                 if action == "reversal-review"
                 else f"outcome_link:{link_id}"
             )
-            _verify_mutation_lease(lease_resource, body, actor=actor, config=config)
+            _verify_mutation_lease(lease_resource_ref, body, actor=actor, config=config)
             if action == "snapshots":
                 link = record_metric_snapshot(
                     link_id,
@@ -3091,12 +3685,49 @@ def dispatch_kernel_request(
 
         # --- decision rights: residual control rights for incomplete mandates ---
         if method == "GET" and route == "/kernel/residual-rights/holder":
+            scope_kind = query.get("scope_kind", [""])[0]
+            scope_ref = query.get("scope_ref", [""])[0]
             holder = get_residual_right_holder(
-                query.get("scope_kind", [""])[0],
-                query.get("scope_ref", [""])[0],
+                scope_kind,
+                scope_ref,
                 log_path=config.residual_rights_log,
             )
-            return _ok({"holder": holder.as_dict() if holder else None})
+            authority_domain_issues: list[str] = []
+            try:
+                from cognitive_firm.orchestration.authority_domains import (
+                    load_authority_domains,
+                )
+
+                authority_domains = load_authority_domains(config.org_dir)
+            except Exception as exc:
+                authority_domains = None
+                authority_domain_issues.append(
+                    f"authority domains could not be loaded: {exc}"
+                )
+            resolution = resolve_residual_right_holder(
+                scope_kind,
+                scope_ref,
+                log_path=config.residual_rights_log,
+                authority_domains=authority_domains,
+                actor_membership_log=config.actor_membership_log,
+                tenant_id=query.get("tenant_id", [None])[0],
+                project_id=query.get("project_id", [None])[0],
+                operating_unit_id=query.get("operating_unit_id", [None])[0],
+            )
+            return _ok(
+                {
+                    "holder": holder.as_dict() if holder else None,
+                    "holder_resolution": resolution.as_dict(),
+                    "boundary": {
+                        "authority_domain_fallback": "projection_only",
+                        "creates_residual_right_assignment": False,
+                        "authorizes_residual_decision": (
+                            resolution.authoritative_for_decision_recording
+                        ),
+                        "issues": authority_domain_issues,
+                    },
+                }
+            )
 
         if method == "GET" and route == "/kernel/decision-rights-summary":
             summary = summarize_decision_rights(
@@ -3816,6 +4447,23 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=Path(os.environ.get("TRANSITIONS_LOG") or WORKSPACE_DIR / "transitions.jsonl"),
     )
+    parser.add_argument(
+        "--kernel-events-log",
+        type=Path,
+        default=(
+            Path(
+                os.environ.get("KERNEL_EVENTS_LOG")
+                or os.environ["COGNITIVE_FIRM_KERNEL_EVENTS_LOG"]
+            )
+            if os.environ.get("KERNEL_EVENTS_LOG")
+            or os.environ.get("COGNITIVE_FIRM_KERNEL_EVENTS_LOG")
+            else None
+        ),
+        help=(
+            "Optional kernel-event stream for provenance reads/writes. "
+            "Defaults to --transition-log."
+        ),
+    )
     parser.add_argument("--enforce-registered-actors", action="store_true")
     parser.add_argument("--enforce-actor-membership", action="store_true")
     parser.add_argument(
@@ -3900,6 +4548,7 @@ def main(argv: list[str] | None = None) -> int:
             gates_dir=args.gates_dir,
             gates_resolved_dir=args.gates_resolved_dir,
             transition_log=args.transition_log,
+            kernel_events_log=args.kernel_events_log,
             enforce_registered_actors=args.enforce_registered_actors,
             enforce_actor_membership=args.enforce_actor_membership,
             enforce_subject_scope=args.enforce_subject_scope,

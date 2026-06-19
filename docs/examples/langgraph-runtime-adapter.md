@@ -21,6 +21,18 @@ cognitive-firm-distro preview-overlay langgraph-runtime-adapter \
   --json
 ```
 
+For a no-cost proof against a temporary starter organization:
+
+```bash
+make langgraph-adapter-policy-preview
+```
+
+That command installs a temporary `starter-firm`, previews the bundled
+`langgraph-runtime-adapter` overlay, validates the adapter manifest and
+conformance declaration, and reports whether the overlay widens authority. It
+does not install LangGraph, execute a graph, apply the overlay, or write a
+governance proposal.
+
 The package installs `adapters/langgraph-runtime-adapter.yaml` and
 `adapter_conformance/langgraph-runtime-adapter.json`. It does not install
 LangGraph or executable adapter code.

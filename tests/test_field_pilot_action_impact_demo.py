@@ -11,6 +11,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from field_pilot_action_impact_demo import main, run_demo  # noqa: E402
 from field_pilot_action_impact_compile import compile_action_impact, load_rows  # noqa: E402
 from field_pilot_validate import validate_pilot  # noqa: E402
+from cognitive_firm.orchestration.human_work import (  # noqa: E402
+    summarize_human_speed_field_pilot,
+)
 
 
 def test_field_pilot_action_impact_demo_builds_review_ready_packet(tmp_path: Path):
@@ -25,6 +28,17 @@ def test_field_pilot_action_impact_demo_builds_review_ready_packet(tmp_path: Pat
     assert payload["policy_evaluation"]["promotion_allowed"] is True
     assert payload["promotion_packet"]["status"] == "review_ready"
     assert payload["promotion_packet"]["review_blockers"] == []
+    assert payload["human_speed_envelope"]["schema"] == (
+        "human_speed_field_pilot_summary.v1"
+    )
+    assert payload["human_speed_envelope"]["measurement_status"] == "stable"
+    assert payload["human_speed_envelope"]["n_total"] == 34
+    assert payload["human_speed_envelope"]["expected_matches"] == 34
+    assert payload["human_speed_envelope"]["expected_mismatches"] == 0
+    assert payload["human_speed_envelope"]["sampled_review_observed_rate"] == 0.2
+    assert payload["human_speed_envelope"]["review_reasons"] == []
+    assert payload["summary"]["human_speed_records"] == 34
+    assert payload["summary"]["human_speed_status"] == "stable"
 
 
 def test_field_pilot_validator_can_require_action_impact(tmp_path: Path):
@@ -43,6 +57,7 @@ def test_field_pilot_action_impact_demo_cli_compact(capsys):
     assert payload["no_external_calls"] is True
     assert payload["summary"]["verdict"] == "passed"
     assert "log_paths" not in payload
+    assert payload["human_speed_envelope"]["measurement_status"] == "stable"
 
 
 def test_field_pilot_action_impact_demo_cli_full_json_keeps_logs(tmp_path: Path, capsys):
@@ -53,6 +68,76 @@ def test_field_pilot_action_impact_demo_cli_full_json_keeps_logs(tmp_path: Path,
     assert "log_paths" in payload
     for path in payload["log_paths"].values():
         assert Path(path).exists()
+    human_speed_path = Path(payload["log_paths"]["human_speed"])
+    human_speed_payload = json.loads(human_speed_path.read_text(encoding="utf-8"))
+    assert human_speed_payload["schema"] == "human_speed_field_pilot_summary.v1"
+    assert human_speed_payload["measurement_status"] == "stable"
+
+
+def test_field_pilot_action_impact_demo_can_write_result_file(tmp_path: Path, capsys):
+    output_path = tmp_path / "field-pilot-result.json"
+
+    assert main(["--workdir", str(tmp_path / "pilot"), "--output", str(output_path)]) == 0
+    stdout_payload = json.loads(capsys.readouterr().out)
+    file_payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert file_payload == stdout_payload
+    assert file_payload["summary"]["verdict"] == "passed"
+    assert file_payload["promotion_packet"]["status"] == "review_ready"
+    assert file_payload["summary"]["human_speed_status"] == "stable"
+
+
+def test_human_speed_field_pilot_summary_flags_review_needed() -> None:
+    summary = summarize_human_speed_field_pilot(
+        [
+            {
+                "row_id": "external-write-1",
+                "risk_tier": "medium",
+                "bottleneck_class": "authority",
+                "deployment_class": "external_write",
+                "chosen_speed_class": "agent_speed",
+                "receipt_present": False,
+                "harm_occurred": True,
+            },
+            {
+                "row_id": "sample-1",
+                "risk_tier": "low",
+                "bottleneck_class": "labor",
+                "deployment_class": "internal",
+                "repeated_similar": True,
+                "chosen_speed_class": "sampled_review",
+                "sampled_for_review": False,
+                "expected_sample_rate": 0.25,
+            },
+            {
+                "row_id": "sample-2",
+                "risk_tier": "low",
+                "bottleneck_class": "labor",
+                "deployment_class": "internal",
+                "repeated_similar": True,
+                "chosen_speed_class": "sampled_review",
+                "sampled_for_review": False,
+                "expected_sample_rate": 0.25,
+            },
+        ],
+        min_records=3,
+    ).as_dict()
+
+    assert summary["measurement_status"] == "needs_review"
+    assert summary["n_total"] == 3
+    assert summary["expected_matches"] == 2
+    assert summary["expected_mismatches"] == [
+        {
+            "row_id": "external-write-1",
+            "chosen_speed_class": "agent_speed",
+            "expected_speed_class": "accountable_closure",
+            "required_record": "accountability_case",
+        }
+    ]
+    assert summary["sample_policy"]["observed_sample_rate"] == 0.0
+    assert any("harm occurred" in reason for reason in summary["review_reasons"])
+    assert any("below expected" in reason for reason in summary["review_reasons"])
+    assert summary["boundary"]["does_not_dispatch_work"] is True
 
 
 def test_field_pilot_action_impact_compile_csv_rows(tmp_path: Path):

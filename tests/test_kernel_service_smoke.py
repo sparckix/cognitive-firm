@@ -55,3 +55,47 @@ def test_kernel_service_smoke_can_write_output_file(tmp_path: Path) -> None:
     assert stdout_payload["action_impact_counts"][
         "policy_promotion_provenance_preserved"
     ] is True
+    assert stdout_payload["human_work_pressure_counts"][
+        "a2h_pressure_groups"
+    ] == 1
+    assert stdout_payload["human_work_pressure_counts"][
+        "human_work_learning_candidates"
+    ] == 1
+    assert stdout_payload["human_work_pressure_counts"][
+        "human_work_candidate_promotion"
+    ] == "blocked"
+    assert stdout_payload["human_speed_envelope_counts"]["schema"] == (
+        "human_speed_envelope.v1"
+    )
+    assert stdout_payload["human_speed_envelope_counts"]["speed_class"] == (
+        "gate_before_action"
+    )
+    assert stdout_payload["human_speed_envelope_counts"]["required_record"] == (
+        "policy_decision_or_gate_plus_lease"
+    )
+    assert stdout_payload["human_speed_envelope_counts"]["observer_only"] is True
+    assert stdout_payload["human_speed_envelope_counts"]["dispatch_boundary"] is True
+    assert stdout_payload["provenance_report_counts"][
+        "provenance_report_events"
+    ] >= 3
+    assert stdout_payload["provenance_report_counts"][
+        "provenance_report_refs"
+    ] >= 1
+    assert stdout_payload["provenance_report_counts"][
+        "provenance_report_coverage"
+    ] in {"partial", "complete_enough_for_review"}
+    assert stdout_payload["provenance_report_counts"][
+        "provenance_follow_through"
+    ] == "closed_loop_observed"
+    assert stdout_payload["provenance_report_counts"][
+        "provenance_outcome_links"
+    ] >= 1
+    assert stdout_payload["provenance_report_counts"][
+        "provenance_routine_reviews"
+    ] >= 1
+    assert stdout_payload["provenance_report_counts"][
+        "provenance_learning_events"
+    ] >= 1
+    assert stdout_payload["provenance_report_counts"][
+        "provenance_learning_use_receipts"
+    ] >= 1

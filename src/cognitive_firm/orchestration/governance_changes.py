@@ -61,6 +61,27 @@ REQUIRED_EVIDENCE_FIELDS = {
     "rollback_plan",
     "invariant_evidence_refs",
 }
+FORMAL_PROOF_CHANGE_KINDS = {
+    "route_policy_change",
+    "capability_policy_change",
+    "gate_policy_change",
+    "tenant_policy_change",
+}
+FORMAL_PROOF_TARGET_HINTS = {
+    "adapter",
+    "capability",
+    "contract",
+    "gate",
+    "policy",
+    "provider",
+    "runtime",
+    "schema",
+    "verifier",
+}
+FORMAL_VERIFICATION_REF_PREFIXES = (
+    "formal_verification:",
+    "formal-verification:",
+)
 
 
 @dataclass(frozen=True)
@@ -235,6 +256,45 @@ def list_governance_changes(
             continue
         out.append(proposal)
     return out
+
+
+def governance_change_request_template(
+    *,
+    change_kind: GovernanceChangeKind | str = "route_policy_change",
+    title: str | None = None,
+    proposed_by: str | None = None,
+    target_ref: str | None = None,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+) -> dict[str, Any]:
+    """Return a POST body skeleton for an evidence-complete proposal."""
+    return {
+        "change_kind": _validate_change_kind(str(change_kind)),
+        "title": title or "<short human-readable title>",
+        "proposed_by": proposed_by or "<role-or-actor>",
+        "target_ref": target_ref or "<mandate/role/policy/ref>",
+        "rationale": "<why this governance change is being proposed>",
+        "source_refs": ["<evidence-ref>"],
+        "expected_behavior_change": "<what should change if approved>",
+        "predicted_effect": {
+            "metric_name": "<metric>",
+            "expected_direction": "increase|decrease|maintain",
+            "expected_window": "<review window>",
+        },
+        "risk_summary": "<operator-visible risk summary>",
+        "rollback_plan": "<how to revert or retire the change>",
+        "tenant_id": tenant_id,
+        "project_id": project_id,
+        "invariant_checks": [
+            {
+                "invariant": invariant,
+                "status": "unknown",
+                "rationale": "<why this invariant is preserved>",
+                "evidence_refs": ["<evidence-ref>"],
+            }
+            for invariant in sorted(REQUIRED_INVARIANTS)
+        ],
+    }
 
 
 def normalize_invariant_checks(rows: list[InvariantCheck | dict[str, Any]]) -> list[InvariantCheck]:
@@ -527,6 +587,243 @@ def failed_invariants(checks: list[InvariantCheck]) -> list[str]:
     return sorted(check.invariant for check in checks if check.status == "fail")
 
 
+def governance_change_review_projection(
+    proposal: GovernanceChangeProposal,
+    *,
+    decided: bool = False,
+) -> dict[str, Any]:
+    """Return a compact, read-only proposal review projection.
+
+    App surfaces should not reimplement governance-change evidence logic just
+    to render a review queue. This projection summarizes the canonical
+    proposal row into the facts a human reviewer or dashboard needs while
+    leaving proposal creation, decision, and lifecycle rules with the kernel
+    service routes.
+    """
+
+    sufficiency = proposal.evidence_sufficiency
+    missing_evidence = (
+        list(sufficiency.missing)
+        if sufficiency is not None
+        else sorted(REQUIRED_EVIDENCE_FIELDS)
+    )
+    failed = failed_invariants(proposal.invariant_checks)
+    missing_required = missing_required_invariants(proposal.invariant_checks)
+    passed_required = sorted(
+        check.invariant
+        for check in proposal.invariant_checks
+        if check.invariant in REQUIRED_INVARIANTS and check.status == "pass"
+    )
+    unknown = sorted(
+        check.invariant
+        for check in proposal.invariant_checks
+        if check.status == "unknown"
+    )
+    evidence_refs = _governance_change_evidence_refs(proposal)
+    proof_obligations = governance_change_proof_obligations(proposal)
+    if decided:
+        review_state = "decided"
+    elif proof_obligations["blocking"]:
+        review_state = "blocked"
+    elif proposal.status == "review_ready" and proposal.review_ready:
+        review_state = "awaiting_review"
+    elif proposal.status == "blocked" or failed or missing_evidence:
+        review_state = "blocked"
+    else:
+        review_state = proposal.status
+
+    predicted = proposal.predicted_effect or {}
+    prediction_summary = None
+    if predicted:
+        bits = [
+            str(value)
+            for value in (
+                predicted.get("metric_name") or predicted.get("metric"),
+                predicted.get("expected_direction") or predicted.get("direction"),
+                predicted.get("expected_window") or predicted.get("window"),
+            )
+            if value
+        ]
+        prediction_summary = ", ".join(bits) if bits else None
+
+    return {
+        "proposal_id": proposal.proposal_id,
+        "created_at_utc": proposal.created_at_utc,
+        "change_kind": proposal.change_kind,
+        "title": proposal.title,
+        "target_ref": proposal.target_ref,
+        "proposed_by": proposal.proposed_by,
+        "owner_role": proposal.owner_role,
+        "tenant_id": proposal.tenant_id,
+        "project_id": proposal.project_id,
+        "status": proposal.status,
+        "decided": decided,
+        "review_state": review_state,
+        "review_ready": proposal.review_ready,
+        "expected_behavior_change": proposal.expected_behavior_change,
+        "risk_summary": proposal.risk_summary,
+        "rollback_plan": proposal.rollback_plan,
+        "prediction_summary": prediction_summary,
+        "evidence_status": sufficiency.status if sufficiency else "unknown",
+        "missing_evidence": missing_evidence,
+        "failed_invariants": failed,
+        "missing_required_invariants": missing_required,
+        "unknown_invariants": unknown,
+        "passed_required_invariants": passed_required,
+        "required_invariants": sorted(REQUIRED_INVARIANTS),
+        "source_ref_count": len(proposal.source_refs),
+        "evidence_ref_count": len(evidence_refs),
+        "proof_obligations": proof_obligations,
+        "decision_route": (
+            f"POST /kernel/governance-changes/{proposal.proposal_id}/decision"
+        ),
+        "read_only": True,
+    }
+
+
+def governance_change_proof_obligations(
+    proposal: GovernanceChangeProposal,
+) -> dict[str, Any]:
+    """Return a read-only formal-proof review signal for one proposal.
+
+    Formal verification remains evidence, not authority. This helper only tells
+    proposal reviewers whether a policy/provider/adapter-shaped proposal cites
+    formal-verification refs, or whether metadata explicitly made such refs a
+    prerequisite for review.
+    """
+
+    evidence_refs = _governance_change_evidence_refs(proposal)
+    formal_refs = [
+        ref for ref in evidence_refs if _is_formal_verification_ref(ref)
+    ]
+    metadata_obligations = _formal_proof_obligation_rows(
+        proposal.metadata.get("formal_proof_obligations")
+    )
+    explicitly_required = _metadata_bool(
+        proposal.metadata,
+        "requires_formal_verification",
+        "formal_proof_required",
+        "proof_obligation_required",
+    )
+    expected = (
+        explicitly_required
+        or bool(metadata_obligations)
+        or proposal.change_kind in FORMAL_PROOF_CHANGE_KINDS
+        or _target_has_formal_proof_hint(proposal.target_ref)
+    )
+    required = explicitly_required or any(
+        row["required"] for row in metadata_obligations
+    )
+    missing = ["formal_verification_ref"] if expected and not formal_refs else []
+    blocking = bool(required and missing)
+    if not expected and not formal_refs:
+        status = "not_expected"
+        rationale = "proposal does not match a formal-proof-sensitive surface"
+    elif missing and blocking:
+        status = "blocking"
+        rationale = "metadata requires formal-verification evidence before review"
+    elif missing:
+        status = "attention"
+        rationale = "policy/provider/adapter-shaped change has no formal-verification ref"
+    else:
+        status = "satisfied"
+        rationale = "proposal cites formal-verification evidence refs"
+
+    obligations = metadata_obligations
+    if not obligations and expected:
+        obligations = [
+            {
+                "obligation_id": "formal_verification_ref",
+                "property_class": None,
+                "subject_ref": proposal.target_ref,
+                "required": required,
+                "formal_verification_refs": formal_refs,
+                "satisfied": bool(formal_refs),
+            }
+        ]
+
+    return {
+        "status": status,
+        "expected": bool(expected),
+        "required": bool(required),
+        "blocking": blocking,
+        "missing": missing,
+        "formal_verification_refs": formal_refs,
+        "accepted_ref_prefixes": list(FORMAL_VERIFICATION_REF_PREFIXES),
+        "obligations": [
+            {
+                **row,
+                "formal_verification_refs": (
+                    row["formal_verification_refs"] or formal_refs
+                ),
+                "satisfied": bool(row["formal_verification_refs"] or formal_refs),
+            }
+            for row in obligations
+        ],
+        "rationale": rationale,
+        "read_only": True,
+        "projection_only": True,
+    }
+
+
+def governance_change_review_packet(
+    proposal: GovernanceChangeProposal,
+    *,
+    decided: bool = False,
+    provenance_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return a portable read-only handoff for one proposal review.
+
+    This packages the existing proposal-review projection with evidence refs,
+    invariant rows, optional provenance-report context, and Markdown. It does
+    not approve, reject, mutate, or create a separate proposal lifecycle.
+    """
+    review = governance_change_review_projection(proposal, decided=decided)
+    evidence_refs = _governance_change_evidence_ref_rows(proposal)
+    provenance_summary: dict[str, Any] | None = None
+    if provenance_report:
+        provenance_summary = {
+            "query": provenance_report.get("query", {}),
+            "summary": provenance_report.get("summary", {}),
+            "coverage": provenance_report.get("coverage", {}),
+            "follow_through": provenance_report.get("follow_through", {}),
+            "caveats": list(provenance_report.get("caveats", []) or []),
+            "event_excerpt": list(provenance_report.get("event_excerpt", []) or []),
+            "evidence_refs": list(provenance_report.get("evidence_refs", []) or []),
+        }
+    packet = {
+        "packet_kind": "governance_change_review_handoff",
+        "proposal_id": proposal.proposal_id,
+        "read_only": True,
+        "projection_only": True,
+        "review": review,
+        "decision_route": review["decision_route"],
+        "proof_obligations": review["proof_obligations"],
+        "follow_through": (
+            provenance_summary.get("follow_through", {})
+            if provenance_summary
+            else {}
+        ),
+        "evidence_refs": evidence_refs,
+        "invariant_checks": [
+            {
+                "invariant": check.invariant,
+                "status": check.status,
+                "rationale": check.rationale,
+                "evidence_refs": list(check.evidence_refs),
+            }
+            for check in proposal.invariant_checks
+        ],
+        "review_questions": _governance_review_questions(
+            review,
+            provenance_summary=provenance_summary,
+        ),
+        "provenance_report": provenance_summary,
+    }
+    packet["markdown"] = _render_governance_review_packet_markdown(packet)
+    return packet
+
+
 def governance_change_resource(proposal: GovernanceChangeProposal) -> KernelResource:
     """Project a governance-change proposal into the common resource envelope.
 
@@ -601,6 +898,244 @@ def governance_change_resource(proposal: GovernanceChangeProposal) -> KernelReso
         },
         links=links,
     )
+
+
+def _governance_change_evidence_refs(
+    proposal: GovernanceChangeProposal,
+) -> list[str]:
+    sufficiency = proposal.evidence_sufficiency
+    return list(
+        dict.fromkeys(
+            [
+                *proposal.source_refs,
+                *(sufficiency.evidence_refs if sufficiency is not None else []),
+                *[
+                    ref
+                    for check in proposal.invariant_checks
+                    for ref in check.evidence_refs
+                ],
+            ]
+        )
+    )
+
+
+def _governance_change_evidence_ref_rows(
+    proposal: GovernanceChangeProposal,
+) -> list[dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for ref in proposal.source_refs:
+        row = rows.setdefault(
+            ref,
+            {"ref": ref, "sources": [], "invariants": []},
+        )
+        if "source_refs" not in row["sources"]:
+            row["sources"].append("source_refs")
+    sufficiency = proposal.evidence_sufficiency
+    if sufficiency is not None:
+        for ref in sufficiency.evidence_refs:
+            row = rows.setdefault(
+                ref,
+                {"ref": ref, "sources": [], "invariants": []},
+            )
+            if "evidence_sufficiency" not in row["sources"]:
+                row["sources"].append("evidence_sufficiency")
+    for check in proposal.invariant_checks:
+        for ref in check.evidence_refs:
+            row = rows.setdefault(
+                ref,
+                {"ref": ref, "sources": [], "invariants": []},
+            )
+            if "invariant_check" not in row["sources"]:
+                row["sources"].append("invariant_check")
+            if check.invariant not in row["invariants"]:
+                row["invariants"].append(check.invariant)
+    return sorted(rows.values(), key=lambda row: row["ref"])
+
+
+def _is_formal_verification_ref(ref: str) -> bool:
+    normalized = ref.strip().lower()
+    return normalized.startswith(FORMAL_VERIFICATION_REF_PREFIXES)
+
+
+def _target_has_formal_proof_hint(target_ref: str) -> bool:
+    normalized = target_ref.strip().lower().replace("_", "-")
+    tokens = {
+        token
+        for chunk in normalized.replace(":", "/").replace(".", "/").split("/")
+        for token in chunk.replace("-", " ").split()
+        if token
+    }
+    return bool(tokens & FORMAL_PROOF_TARGET_HINTS)
+
+
+def _metadata_bool(metadata: dict[str, Any], *keys: str) -> bool:
+    return any(metadata.get(key) is True for key in keys)
+
+
+def _formal_proof_obligation_rows(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            continue
+        refs = _string_list(item.get("formal_verification_refs") or [])
+        rows.append(
+            {
+                "obligation_id": str(
+                    item.get("obligation_id")
+                    or item.get("property_class")
+                    or f"formal_proof_obligation_{index + 1}"
+                ),
+                "property_class": (
+                    str(item["property_class"]) if item.get("property_class") else None
+                ),
+                "subject_ref": (
+                    str(item["subject_ref"]) if item.get("subject_ref") else None
+                ),
+                "required": item.get("required") is not False,
+                "formal_verification_refs": refs,
+                "satisfied": bool(refs),
+            }
+        )
+    return rows
+
+
+def _governance_review_questions(
+    review: dict[str, Any],
+    *,
+    provenance_summary: dict[str, Any] | None,
+) -> list[str]:
+    questions = [
+        "Do the cited refs support the expected behavior change?",
+        "Are the risks and rollback plan acceptable for this target?",
+    ]
+    if review.get("review_state") == "awaiting_review":
+        questions.append("Should the accountable actor approve or decline this proposal?")
+    if review.get("missing_evidence"):
+        questions.append("Which missing evidence must be supplied before review?")
+    if review.get("failed_invariants"):
+        questions.append("Should failed invariants block the proposal or trigger a revised proposal?")
+    if review.get("unknown_invariants"):
+        questions.append("Which unknown invariants need evidence before a decision?")
+    if review.get("prediction_summary"):
+        questions.append("What outcome link or routine review will test the predicted effect?")
+    follow_through = (provenance_summary or {}).get("follow_through") or {}
+    for question in follow_through.get("review_questions") or []:
+        text = str(question)
+        if text not in questions:
+            questions.append(text)
+    proof = review.get("proof_obligations") or {}
+    if proof.get("blocking"):
+        questions.append("Which formal-verification evidence is required before review can proceed?")
+    elif proof.get("status") == "attention":
+        questions.append("Should this policy/provider/adapter-shaped change cite formal-verification evidence before approval?")
+    if provenance_summary:
+        gaps = provenance_summary.get("coverage", {}).get("gaps") or []
+        if gaps:
+            questions.append("Do the provenance coverage gaps matter for this decision?")
+    return questions
+
+
+def _render_governance_review_packet_markdown(packet: dict[str, Any]) -> str:
+    review = packet["review"]
+    lines = [
+        "# Governance Change Review Packet",
+        "",
+        "Read-only projection over the proposal row and selected provenance.",
+        "",
+        f"Proposal: {packet['proposal_id']}",
+        f"State: {review.get('review_state')} ({review.get('status')})",
+        f"Kind: {review.get('change_kind')}",
+        f"Target: {review.get('target_ref')}",
+        f"Title: {review.get('title')}",
+    ]
+    if review.get("expected_behavior_change"):
+        lines.append(f"Expected change: {review.get('expected_behavior_change')}")
+    if review.get("risk_summary"):
+        lines.append(f"Risk: {review.get('risk_summary')}")
+    if review.get("rollback_plan"):
+        lines.append(f"Rollback: {review.get('rollback_plan')}")
+    if review.get("prediction_summary"):
+        lines.append(f"Prediction: {review.get('prediction_summary')}")
+    lines.append("")
+
+    follow_through = packet.get("follow_through") or {}
+    if follow_through:
+        lines.extend(["## Follow-Through", ""])
+        lines.append(f"- status: {follow_through.get('status')}")
+        lines.append(f"- decision events: {follow_through.get('decision_events', 0)}")
+        lines.append(f"- outcome links: {follow_through.get('outcome_links', 0)}")
+        lines.append(f"- routine reviews: {follow_through.get('routine_reviews', 0)}")
+        lines.append(
+            f"- learning-use receipts: {follow_through.get('learning_use_receipts', 0)}"
+        )
+        for ref in follow_through.get("latest_refs") or []:
+            lines.append(f"- ref: {ref}")
+        lines.append("")
+
+    proof = packet.get("proof_obligations") or {}
+    if proof.get("expected") or proof.get("formal_verification_refs"):
+        lines.extend(["## Proof Obligations", ""])
+        lines.append(f"- status: {proof.get('status')}")
+        lines.append(f"- required: {proof.get('required')}")
+        for missing in proof.get("missing") or []:
+            lines.append(f"- missing: {missing}")
+        for ref in proof.get("formal_verification_refs") or []:
+            lines.append(f"- formal evidence: {ref}")
+        lines.append("")
+
+    gaps = review.get("missing_evidence") or []
+    if gaps:
+        lines.extend(["## Missing Evidence", ""])
+        for gap in gaps:
+            lines.append(f"- {gap}")
+        lines.append("")
+
+    failed = review.get("failed_invariants") or []
+    unknown = review.get("unknown_invariants") or []
+    if failed or unknown:
+        lines.extend(["## Invariant Attention", ""])
+        for invariant in failed:
+            lines.append(f"- failed: {invariant}")
+        for invariant in unknown:
+            lines.append(f"- unknown: {invariant}")
+        lines.append("")
+
+    evidence_refs = packet.get("evidence_refs") or []
+    if evidence_refs:
+        lines.extend(["## Evidence Refs", ""])
+        for row in evidence_refs[:20]:
+            sources = ",".join(row.get("sources") or [])
+            invariants = ",".join(row.get("invariants") or [])
+            suffix = f" [{sources}]"
+            if invariants:
+                suffix = f"{suffix} invariants={invariants}"
+            lines.append(f"- {row.get('ref')}{suffix}")
+        if len(evidence_refs) > 20:
+            lines.append(f"- ... {len(evidence_refs) - 20} more ref(s)")
+        lines.append("")
+
+    provenance = packet.get("provenance_report") or {}
+    if provenance:
+        summary = provenance.get("summary") or {}
+        coverage = provenance.get("coverage") or {}
+        lines.extend(["## Provenance", ""])
+        lines.append(f"- events: {summary.get('event_count', 0)}")
+        lines.append(f"- coverage: {coverage.get('status')}")
+        for caveat in provenance.get("caveats") or []:
+            lines.append(f"- caveat: {caveat}")
+        lines.append("")
+
+    questions = packet.get("review_questions") or []
+    if questions:
+        lines.extend(["## Review Questions", ""])
+        for question in questions:
+            lines.append(f"- {question}")
+        lines.append("")
+
+    lines.extend(["## Decision Route", "", f"`{packet['decision_route']}`"])
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def governance_change_from_candidate(

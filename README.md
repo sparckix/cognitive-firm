@@ -1,6 +1,6 @@
 # cognitive-firm
 
-**A governance kernel for organizations that coordinate persistent human and agent roles.**
+**Orchestrate and govern human + AI work loops with auditable receipts.**
 
 [Identity](#1-identity) · [Who it's for](#2-who-its-for--what-it-solves) · [Architecture](#3-architecture) · [Repository map](#4-repository-map) · [Quickstart](#5-quickstart-local-dev) · [Production](#6-production-deployment) · [Status](#7-status) · [Adoption](#8-adoption) · [License & provenance](#9-license--provenance)
 
@@ -97,32 +97,71 @@ For the broader demo suite:
 
 ```bash
 make adoption-demo
+make adoption-onramp-packet
+make adoption-readiness-packet
 ```
 
-The demo runs a no-cost suite: a fictional Kettle & Compass native kernel
-workflow, an agent-fleet audit trail fixture, governance failure fixtures,
-decision-log replay, action-impact and formal-provider examples, a
-LangGraph-style adapter workflow, a bounded governed org-evolution proof
-fixture, a daemon-native starter-firm dispatch smoke, a multi-agent
-trace-attribution carrier demo, phase-execution overlay, protocol experiment
-carrier, and capability signal carrier. Together they show role authority,
-claimable work, run checkpoints, local agent invocation receipts, human work,
-action attestation, outcome linkage, accountable closure, governed-run
-attestation summaries with work-item and observability refs plus derived
-evidence hashes, the failures the kernel blocks or flags, a governed
-structural-change loop over a fresh starter firm, actual daemon dispatch
-against an installed starter firm, recursive-runtime trace evidence becoming
-an observer-only learning carrier, verifier feedback with retry budget decay,
-coordination-pattern evidence becoming a review-ready route-policy candidate,
-and abstention or authority gaps routing without being treated as task
-failure. The live self-evolving path is
+Start with the loop, then inspect the evidence:
+
+- `make adoption-demo` exercises the no-cost native workflow, failure
+  fixtures, runtime-adapter projection, and governed org-evolution examples.
+- `make adoption-onramp-packet` collects the first-review evidence bundle under
+  `.cognitive-firm-runs/adoption-onramp/...`.
+- `make adoption-readiness-packet` re-renders the latest on-ramp reviewer
+  handoff when one exists, or falls back to expected proof gaps on a fresh tree.
+
+The default adoption path is meant to answer four questions: what work happened,
+under which role authority, what human or machine evidence closed it, and what
+future learning/provenance record can be inspected. It is a bounded harness, not
+a planner or workflow engine. If you have a separately produced bounded
+live-agent or release-gate result, attach it without letting the collector run
+that substrate with
+`--result bounded_live_agent_run=/path/to/self-evolving-org-demo.json`. Use the
+generated self-evolving report JSON rather than a clipped stdout summary so the
+packet can inspect the v0.4 learning-use, context-packet, provenance, and
+proposal-review evidence counters, including proposal follow-through that shows
+whether at least one proposal reached closed-loop evidence. Those counters must
+be present and nonzero for the live-agent row to count as fully reviewable.
+Missing optional evidence stays visible as deferred evidence, but a supplied
+optional artifact that fails its checks blocks the packet from reporting
+`ok: true`.
+The same sequence is discoverable without scanning this README:
+`cognitive-firm-userland operator-path first_review` returns the three
+recommended review commands directly, and
+`cognitive-firm-userland commands "first serious review"` finds the same path
+from task text.
+
+For concrete wedge reviews, `make agent-fleet-review-packet` writes a persistent
+local/subscription agent invocation receipt, governed-run bundle,
+operator-burden summary, and Markdown runbook without calling an external
+runtime. `make langgraph-adapter-policy-preview` validates the bundled
+`langgraph-runtime-adapter` policy overlay against a temporary starter org
+without installing LangGraph, applying the overlay, or writing a governance
+proposal. The live self-evolving path remains available through
 `make self-evolving-org-agent-demo` with `AGENT_PLANNER_COMMAND` set to a
-subscription/local agent planner that emits JSON; `make self-evolving-org-api-demo`
-is the portable API model-call fallback. In both live paths, the worker proposes
-structural changes while the kernel keeps the same governance and proof path.
-Use `make self-evolving-org-view` when you want persistent reports and the
-human-first company-state view plus the proof timeline for that org-evolution
-fixture.
+subscription/local agent planner that emits JSON; use
+`make self-evolving-org-view` when you want persistent reports and the
+human-first company-state view for that fixture.
+
+`make adoption-onramp-replay` copies the public repo surface into an isolated
+worktree, excludes `internal/`, local run state, virtualenvs, and `.env`, then
+runs the core on-ramp collector from that copy. Use it when you want evidence
+that the first-review path is replayable from a clean clone-like surface rather
+than depending on author-local state.
+
+`make adoption-onramp-full-replay` runs the same clean-copy replay with the full
+no-cost collector, including adapter-policy preview, formal-provider proof pack,
+runtime-adapter proof pack, agent-fleet audit, and field-pilot rows.
+
+`make adoption-readiness-packet` emits the read-only reviewer handoff. After
+`make adoption-onramp-packet`, it re-renders the latest collected packet from
+`.cognitive-firm-runs/adoption-onramp/...`; on a fresh tree it falls back to
+the expected proof paths and marks absent rows as missing. Pass observed JSON
+outputs directly to `scripts/adoption_readiness_packet.py --result
+CHECK_ID=path` when you want to assemble a manual packet. The script never runs
+commands, approves release readiness, or writes kernel state. It also reports
+expected, present, and missing evidence fields for each check, so a required
+green command with a thin JSON payload still blocks adoption review.
 See
 [`docs/examples/README.md`](docs/examples/README.md) for the example index,
 [`docs/examples/governance-failure-benchmark.md`](docs/examples/governance-failure-benchmark.md)
@@ -145,7 +184,7 @@ for the organization-evolution path.
 | Enterprise RBAC / SSO | Lean multi-actor role membership is supported. Full enterprise IAM administration, SSO provisioning, and tenant isolation remain deployment work. |
 | Production compliance certification | The repo ships local audit, evidence, and deploy-gate primitives. It does not certify a regulated deployment or replace tenant legal, compliance, or external-audit work. |
 | A model/graph engine | The daemon executes governed role-office work by discovering tasks, dispatching configured CLIs and MCP tools, recording checkpoints, and routing interrupts. It deliberately leaves model inference, graph replay, and node scheduling to the runtime best suited for that job. |
-| A chat UI | The system of record is the filesystem + git. UIs (Orbit, Telegram) are projections, not the truth. |
+| A chat UI | The system of record is kernel state/logs (`org/` + workspace logs) plus git history. UIs such as Orbit are projections, not the truth. |
 | Agentic prompt engineering | Mandates and roles are typed contracts, not prompt templates. |
 | Cross-org federation | A single repo / single authority domain is the current unit of governance. |
 
@@ -220,8 +259,8 @@ The primitives serve a small conceptual core. See
 │  EXTERNAL SYSTEMS (Linear, Salesforce, ERPs, ticketing)         │
 └─────────────────────────────────────────────────────────────────┘
 
-System of record: org/ (filesystem) + git history.
-                  Audit trail = git log; UI = projection.
+System of record: kernel state/logs (org/ + workspace logs) + git history.
+                  Audit trail = git log + receipts/events; UI = projection.
 ```
 
 ---
@@ -436,9 +475,34 @@ vocabulary:
 cognitive-firm-userland needs-me <actor_id>   # the accountable actor's attention queue
 cognitive-firm-userland inbox <actor_id>      # a member-human's bounded work
 cognitive-firm-userland vocabulary            # the shared userland glossary
+cognitive-firm-userland commands "adoption readiness packet"
+cognitive-firm-userland commands "field pilot action impact demo" --role-id role.manager
 cognitive-firm-userland status                # plain-language org health
 cognitive-firm-userland resolve <gate_id> --option <opt>   # resolve a pending gate
 cognitive-firm-userland proposals             # governance changes awaiting review
+cognitive-firm-userland proposal <proposal_id> # evidence + invariant detail
+cognitive-firm-userland proposal-packet <proposal_id> --markdown
+cognitive-firm-userland proposal-template --change-kind route_policy_change
+cognitive-firm-userland proposal-from-candidate <candidate_id> --target-ref org/policies/example.md
+cognitive-firm-userland work-context --assigned-to role.manager --cue "queue stalls"
+cognitive-firm-userland work-context --cue-signature formal_verification.provider_payload --resource-ref formal_provider:trusted_checker --topology-ref state_surface:formal_verifications
+cognitive-firm-userland context-packet-verify work-context.json
+cognitive-firm-userland human-pressure --agent-counterparty-role role.manager --tenant-id tenant-a
+cognitive-firm-userland learning-candidates --source human_work
+cognitive-firm-userland lease-acquire governance_change:gcp_1:decision --actor human.principal --role role.principal
+cognitive-firm-userland leases --state active
+cognitive-firm-userland lease-release <lease_id> --actor human.principal --role role.principal
+cognitive-firm-userland decision-profiles # evidence-only procedure recipes
+cognitive-firm-userland decision-open --subject-ref governance_change:gcp_1 --decision-class route_policy_change --scope-kind tenant --scope-ref tenant-a --procedure-profile majority --eligibility-basis "reviewer sample" --eligible-role role.reviewer_a --eligible-role role.reviewer_b --eligible-role role.reviewer_c
+cognitive-firm-userland decision-position dac_1 --actor-id human.alice --role-id role.reviewer_a --position approve --rationale "reviewed the evidence"
+cognitive-firm-userland decision-compute dac_1 # compute recommendation, not authority
+cognitive-firm-userland receipt <human_work_session_id> --actor principal --summary "reviewed agent output" --agent-output-ref artifact://draft --action-attestation-ref action_attestation:aat_123
+cognitive-firm-userland learning-use <learning_event_id> --role role.manager --cue "queue stalls" --outcome applied --context-packet-ref <ctx_id>
+cognitive-firm-userland learning-use <learning_event_id> --role role.manager --cue "queue stalls" --outcome applied --context-packet-json work-context.json
+cognitive-firm-userland learning-loop <learning_event_id> # one learning unit's loop state
+cognitive-firm-userland timeline --run-id <run_id> # readable provenance timeline
+cognitive-firm-userland graph --run-id <run_id> # projection-only provenance graph
+cognitive-firm-userland provenance-report --run-id <run_id> --markdown
 cognitive-firm-userland approve <proposal_id> # approve a governance change
 cognitive-firm-userland decline <proposal_id> # decline a governance change
 ```
@@ -446,8 +510,75 @@ cognitive-firm-userland decline <proposal_id> # decline a governance change
 `proposals` / `approve` / `decline` are the governed-install human-review
 loop: a governance-change proposal awaits an accountable actor decision, and
 `approve` / `decline` each record an attested kernel event.
+Terminal write commands such as `approve`, `decline`, `receipt`,
+`learning-use`, `proposal-from-candidate`, `decision-open`,
+`decision-position`, `decision-compute`, and `decision-route-escalation` accept
+`--lease-id` and `--fencing-token` when the service runs in lease-required
+mode. `lease-acquire`, `leases`, and `lease-release` close that terminal loop:
+they let an operator obtain the fenced mutation evidence, inspect active
+claims, and release a claim without adding a workflow engine above the kernel.
+`proposal` shows the evidence, rollback, predicted effect, sufficiency, and
+invariant checks for one proposal. `proposal-packet` packages the same review
+facts with evidence refs, invariant rows, selected provenance, review
+questions, and optional Markdown for a portable human handoff.
+`proposal-template` prints a service-owned request skeleton for
+`POST /kernel/governance-changes`. The service also
+exposes `GET /kernel/governance-changes?view=review` as a read-only proposal
+review projection for custom surfaces: review state, evidence status, missing
+evidence, invariant gaps, and the decision route without a new proposal
+lifecycle.
+`commands --role-id` keeps command discovery projection-only while tracing
+whether that source role's escalation chain reaches the authority domain for a
+typed command effect such as `decision_class: policy_change`.
+`proposal-from-candidate` turns a learning-transition candidate into a
+governance-change proposal through the existing service route. The candidate
+contributes rationale and source refs, but the caller must still provide a
+target, expected behavior change, risk, rollback, and invariant evidence; weak
+requests remain `blocked`.
+`work-context` shows the pre-work context packet; `context-packet-verify`
+recomputes a captured packet digest without writing state; `learning-use`
+records the later auditable receipt for whether that approved learning was
+applied, ignored, deferred, or merely encountered. When supplied with
+`--context-packet-json`, `learning-use` also verifies that the captured packet
+contains the target learning event. `learning-loop` joins one approved learning
+event to its context-packet refs, verified packet refs, encounters, outcome
+links, routine reviews, overdue review ids, and evidence refs so an operator
+can see whether the learning is compounding or still awaiting
+measurement/review.
+`work-context` can also use exact `cue_signature`, `resource_ref`, and
+`topology_ref` filters from learning-event metadata, so tools, verifiers, and
+state surfaces can retrieve relevant approved learning without inventing a new
+role office or granting semantic memory authority. No-role structured queries
+stay learning-only by default; use `--learning-only` on role-scoped context when
+you want to suppress matching work candidates.
+`human-pressure` surfaces repeated A2H human-work bottlenecks by role and
+bottleneck class. It is observer-only: access/labor/cognition pressure can
+suggest source repair, tooling, or mandate review, while taste, safety,
+relationship, and authority work remains an explicit human boundary. Use
+`tenant_id` / `project_id` selectors when inspecting multi-tenant logs.
+`learning-candidates --source human_work` compiles whole-firm A2H pressure
+groups into observer-only review candidates over existing human-work session
+refs. It asks whether repeated pressure should become source repair, tooling,
+mandate review, receipt discipline, or an intentionally preserved human
+boundary; it does not automate, reroute, or close the work.
+`receipt` records bounded human-work receipts, including the common
+human-reviewed-agent-output pattern by citing both the agent output and its
+action attestation. `timeline` renders the same read-only provenance projection
+available through the kernel service. `graph` exposes the same selected records
+as event/ref nodes plus projection-only edges, so adopters can build lineage,
+network, and "why/what-after" views without creating a second workflow store.
+`provenance-report` packages that same selected provenance into a portable
+reviewer handoff: coverage status, source counts, caveats, review questions,
+high-signal refs, a bounded timeline excerpt, and optional Markdown.
+`commands` is a read-only command-surface helper over known Make targets and
+Python scripts. It uses exact or separator-normalized matches to suggest
+canonical repo commands for a task description, but does not execute commands,
+schedule work, or mutate state.
 
-The same attention queue is also rendered by the Orbit `NeedsMePane`.
+Orbit renders first-party projection panes over these same routes
+(`NeedsMePane`, `WorkInboxPane`, and `ProvenanceTimelinePane`). Orbit is one
+surface; adopters can build their own dashboards against the service/userland
+contract without changing the kernel source of truth.
 
 ---
 
@@ -505,13 +636,14 @@ operator runbook before treating it as release evidence.
 | Outbox relay (MCP transport) | `src/cognitive_firm/role_extensions/mcp_bridge/` | `tests/test_mcp_outbox_relay.py`, `test_mcp_linear_server.py` |
 | MCP transport parser | `src/cognitive_firm/role_extensions/mcp_bridge/transport.py` | `tests/test_mcp_transport.py` |
 | Capability tokens for MCP dispatch | `src/cognitive_firm/role_extensions/mcp_bridge/capabilities.py` | `tests/test_mcp_capabilities.py` |
-| A2A obligation lifecycle (Phase A) | `src/cognitive_firm/orchestration/agent_channels.py` | `tests/test_obligation_lifecycle.py` |
+| A2A obligation lifecycle (Phase A) | `src/cognitive_firm/orchestration/agent_channels.py` | `tests/test_obligation_lifecycle.py`, `tests/test_a2a_delegation_command_conformance.py`, `tests/test_a2a_h2a_command_conformance.py` |
 | Artifact dependencies (Phase B) | `src/cognitive_firm/orchestration/artifact_dependencies.py` | `tests/test_artifact_dependencies.py` |
-| Saga compensation (Phase C) | `src/cognitive_firm/orchestration/saga_compensation.py` | `tests/test_saga_compensation.py` |
+| Saga compensation (Phase C) | `src/cognitive_firm/orchestration/saga_compensation.py` | `tests/test_saga_compensation.py`, `tests/test_saga_command_conformance.py` |
 | Project charter parser | `src/cognitive_firm/orchestration/project_charter.py` | `tests/test_project_charter.py` |
 | Evidence gap state | `src/cognitive_firm/orchestration/evidence_gaps.py` | `tests/test_evidence_gaps.py` |
 | Human work sessions + A2H helper | `src/cognitive_firm/orchestration/human_work.py` | `tests/test_human_work.py` |
 | Action attestations | `src/cognitive_firm/orchestration/action_attestation.py` | `tests/test_action_attestation.py` |
+| Formal verification records and provider proof packs | `src/cognitive_firm/orchestration/formal_verification.py` | `tests/test_formal_verification.py`, `tests/test_formal_provider_bundle_demo.py`, `tests/test_formal_provider_proof_pack_script.py` |
 | Governed-run attestation bundle + validation route | `src/cognitive_firm/orchestration/artifact_bundle.py`, `src/cognitive_firm/kernel_service.py` | `tests/test_governed_run_attestation_bundle.py`, `tests/test_kernel_service.py`, `schemas/governed-run-attestation.v1.schema.json` |
 | Governed mutation proof chain + validation route | `src/cognitive_firm/orchestration/mutation_proofs.py`, `src/cognitive_firm/kernel_service.py` | `tests/test_mutation_proofs.py`, `tests/test_kernel_service.py`, `tests/test_self_evolving_org_demo.py` |
 | Audit integrity manifests | `src/cognitive_firm/orchestration/audit_integrity.py` | `tests/test_audit_integrity.py` |
@@ -523,7 +655,7 @@ operator runbook before treating it as release evidence.
 | Organization surface read model | `src/cognitive_firm/orchestration/org_surface.py` | `tests/test_org_surface.py` |
 | Execution routing contracts | `src/cognitive_firm/orchestration/execution_routing.py` | `tests/test_execution_routing.py`, `tests/test_human_work.py` |
 | Run checkpoint interface | `src/cognitive_firm/orchestration/run_checkpoints.py` | `tests/test_run_checkpoints.py` |
-| Runtime adapter interface | `src/cognitive_firm/orchestration/runtime_adapters.py` | `tests/test_runtime_adapters.py` |
+| Runtime adapter interface | `src/cognitive_firm/orchestration/runtime_adapters.py` | `tests/test_runtime_adapters.py`, `tests/test_runtime_interrupt_command_conformance.py` |
 | Agent runtime invocation receipts and readiness summaries | `src/cognitive_firm/orchestration/agent_runtime_invocation.py` | `tests/test_agent_runtime_invocation.py`, `tests/test_llm_runtime_providers.py`, `tests/test_self_evolving_agent_preflight.py` |
 | Multi-agent trace attribution and failure packets | `src/cognitive_firm/orchestration/multi_agent_trace_attribution.py` | `tests/test_multi_agent_trace_attribution.py`, `tests/test_multi_agent_trace_attribution_demo.py`, `tests/test_kernel_service.py` |
 | Phase execution overlay | `src/cognitive_firm/orchestration/phase_execution.py` | `tests/test_phase_execution.py`, `tests/test_phase_execution_demo.py`, `tests/test_kernel_service.py` |
@@ -543,6 +675,7 @@ operator runbook before treating it as release evidence.
 | Resource leases | `src/cognitive_firm/orchestration/leases.py` | `tests/test_leases.py` |
 | Kernel event envelope | `src/cognitive_firm/orchestration/kernel_events.py` | `tests/test_kernel_events.py` |
 | Resource envelope | `src/cognitive_firm/orchestration/resource_envelope.py` | `tests/test_resource_envelope.py` |
+| Provenance timeline, graph, and portable handoff report projections | `src/cognitive_firm/orchestration/provenance_timeline.py`, `src/cognitive_firm/kernel_service.py` | `tests/test_provenance_timeline.py` |
 | Policy decisions | `src/cognitive_firm/orchestration/policy_decisions.py` | `tests/test_policy_decisions.py` |
 | Decision aggregation cases | `src/cognitive_firm/orchestration/decision_aggregation.py` | `tests/test_decision_aggregation.py`, `tests/test_kernel_service.py` |
 | Migration records | `src/cognitive_firm/orchestration/migrations.py` | `tests/test_migrations.py` |
@@ -562,7 +695,7 @@ operator runbook before treating it as release evidence.
 | Governed overlay install and no-write overlay preview (authority diff, file plan, `package.install_approved`) | `src/cognitive_firm/distribution/governed_install.py` | `tests/test_governed_install.py` |
 | Remote packages (git-URL fetch, SHA pin, content-hashed lockfile) | `src/cognitive_firm/distribution/remote_registry.py`, `lockfile.py` | `tests/test_remote_registry.py` |
 | Userland — enrollment, attention router, needs-me, work inbox, vocabulary, surface policy | `src/cognitive_firm/userland/` | `tests/test_attention_router.py`, `tests/test_needs_me.py`, `tests/test_work_inbox.py`, `tests/test_vocabulary.py`, `tests/test_enrollment.py`, `tests/test_surface_policy.py` |
-| Userland CLI + kernel routes (`needs-me` / `inbox` / `vocabulary` / `status` / `resolve` / `proposals` / `approve` / `decline`; `GET /kernel/attention`, `GET /kernel/vocabulary`, `GET /kernel/governance-changes`, `POST /kernel/governance-changes/{id}/decision`) | `src/cognitive_firm/userland/cli.py`, `src/cognitive_firm/kernel_service.py` | `tests/test_userland_cli.py`, `tests/test_kernel_service_userland.py` |
+| Userland CLI + kernel routes (`needs-me` / `inbox` / `vocabulary` / `commands` / `operator-path` / `status` / `resolve` / `proposals` / `proposal` / `proposal-packet` / `proposal-template` / `proposal-from-candidate` / `work-context` / `context-packet-verify` / `human-pressure` / `learning-candidates` / `lease-acquire` / `leases` / `lease-release` / `decision-profiles` / `decision-cases` / `decision-open` / `decision-position` / `decision-compute` / `decision-route-escalation` / `receipt` / `learning-use` / `learning-loop` / `timeline` / `graph` / `provenance-report` / `approve` / `decline`; `GET /kernel/attention`, `GET /kernel/vocabulary`, `GET /kernel/command-surface`, `GET /kernel/operator-path`, `GET /kernel/governance-change-template`, `GET /kernel/governance-changes`, `GET /kernel/governance-changes?view=review`, `GET /kernel/governance-changes/{id}/review-packet`, `GET /kernel/leases`, `GET /kernel/decision-procedure-profiles`, `GET /kernel/decision-aggregation-cases`, `GET /kernel/learning-transition-candidates`, `GET /kernel/learning-events/{id}/loop`, `GET /kernel/work-discovery`, `POST /kernel/work-discovery/context-packet/verify`, `GET /kernel/human-work-pressure`, `GET /kernel/provenance-timeline`, `GET /kernel/provenance-graph`, `GET /kernel/provenance-report`, `POST /kernel/leases`, `POST /kernel/leases/{id}/release`, `POST /kernel/decision-aggregation-cases`, `POST /kernel/decision-aggregation-cases/{id}/positions`, `POST /kernel/decision-aggregation-cases/{id}/compute`, `POST /kernel/decision-aggregation-cases/{id}/route-escalation`, `POST /kernel/human-work/{id}/receipt`, `POST /kernel/learning-event-encounters`, `POST /kernel/learning-transition-candidates/{candidate_id}/governance-change`, `POST /kernel/governance-changes/{id}/decision`) | `src/cognitive_firm/userland/cli.py`, `src/cognitive_firm/kernel_service.py`; Orbit projection panes under `orbit/src/components/` | `tests/test_userland_cli.py`, `tests/test_kernel_service_userland.py`, `tests/test_governance_changes.py`, `tests/test_learning_events.py`, `tests/test_provenance_timeline.py`; Orbit TypeScript/build smoke |
 | Primitive extension schemas | `src/cognitive_firm/orchestration/extension_schemas.py` | `tests/test_extension_schemas.py` |
 | EU AI Act deploy gate | `src/cognitive_firm/orchestration/eu_ai_act_deploy_gate.py` | `tests/test_eu_ai_act_deploy_gate.py`; `docs/protocols/eu-ai-act-deploy-gate.md` |
 | Property-based invariants (Hypothesis) | `tests/test_invariants_property_based.py` | 8/8 |

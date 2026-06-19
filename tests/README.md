@@ -12,6 +12,8 @@ _Folder index. Prose may be added above the auto-index block._
 
 **Documents**
 
+- [test_a2a_delegation_command_conformance.py](test_a2a_delegation_command_conformance.py)
+- [test_a2a_h2a_command_conformance.py](test_a2a_h2a_command_conformance.py)
 - [test_a2h_command_conformance.py](test_a2h_command_conformance.py)
 - [test_accountability.py](test_accountability.py)
 - [test_accountability_cases.py](test_accountability_cases.py)
@@ -20,6 +22,9 @@ _Folder index. Prose may be added above the auto-index block._
 - [test_actor_identity.py](test_actor_identity.py)
 - [test_actor_membership.py](test_actor_membership.py)
 - [test_adapter_conformance.py](test_adapter_conformance.py)
+- [test_adoption_onramp_packet_script.py](test_adoption_onramp_packet_script.py)
+- [test_adoption_onramp_replay_script.py](test_adoption_onramp_replay_script.py)
+- [test_adoption_readiness_packet_script.py](test_adoption_readiness_packet_script.py)
 - [test_agent_daemon_roots.py](test_agent_daemon_roots.py)
 - [test_agent_fleet_audit_demo.py](test_agent_fleet_audit_demo.py)
 - [test_agent_runtime_invocation.py](test_agent_runtime_invocation.py)
@@ -33,6 +38,7 @@ _Folder index. Prose may be added above the auto-index block._
 - [test_business_function_bandit.py](test_business_function_bandit.py)
 - [test_capability_signal_demo.py](test_capability_signal_demo.py)
 - [test_capability_signals.py](test_capability_signals.py)
+- [test_composition_boundaries.py](test_composition_boundaries.py)
 - [test_cross_primitive_integration.py](test_cross_primitive_integration.py)
 - [test_daemon_bug_audit.py](test_daemon_bug_audit.py)
 - [test_decision_aggregation.py](test_decision_aggregation.py)
@@ -48,6 +54,7 @@ _Folder index. Prose may be added above the auto-index block._
 - [test_field_pilot_action_impact_demo.py](test_field_pilot_action_impact_demo.py)
 - [test_forecast_market_interface.py](test_forecast_market_interface.py)
 - [test_formal_provider_bundle_demo.py](test_formal_provider_bundle_demo.py)
+- [test_formal_provider_proof_pack_script.py](test_formal_provider_proof_pack_script.py)
 - [test_formal_verification.py](test_formal_verification.py)
 - [test_gen_folder_index.py](test_gen_folder_index.py)
 - [test_governance_changes.py](test_governance_changes.py)
@@ -64,8 +71,11 @@ _Folder index. Prose may be added above the auto-index block._
 - [test_invariants_property_based.py](test_invariants_property_based.py)
 - [test_kernel_events.py](test_kernel_events.py)
 - [test_kernel_service.py](test_kernel_service.py)
+- [test_kernel_service_smoke.py](test_kernel_service_smoke.py)
 - [test_kernel_service_userland.py](test_kernel_service_userland.py)
+- [test_langgraph_adapter_policy_preview.py](test_langgraph_adapter_policy_preview.py)
 - [test_learning_events.py](test_learning_events.py)
+- [test_learning_loop_walkthrough.py](test_learning_loop_walkthrough.py)
 - [test_learning_transition_compiler.py](test_learning_transition_compiler.py)
 - [test_leases.py](test_leases.py)
 - [test_llm_runtime_providers.py](test_llm_runtime_providers.py)
@@ -92,8 +102,10 @@ _Folder index. Prose may be added above the auto-index block._
 - [test_project_charter.py](test_project_charter.py)
 - [test_protocol_experiment_demo.py](test_protocol_experiment_demo.py)
 - [test_protocol_experiments.py](test_protocol_experiments.py)
+- [test_provenance_timeline.py](test_provenance_timeline.py)
 - [test_public_claims_check.py](test_public_claims_check.py)
 - [test_push_router.py](test_push_router.py)
+- [test_release_diff_audit.py](test_release_diff_audit.py)
 - [test_release_hygiene_check.py](test_release_hygiene_check.py)
 - [test_remote_registry.py](test_remote_registry.py)
 - [test_resource_allocation.py](test_resource_allocation.py)
@@ -102,8 +114,11 @@ _Folder index. Prose may be added above the auto-index block._
 - [test_routine_reviews.py](test_routine_reviews.py)
 - [test_run_checkpoints.py](test_run_checkpoints.py)
 - [test_runtime_adapter_conformance.py](test_runtime_adapter_conformance.py)
+- [test_runtime_adapter_proof_pack_script.py](test_runtime_adapter_proof_pack_script.py)
 - [test_runtime_adapters.py](test_runtime_adapters.py)
+- [test_runtime_interrupt_command_conformance.py](test_runtime_interrupt_command_conformance.py)
 - [test_runtime_proof_pack.py](test_runtime_proof_pack.py)
+- [test_saga_command_conformance.py](test_saga_command_conformance.py)
 - [test_saga_compensation.py](test_saga_compensation.py)
 - [test_self_evolving_agent_preflight.py](test_self_evolving_agent_preflight.py)
 - [test_self_evolving_daemon_smoke.py](test_self_evolving_daemon_smoke.py)
@@ -124,6 +139,6 @@ _Folder index. Prose may be added above the auto-index block._
 - [test_work_items.py](test_work_items.py)
 - [test_worker_taxonomy.py](test_worker_taxonomy.py)
 
-<sub>1 sub-folder(s), 111 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
+<sub>1 sub-folder(s), 126 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
 
 <!-- AUTO-INDEX:END -->

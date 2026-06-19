@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from cognitive_firm.orchestration.kernel_events import list_kernel_events  # noqa: E402
+from cognitive_firm.orchestration.authority_domains import AuthorityDomain  # noqa: E402
 from cognitive_firm.orchestration.decision_rights import (  # noqa: E402
     assign_residual_right,
     get_residual_decision,
@@ -22,6 +23,7 @@ from cognitive_firm.orchestration.decision_rights import (  # noqa: E402
     residual_decision_resource,
     residual_right_assignment_resource,
     review_residual_decision,
+    resolve_residual_right_holder,
     summarize_decision_rights,
 )
 from cognitive_firm.orchestration.resource_envelope import validate_resource  # noqa: E402
@@ -201,6 +203,80 @@ def test_record_decision_with_no_assignment_is_unauthorized(logs: _Logs):
     decision = _record(logs)
     assert decision.unauthorized is True
     assert decision.assignment_id is None
+
+
+def test_holder_resolution_prefers_explicit_residual_assignment(logs: _Logs):
+    assignment = _assign(logs, holder_role="role.project_lead")
+    domains = [
+        AuthorityDomain(
+            domain_id="project_authority",
+            authority_role_id="project_authority",
+            scope_kind="project",
+            scope_id="proj.atlas",
+        )
+    ]
+
+    resolution = resolve_residual_right_holder(
+        "project",
+        "proj.atlas",
+        log_path=logs.assignments,
+        authority_domains=domains,
+    )
+
+    assert resolution.source == "residual_right_assignment"
+    assert resolution.holder_role == "role.project_lead"
+    assert resolution.assignment_id == assignment.assignment_id
+    assert resolution.authority_domain_id is None
+    assert resolution.explicit_assignment is True
+    assert resolution.authoritative_for_decision_recording is True
+    assert resolution.projection_only is False
+
+
+def test_holder_resolution_projects_authority_domain_when_assignment_missing(
+    logs: _Logs,
+):
+    domains = [
+        AuthorityDomain(
+            domain_id="policy_decisions",
+            authority_role_id="policy_authority",
+            scope_kind="decision_class",
+            scope_id="policy_change",
+        )
+    ]
+
+    resolution = resolve_residual_right_holder(
+        "decision_class",
+        "policy_change",
+        log_path=logs.assignments,
+        authority_domains=domains,
+    )
+
+    assert resolution.source == "authority_domain"
+    assert resolution.holder_role == "role.policy_authority"
+    assert resolution.assignment_id is None
+    assert resolution.authority_domain_id == "policy_decisions"
+    assert resolution.authority_scope_kind == "decision_class"
+    assert resolution.authority_scope_id == "policy_change"
+    assert resolution.explicit_assignment is False
+    assert resolution.authoritative_for_decision_recording is False
+    assert resolution.projection_only is True
+    assert "no active residual-right assignment for scope" in resolution.issues
+    assert resolution.as_dict()["resolved"] is True
+
+
+def test_holder_resolution_reports_unassigned_without_assignment_or_domain(logs: _Logs):
+    resolution = resolve_residual_right_holder(
+        "resource_class",
+        "budget",
+        log_path=logs.assignments,
+        authority_domains=[],
+    )
+
+    assert resolution.source == "unassigned"
+    assert resolution.holder_role is None
+    assert resolution.resolved is False
+    assert resolution.authoritative_for_decision_recording is False
+    assert "authority domains were empty" in resolution.issues
 
 
 def test_record_decision_requires_a_rationale(logs: _Logs):
@@ -391,6 +467,53 @@ def test_cli_can_render_residual_right_assignment_resources(
     assert [payload["kind"] for payload in payloads] == ["ResidualRightAssignment"]
     assert payloads[0]["metadata"]["name"] == assignment.assignment_id
     assert payloads[0]["spec"]["holder_role"] == "role.project_lead"
+
+
+def test_cli_holder_can_render_authority_resolution(
+    logs: _Logs,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    domains = tmp_path / "authority_domains" / "authority_domains.json"
+    domains.parent.mkdir(parents=True)
+    domains.write_text(
+        json.dumps(
+            {
+                "authority_domains": [
+                    {
+                        "domain_id": "policy_decisions",
+                        "authority_role_id": "role.policy_authority",
+                        "scope_kind": "decision_class",
+                        "scope_id": "policy_change",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = decision_rights_main(
+        [
+            "holder",
+            "--scope-kind",
+            "decision_class",
+            "--scope-ref",
+            "policy_change",
+            "--log-path",
+            str(logs.assignments),
+            "--resolve-authority",
+            "--org-root",
+            str(tmp_path),
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["holder"] is None
+    assert payload["holder_resolution"]["source"] == "authority_domain"
+    assert payload["holder_resolution"]["holder_role"] == "role.policy_authority"
+    assert payload["holder_resolution"]["projection_only"] is True
+    assert payload["boundary"]["authority_domain_fallback"] == "projection_only"
 
 
 def test_cli_can_render_residual_decision_resources(

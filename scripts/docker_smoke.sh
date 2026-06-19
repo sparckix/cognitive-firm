@@ -24,6 +24,14 @@ docker run --rm "$IMAGE" python scripts/package_smoke.py >/tmp/cognitive-firm-pa
 docker run --rm "$IMAGE" python scripts/kernel_conformance_smoke.py >/tmp/cognitive-firm-kernel-conformance.json
 docker run --rm "$IMAGE" python scripts/app_integration_conformance.py >/tmp/cognitive-firm-app-conformance.json
 docker run --rm "$IMAGE" python scripts/app_service_integration_smoke.py >/tmp/cognitive-firm-app-service-smoke.json
+docker run --rm "$IMAGE" python scripts/formal_provider_proof_pack.py >/tmp/cognitive-firm-formal-provider-proof-pack.json
+docker run --rm -v "$ROOT_DIR/tests:/app/tests:ro" "$IMAGE" python scripts/langgraph_adapter_policy_preview.py >/tmp/cognitive-firm-langgraph-adapter-policy-preview.json
+docker run --rm "$IMAGE" python scripts/runtime_adapter_proof_pack.py >/tmp/cognitive-firm-runtime-adapter-proof-pack.json
+docker run --rm "$IMAGE" python scripts/runtime_interrupt_command_conformance.py >/tmp/cognitive-firm-runtime-interrupt-command-conformance.json
+docker run --rm "$IMAGE" python scripts/a2h_command_conformance.py >/tmp/cognitive-firm-a2h-command-conformance.json
+docker run --rm "$IMAGE" python scripts/a2a_delegation_command_conformance.py >/tmp/cognitive-firm-a2a-delegation-command-conformance.json
+docker run --rm "$IMAGE" python scripts/a2a_h2a_command_conformance.py >/tmp/cognitive-firm-a2a-h2a-command-conformance.json
+docker run --rm "$IMAGE" python scripts/saga_command_conformance.py >/tmp/cognitive-firm-saga-command-conformance.json
 docker run --rm "$IMAGE" python scripts/field_pilot_scaffold.py /tmp/cognitive-firm-field-pilot-smoke >/tmp/cognitive-firm-field-pilot-scaffold.txt
 docker run --rm "$IMAGE" python -m cognitive_firm.orchestration.org_surface --json >/tmp/cognitive-firm-org-surface.json
 docker run --rm "$IMAGE" python -m cognitive_firm.orchestration.human_work --help >/tmp/cognitive-firm-human-work-help.txt

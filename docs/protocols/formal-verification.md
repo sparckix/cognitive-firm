@@ -2,7 +2,8 @@
 
 **Status:** T1 filesystem primitive.
 **Module:** `cognitive_firm.orchestration.formal_verification`
-**Tests:** `tests/test_formal_verification.py`
+**Tests:** `tests/test_formal_verification.py`,
+`tests/test_formal_provider_proof_pack_script.py`
 
 Formal verification records are typed certificate rows from external formal
 checkers. The checker may be Lean, SMT, Isabelle, Coq, Alloy, TLA+, or a
@@ -248,6 +249,45 @@ make formal-provider-bundle-demo
 The demo creates one signed LeanMill-style provider payload that clears org
 trust policy and one missing-evidence provider row that stays caveated in the
 governed-run bundle.
+
+## Formal Provider Proof Pack
+
+```bash
+make formal-provider-proof-pack
+```
+
+The target emits `formal_provider_proof_pack.v1`. It runs the deterministic
+formal-provider demo in a temporary workspace, validates the bundled
+`leanmill-formal-verification` manifest/config/trust-policy declarations, and
+packages one operator receipt for adoption review.
+
+The pack checks six things:
+
+- the adapter manifest declares `family=formal_verification_provider` and
+  `protocol=formal_verification_provider_payload`;
+- the conformance config includes the signed-payload, forged-signature,
+  checker-evidence, faithfulness-ref, and missing-trust caveat checks;
+- the installed trust policy requires payload signatures, re-verification refs,
+  and faithfulness refs;
+- signed trusted evidence clears the governed-run bundle;
+- missing provider evidence stays caveated as an incomplete bundle;
+- the demo remains surface-neutral and no-external-call.
+
+The proof pack is a reviewer handoff. It does not run LeanMill, install
+provider code, approve provider trust, decide whether an informal claim was
+faithfully formalized, or mutate durable kernel state.
+
+## Research Anchor
+
+- [Natural Language Specifications in Proof Assistants](https://arxiv.org/abs/2205.07811)
+  is the reason this primitive separates certificate success from claim
+  faithfulness: a proof assistant can check a formal claim even when the
+  informal-to-formal translation is wrong.
+- [Evaluating the Robustness of Proof Autoformalization in Lean 4](https://arxiv.org/abs/2606.14867)
+  reinforces the same boundary for agent-era provers: proof autoformalizers can
+  be brittle under paraphrase and local perturbation, so cognitive-firm records
+  explicit `faithfulness_refs` and `checker_evidence_refs` instead of letting a
+  verified certificate silently become org truth.
 
 ## Boundary
 

@@ -108,6 +108,46 @@ This is not full enterprise isolation. It is the first kernel-level routing
 primitive that removes the single-authority assumption without weakening the T1
 default.
 
+The reusable validator is
+`validate_authority_role_graph(roles, domains=...)`. It follows role
+`escalates_to` chains until an authority role is reached, fails closed on dead
+ends or cycles that never reach authority, and accepts both `role.<id>` and a
+bare `<id>` when the bare value names a role in the same role index. The
+distribution `boot_check` and `cognitive-firm-authority-domains validate` use
+the same helper so package install and operator validation enforce one
+invariant.
+
+For scoped checks, use
+`trace_role_escalation_for_scope(roles, domains, role_id=..., decision_class=...)`.
+It resolves the authority domain for the supplied tenant/project/resource or
+decision scope, then proves that one source role's `escalates_to` path reaches
+that specific authority role. This catches the multi-authority case where a
+role can reach *an* authority but not the authority that owns the typed
+decision class.
+
+## Command Authority Effects
+
+Known command-surface entries can declare projection-only authority effects in
+`cognitive_firm.orchestration.command_surface`. For example, an adoption packet
+command can declare `decision_class: adoption_readiness`, while a
+policy-promotion demo can declare `decision_class: policy_change`.
+
+`GET /kernel/command-surface` and `cognitive-firm-userland commands` expose
+those effects alongside the command suggestion. When authority domains are
+configured, the effect is resolved through the same domain resolver used for
+governance interrupts. If no authority-domain file is configured, the effect
+reports the T1 single-authority fallback. Sensitive effects can require an
+explicit decision/resource scope so a global fallback remains visible as a
+review issue.
+
+Callers may also pass a source role (`role_id` on the service route or
+`--role-id` in terminal userland). The command surface then includes a
+read-only source-role escalation trace for each typed effect, showing whether
+that role reaches the resolved authority domain.
+
+This is a typed-effect style projection, not a workflow engine. It does not run
+commands, grant command authority, or infer who should execute the command.
+
 ## Interaction With Actor Membership
 
 Authority domains resolve the role. Actor membership resolves which actor
@@ -144,6 +184,17 @@ Validate domains against role files:
 
 ```bash
 cognitive-firm-authority-domains --org-root "$ORG_ROOT" validate
+```
+
+This command also validates role escalation reachability. It does not repair
+the role graph or choose an authority on behalf of the operator.
+
+Trace whether a role reaches the authority for a specific scope:
+
+```bash
+cognitive-firm-authority-domains --org-root "$ORG_ROOT" trace-escalation \
+  --role-id role.manager \
+  --decision-class policy_change
 ```
 
 Resolve a scoped authority role:

@@ -59,6 +59,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print all demo records instead of the compact adoption summary.",
     )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Optional path for the emitted JSON payload. Stdout is still written.",
+    )
     args = parser.parse_args(argv)
 
     with tempfile.TemporaryDirectory(prefix="cf-native-e2e-") as raw:
@@ -348,6 +353,9 @@ def main(argv: list[str] | None = None) -> int:
         bundle_validation_errors = validate_governed_run_bundle_payload(bundle_payload)
         payload = (
             {
+                "demo": "native_cognitive_firm_e2e",
+                "no_external_calls": True,
+                "summary": summary,
                 "actors": [asdict(analyst), asdict(reviewer)],
                 "operating_unit": unit.as_dict(),
                 "work_item": completed_work.as_dict(),
@@ -377,7 +385,11 @@ def main(argv: list[str] | None = None) -> int:
                 },
             }
         )
-        print(json.dumps(payload, indent=2, sort_keys=True))
+        rendered = json.dumps(payload, indent=2, sort_keys=True)
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(rendered + "\n", encoding="utf-8")
+        print(rendered)
     return 0
 
 

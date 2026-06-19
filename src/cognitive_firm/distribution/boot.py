@@ -11,15 +11,13 @@ internals, so it stays stable as the kernel evolves (spec G5).
 
 from __future__ import annotations
 
-from collections import deque
 from pathlib import Path
 
 import yaml
 
 from cognitive_firm.orchestration.authority_domains import (
-    authority_roles_in_domains,
     load_authority_domains,
-    validate_authority_domains,
+    validate_authority_role_graph,
 )
 
 # Top-level keys every role.yaml must carry (role.v1 schema).
@@ -34,16 +32,6 @@ ROLE_REQUIRED_KEYS = (
     "escalates_to",
     "budget",
 )
-
-_ROLE_REF_PREFIX = "role."
-
-
-def _role_ref(ref: object) -> str | None:
-    """Resolve a ``role.<id>`` reference to its role_id; ignore non-role refs."""
-    if isinstance(ref, str) and ref.startswith(_ROLE_REF_PREFIX):
-        return ref[len(_ROLE_REF_PREFIX):]
-    return None
-
 
 def boot_check(org_root: Path) -> list[str]:
     """Return the reasons an installed org cannot boot. Empty list = bootable.
@@ -121,77 +109,11 @@ def _check_governance_graph(
     """
     issues: list[str] = []
 
-    authorities = sorted(
-        rid for rid, r in roles.items() if r.get("role_class") == "authority"
-    )
     domains = []
     if org_root is not None:
         try:
             domains = load_authority_domains(org_root)
         except (OSError, ValueError, TypeError) as exc:
             issues.append(f"authority domains do not parse: {exc}")
-    if domains:
-        issues.extend(validate_authority_domains(domains, roles=roles))
-        scoped_authorities = authority_roles_in_domains(domains)
-        unscoped = sorted(set(authorities) - scoped_authorities)
-        if unscoped:
-            issues.append(
-                "authority roles are missing authority-domain records: "
-                + ", ".join(unscoped)
-            )
-    if not authorities:
-        issues.append(
-            "no role has role_class 'authority' - escalation cannot terminate"
-        )
-    elif len(authorities) > 1 and not domains:
-        issues.append(
-            f"multiple authority roles ({', '.join(authorities)}) - "
-            "exactly one is required unless authority domains are declared"
-        )
-
-    escalation: dict[str, list[str]] = {}
-    for rid, role in roles.items():
-        resolved: list[str] = []
-        for ref in role.get("escalates_to") or []:
-            target = _role_ref(ref)
-            if target is None:
-                continue  # a non-role escalation target (e.g. external)
-            if target not in roles:
-                issues.append(f"role {rid} escalates_to unknown role: {ref}")
-            else:
-                resolved.append(target)
-        escalation[rid] = resolved
-        for ref in role.get("delegates_to") or []:
-            target = _role_ref(ref)
-            if target is not None and target not in roles:
-                issues.append(f"role {rid} delegates_to unknown role: {ref}")
-
-    authority_set = set(authorities)
-    for rid in roles:
-        if rid in authority_set:
-            continue
-        if not _reaches_authority(rid, escalation, authority_set):
-            issues.append(
-                f"role {rid} escalation chain never reaches an authority "
-                "role - the org has an ungoverned decision path"
-            )
+    issues.extend(validate_authority_role_graph(roles, domains=domains))
     return issues
-
-
-def _reaches_authority(
-    start: str,
-    escalation: dict[str, list[str]],
-    authority_set: set[str],
-) -> bool:
-    """BFS the escalation graph from ``start``; True if it reaches authority."""
-    seen: set[str] = {start}
-    queue: deque[str] = deque(escalation.get(start, []))
-    while queue:
-        node = queue.popleft()
-        if node in authority_set:
-            return True
-        if node in seen:
-            continue
-        seen.add(node)
-        queue.extend(escalation.get(node, []))
-    return False

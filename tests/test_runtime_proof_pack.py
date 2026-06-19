@@ -64,3 +64,16 @@ def test_runtime_proof_pack_native_and_langgraph_share_bundle_contract(capsys):
     native_summary_keys = set(native["summary"])
     langgraph_summary_keys = set(langgraph["summary"])
     assert native_summary_keys == langgraph_summary_keys
+
+
+def test_native_e2e_demo_can_write_output_file(tmp_path: Path, capsys):
+    module = _load_script("native_e2e_demo")
+    output_path = tmp_path / "native-e2e.json"
+
+    assert module.main(["--output", str(output_path)]) == 0
+    stdout_payload = json.loads(capsys.readouterr().out)
+    file_payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert file_payload == stdout_payload
+    assert file_payload["demo"] == "native_cognitive_firm_e2e"
+    assert file_payload["bundle_validation"]["ok"] is True

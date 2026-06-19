@@ -15,6 +15,8 @@ from cognitive_firm.orchestration.governance_changes import (  # noqa: E402
     InvariantCheck,
     failed_invariants,
     governance_change_from_candidate,
+    governance_change_review_packet,
+    governance_change_review_projection,
     governance_change_resource,
     list_governance_changes,
     main as governance_changes_main,
@@ -66,6 +68,261 @@ def test_governance_change_requires_all_invariants_for_review_ready(tmp_path: Pa
 
     proposals = list_governance_changes(status="review_ready", log_path=log_path)
     assert [item.proposal_id for item in proposals] == [proposal.proposal_id]
+
+
+def test_governance_change_review_projection_summarizes_review_state(tmp_path: Path):
+    log_path = tmp_path / "governance_changes.jsonl"
+
+    proposal = propose_governance_change(
+        change_kind="mandate_change",
+        title="Tighten reviewer write scope",
+        proposed_by="role.research_director",
+        target_ref="org/mandates/reviewer_mandate.md",
+        rationale="Repeated scope drift requires a narrower default write boundary.",
+        expected_behavior_change="Reviewer can edit review artifacts only unless escalated.",
+        risk_summary="Narrows reviewer write scope; no additional runtime authority.",
+        rollback_plan="Restore previous mandate hash.",
+        source_refs=["authority_diff:reviewer-write-scope"],
+        invariant_checks=_passing_checks(),
+        log_path=log_path,
+    )
+
+    projection = governance_change_review_projection(proposal)
+
+    assert projection["proposal_id"] == proposal.proposal_id
+    assert projection["review_state"] == "awaiting_review"
+    assert projection["read_only"] is True
+    assert projection["evidence_status"] == "pass"
+    assert projection["missing_evidence"] == []
+    assert projection["failed_invariants"] == []
+    assert projection["missing_required_invariants"] == []
+    assert projection["source_ref_count"] == 1
+    assert projection["evidence_ref_count"] >= len(REQUIRED_INVARIANTS)
+    assert projection["decision_route"].endswith(
+        f"/kernel/governance-changes/{proposal.proposal_id}/decision"
+    )
+
+    decided = governance_change_review_projection(proposal, decided=True)
+    assert decided["review_state"] == "decided"
+
+
+def test_governance_change_review_packet_exports_handoff(tmp_path: Path):
+    log_path = tmp_path / "governance_changes.jsonl"
+
+    proposal = propose_governance_change(
+        change_kind="mandate_change",
+        title="Tighten reviewer write scope",
+        proposed_by="role.research_director",
+        target_ref="org/mandates/reviewer_mandate.md",
+        rationale="Repeated scope drift requires a narrower default write boundary.",
+        expected_behavior_change="Reviewer can edit review artifacts only unless escalated.",
+        risk_summary="Narrows reviewer write scope; no additional runtime authority.",
+        rollback_plan="Restore previous mandate hash.",
+        source_refs=["authority_diff:reviewer-write-scope"],
+        invariant_checks=_passing_checks(),
+        log_path=log_path,
+    )
+    packet = governance_change_review_packet(
+        proposal,
+        provenance_report={
+            "query": {"ref": f"governance_change:{proposal.proposal_id}"},
+            "summary": {"event_count": 1},
+            "coverage": {"status": "partial", "gaps": ["no outcome link"]},
+            "follow_through": {
+                "status": "proposal_only",
+                "decision_events": 0,
+                "outcome_links": 0,
+                "routine_reviews": 0,
+                "learning_use_receipts": 0,
+                "latest_refs": [f"governance_change:{proposal.proposal_id}"],
+                "review_questions": [
+                    "What decision, outcome link, or routine review should close this loop?"
+                ],
+                "read_only": True,
+                "projection_only": True,
+            },
+            "caveats": ["projection-only fixture"],
+            "event_excerpt": [],
+            "evidence_refs": [],
+        },
+    )
+
+    assert packet["packet_kind"] == "governance_change_review_handoff"
+    assert packet["read_only"] is True
+    assert packet["projection_only"] is True
+    assert packet["review"]["review_state"] == "awaiting_review"
+    assert packet["decision_route"].endswith(
+        f"/kernel/governance-changes/{proposal.proposal_id}/decision"
+    )
+    refs = {row["ref"]: row for row in packet["evidence_refs"]}
+    assert "authority_diff:reviewer-write-scope" in refs
+    assert "source_refs" in refs["authority_diff:reviewer-write-scope"]["sources"]
+    assert any(
+        row["ref"] == "tests/write_scope_preserved.txt"
+        and "write_scope_preserved" in row["invariants"]
+        for row in packet["evidence_refs"]
+    )
+    assert packet["provenance_report"]["coverage"]["status"] == "partial"
+    assert packet["follow_through"]["status"] == "proposal_only"
+    assert (
+        "What decision, outcome link, or routine review should close this loop?"
+        in packet["review_questions"]
+    )
+    assert any(
+        "Do the cited refs support" in question
+        for question in packet["review_questions"]
+    )
+    assert "# Governance Change Review Packet" in packet["markdown"]
+    assert "authority_diff:reviewer-write-scope" in packet["markdown"]
+
+
+def test_governance_change_review_surfaces_formal_proof_obligation(
+    tmp_path: Path,
+) -> None:
+    proposal = propose_governance_change(
+        change_kind="route_policy_change",
+        title="Review provider routing policy",
+        proposed_by="role.governance_reviewer",
+        target_ref="policy://support/provider-routing",
+        rationale="Measured action-impact rows favor the candidate route.",
+        expected_behavior_change="Route provider-sensitive cases to specialist review.",
+        risk_summary="Changes a policy adapter but does not grant new authority.",
+        rollback_plan="Revert to the prior route policy.",
+        source_refs=[
+            "action_impact_policy_evaluation:eval_provider_route",
+            "formal_verification:fver_provider_route_safety",
+        ],
+        invariant_checks=_passing_checks(),
+        log_path=tmp_path / "governance_changes.jsonl",
+    )
+
+    projection = governance_change_review_projection(proposal)
+    proof = projection["proof_obligations"]
+
+    assert projection["review_state"] == "awaiting_review"
+    assert proof["status"] == "satisfied"
+    assert proof["expected"] is True
+    assert proof["required"] is False
+    assert proof["blocking"] is False
+    assert proof["formal_verification_refs"] == [
+        "formal_verification:fver_provider_route_safety"
+    ]
+
+    packet = governance_change_review_packet(proposal)
+    assert packet["proof_obligations"]["status"] == "satisfied"
+    assert "## Proof Obligations" in packet["markdown"]
+    assert "formal_verification:fver_provider_route_safety" in packet["markdown"]
+
+
+def test_governance_change_review_warns_when_policy_proof_missing(
+    tmp_path: Path,
+) -> None:
+    proposal = propose_governance_change(
+        change_kind="gate_policy_change",
+        title="Relax deploy gate",
+        proposed_by="role.release_owner",
+        target_ref="gate://deploy/high-risk-policy",
+        rationale="Pilot data suggests the existing gate is too strict.",
+        expected_behavior_change="Allow a narrower reviewer set on low-risk deploys.",
+        risk_summary="Touches a high-risk policy gate.",
+        rollback_plan="Restore the previous gate policy.",
+        source_refs=["pilot:deploy-gate-summary"],
+        invariant_checks=_passing_checks(),
+        log_path=tmp_path / "governance_changes.jsonl",
+    )
+
+    projection = governance_change_review_projection(proposal)
+    proof = projection["proof_obligations"]
+
+    assert projection["review_state"] == "awaiting_review"
+    assert proof["status"] == "attention"
+    assert proof["expected"] is True
+    assert proof["required"] is False
+    assert proof["blocking"] is False
+    assert proof["missing"] == ["formal_verification_ref"]
+
+
+def test_governance_change_review_blocks_explicit_required_proof(
+    tmp_path: Path,
+) -> None:
+    proposal = propose_governance_change(
+        change_kind="tenant_policy_change",
+        title="Install verifier policy",
+        proposed_by="role.release_owner",
+        target_ref="provider://formal-verification/leanmill",
+        rationale="Require formal provider payloads for high-risk policy checks.",
+        expected_behavior_change="High-risk checks must cite provider proof payloads.",
+        risk_summary="Changes tenant verifier trust policy.",
+        rollback_plan="Remove the provider trust-policy entry.",
+        source_refs=["authority_diff:leanmill-provider"],
+        invariant_checks=_passing_checks(),
+        metadata={
+            "requires_formal_verification": True,
+            "formal_proof_obligations": [
+                {
+                    "obligation_id": "provider_payload_contract",
+                    "property_class": "contract",
+                    "subject_ref": "provider://formal-verification/leanmill",
+                    "required": True,
+                }
+            ],
+        },
+        log_path=tmp_path / "governance_changes.jsonl",
+    )
+
+    projection = governance_change_review_projection(proposal)
+    proof = projection["proof_obligations"]
+
+    assert proposal.status == "review_ready"
+    assert projection["review_state"] == "blocked"
+    assert proof["status"] == "blocking"
+    assert proof["required"] is True
+    assert proof["blocking"] is True
+    assert proof["missing"] == ["formal_verification_ref"]
+    assert proof["obligations"][0]["obligation_id"] == "provider_payload_contract"
+
+
+def test_governance_change_review_projection_does_not_mark_failed_invariants_passed(
+    tmp_path: Path,
+):
+    log_path = tmp_path / "governance_changes.jsonl"
+    checks = _passing_checks()
+    failed = checks[0]
+    unknown = checks[1]
+    checks[0] = InvariantCheck(
+        invariant=failed.invariant,
+        status="fail",
+        rationale="Fixture failure.",
+        evidence_refs=["test:failed"],
+    )
+    checks[1] = InvariantCheck(
+        invariant=unknown.invariant,
+        status="unknown",
+        rationale="Fixture unknown.",
+        evidence_refs=["test:unknown"],
+    )
+
+    proposal = propose_governance_change(
+        change_kind="mandate_change",
+        title="Blocked reviewer write scope",
+        proposed_by="role.research_director",
+        target_ref="org/mandates/reviewer_mandate.md",
+        rationale="Repeated scope drift requires review.",
+        expected_behavior_change="Reviewer can edit review artifacts only.",
+        risk_summary="Narrows reviewer write scope.",
+        rollback_plan="Restore previous mandate hash.",
+        source_refs=["authority_diff:reviewer-write-scope"],
+        invariant_checks=checks,
+        log_path=log_path,
+    )
+
+    projection = governance_change_review_projection(proposal)
+
+    assert projection["review_state"] == "blocked"
+    assert failed.invariant in projection["failed_invariants"]
+    assert unknown.invariant in projection["unknown_invariants"]
+    assert failed.invariant not in projection["passed_required_invariants"]
+    assert unknown.invariant not in projection["passed_required_invariants"]
 
 
 def test_governance_change_can_carry_typed_predicted_effect(tmp_path: Path):

@@ -73,6 +73,13 @@ python -m cognitive_firm.orchestration.leases list --resource
 
 ## Service Flow
 
+List or project current claims:
+
+```text
+GET /kernel/leases?resource_ref=human_work:hws_123&state=active
+GET /kernel/leases?resource=true
+```
+
 Acquire:
 
 ```json
@@ -115,6 +122,14 @@ POST /kernel/leases/lease_.../release
     "role_id": "role.manager"
   }
 }
+```
+
+The terminal userland mirrors the same flow without becoming a scheduler:
+
+```bash
+cognitive-firm-userland lease-acquire human_work:hws_123 --actor human.alice --role role.manager
+cognitive-firm-userland leases --resource-ref human_work:hws_123 --state active
+cognitive-firm-userland lease-release lease_... --actor human.alice --role role.manager
 ```
 
 ## T1 And T2 Modes

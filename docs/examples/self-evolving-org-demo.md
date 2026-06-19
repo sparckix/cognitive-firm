@@ -187,15 +187,21 @@ packet inbox, execution receipts, action attestations, and optionally score
 totals. The operator-only scorecards are written outside the generated
 `demo-firm` directory under the run root's `operator-only/workload-probes/`
 directory. The answer key and rubric are not copied into `org/` or `reports/`.
+The firm-visible measurement carrier is
+`reports/workload-probes/workload-probe-summary.json`, with the receipt index at
+`org/workload/executions/README.md`. Live planner prompts and reviewer evidence
+refs carry those paths so capability claims can be checked against the workload
+probe instead of relying on model narration.
 
 Two feedback arms are supported:
 
 - `score_totals` returns packet totals and score-per-budget into firm-visible
-  receipts. This is the anchored-learning arm.
+  receipts and the workload-probe summary. This is the anchored-learning arm.
 - `withheld` still scores operator-side, but firm-visible receipts say that
   score feedback was withheld. This is the no-feedback baseline for observing
   whether the organization involutes into process work when it cannot see task
-  performance.
+  performance. Planner prompts explicitly warn that operator-only score values
+  are not firm-visible evidence.
 
 Use `SELF_EVOLVING_FEEDBACK=withheld` with the Make targets, or pass
 `--workload-feedback withheld` to the script directly.
@@ -246,6 +252,15 @@ workload scorecards, but only the score-feedback arm receives score totals in
 firm-visible state. The target starts a local static server; inspect
 `http://127.0.0.1:8765/reports/self-evolving-feedback-comparison.html` first,
 then drill into either embedded arm viewer.
+The comparison report is the fastest way to see whether visible score feedback
+changed the approved mutation, hidden holdout score, blocked proposals, and
+budget use. Each arm still has its own generated
+`demo-firm/reports/self-evolving-org-company-state.html` viewer for the full
+proposal, reviewer, proof, workload, and git trace. In the Agent Work tab,
+live reviewer positions show both their captured prompt/output artifacts and
+the input evidence refs they reviewed. Reviewer-quorum blocks preserve the same
+decision positions, so a blocked run is still useful evidence rather than a
+blank failed demo.
 
 In live runs, a no-feedback arm may legitimately end with
 `termination_reason=blocked_by_reviewer_quorum` if reviewer offices abstain
@@ -637,7 +652,21 @@ the rebuilt payload with the saved proof. The summary includes
 The demo also writes `reports/self-evolving-org-demo.md`, a compact human
 review report with summary metrics, accepted mutations, proof-chain tables,
 planner receipts, evidence carrier refs, delegation diagnostics, blocked
-proposals, and git receipts.
+proposals, provenance report refs, and git receipts. Accepted governed
+mutations also write reusable provenance handoff reports under
+`reports/provenance/` by calling the same read-only
+`GET /kernel/provenance-report?run_id=...` route used by userland. Accepted
+and blocked governance proposals write reusable review handoff packets under
+`reports/proposals/` by calling
+`GET /kernel/governance-changes/{proposal_id}/review-packet`. The main demo
+report summarizes those packets' follow-through status so reviewers can see
+which accepted proposals reached closed-loop evidence and which blocked
+proposal remains proposal-only.
+After outcome and routine-review records exist, each accepted mutation also
+obtains a future work-discovery context packet, verifies it through
+`POST /kernel/work-discovery/context-packet/verify`, and records a
+learning-use receipt tied to that verified packet. The packet is evidence for
+future dispatch, not hidden memory or workflow state.
 
 For visual inspection, the primary surface is
 `reports/self-evolving-org-company-state.html`, backed by
@@ -659,7 +688,7 @@ This projection answers:
 
 - what role offices exist now;
 - what structural mutations were accepted;
-- what learning units can affect future dispatch;
+- what learning units and verified context packets can affect future dispatch;
 - what planner transport produced the proposals;
 - what prompt/response artifacts exist for live planner runs;
 - what A2A review messages were exchanged;
@@ -834,7 +863,10 @@ generated reports directory also includes
 humans: it links the viewer, planner receipts, mutation proofs, git history,
 and safe rerun commands. The runbook JSON uses the generic
 `governed_run_operator_summary.v1` projection from
-`governed_run_recipes`, with demo-specific metadata under `metadata`.
+`governed_run_recipes`, with demo-specific metadata under `metadata`. Accepted
+mutations also feed the runbook's `Learning Closure` section, which joins the
+learning event, verified context packet, learning-use receipt, changed org
+context, future replay cue, outcome review, routine review, and evidence refs.
 To serve the tabbed viewer with live polling, pass the printed
 `SELF_EVOLVING_DEMO_WORKDIR` to
 `make self-evolving-org-serve`, or use the stable realtime targets shown above

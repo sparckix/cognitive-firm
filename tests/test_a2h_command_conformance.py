@@ -29,6 +29,9 @@ def test_a2h_command_conformance_script_runs_cli_path():
     assert payload["ok"] is True
     assert payload["fixture"] == "a2h_command_conformance"
     assert payload["receipt_before_integration_enforced"] is True
+    assert payload["ready_for_agent_followup_before_integration"] is True
+    assert payload["followup_missing_receipt_visible"] is True
+    assert payload["followup_cleared_after_integration"] is True
     assert payload["completed_without_receipt_state"] == "completed"
     assert payload["final_state"] == "integrated"
     assert payload["resource_kind"] == "HumanWorkSession"

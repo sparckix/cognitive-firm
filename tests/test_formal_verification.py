@@ -14,7 +14,9 @@ from cognitive_firm.distribution.signing import generate_keypair  # noqa: E402
 from cognitive_firm.orchestration.formal_verification import (  # noqa: E402
     FORMAL_VERIFICATION_PROVIDER_SCHEMA_VERSION,
     FORMAL_VERIFICATION_TRUST_POLICY_VERSION,
+    FormalProviderProofPackInput,
     TRUSTED_FORMAL_VERIFICATION_PROVIDERS_RELATIVE_PATH,
+    build_formal_provider_proof_pack,
     configure_trusted_provider,
     create_formal_verification_from_provider_payload,
     create_formal_verification,
@@ -292,6 +294,56 @@ def test_validate_provider_payload_contract_checks_trust_policy_requirements(
     assert accepted["ok"] is True
     assert accepted["signature_status"] == "verified"
     assert accepted["trust_requirements"]["requires_payload_signature"] is True
+
+
+def test_formal_provider_proof_pack_accepts_declared_provider_boundary():
+    packet = build_formal_provider_proof_pack(
+        FormalProviderProofPackInput(
+            adapter_id="leanmill-formal-verification",
+            provider_id="leanmill",
+            demo_payload=_formal_provider_demo_payload(),
+            manifest=_formal_provider_manifest(),
+            conformance_config=_formal_provider_conformance_config(),
+            trust_policy=_formal_provider_trust_policy(),
+        )
+    )
+
+    assert packet["schema"] == "formal_provider_proof_pack.v1"
+    assert packet["summary"]["ok"] is True
+    assert packet["boundary"]["checker_does_not_execute_provider"] is True
+    assert "missing-evidence path is a first-class falsifier" in " ".join(
+        packet["isomorphism_takeaways"]
+    )
+
+
+def test_formal_provider_proof_pack_blocks_missing_evidence_without_falsifier_caveat():
+    demo_payload = _formal_provider_demo_payload()
+    demo_payload["missing_provider_evidence"]["bundle_caveats"] = [
+        "verified formal verifications with trust caveats: provider_payload_signature"
+    ]
+
+    packet = build_formal_provider_proof_pack(
+        FormalProviderProofPackInput(
+            adapter_id="leanmill-formal-verification",
+            provider_id="leanmill",
+            demo_payload=demo_payload,
+            manifest=_formal_provider_manifest(),
+            conformance_config=_formal_provider_conformance_config(),
+            trust_policy=_formal_provider_trust_policy(),
+        )
+    )
+
+    assert packet["summary"]["ok"] is False
+    failing = {
+        check["check_id"]: check
+        for check in packet["checks"]
+        if check["status"] != "passed"
+    }
+    assert "missing_evidence_falsifier_contract" in failing
+    assert any(
+        "checker_evidence_refs" in error
+        for error in failing["missing_evidence_falsifier_contract"]["errors"]
+    )
 
 
 def test_signed_provider_payload_rejects_forged_signature(tmp_path: Path):
@@ -657,3 +709,129 @@ def test_formal_verification_cli_creates_record(tmp_path: Path, capsys):
     assert payload["run_id"] == "run_cli_create"
     assert payload["action_attestation_id"]
     assert len(list_formal_verifications(run_id="run_cli_create", log_path=formal_log)) == 1
+
+
+def _formal_provider_demo_payload() -> dict:
+    return {
+        "demo": "formal_provider_bundle",
+        "fictional_firm": "Northstar Compliance Lab",
+        "no_external_calls": True,
+        "trusted_provider": {
+            "run_id": "run_trusted",
+            "verification_id": "fver_trusted",
+            "bundle_verdict": "passed",
+            "bundle_caveats": [],
+            "signature_verified": True,
+            "formal_verifications": 1,
+            "bundle_schema_valid": True,
+        },
+        "missing_provider_evidence": {
+            "run_id": "run_missing",
+            "verification_id": "fver_missing",
+            "bundle_verdict": "incomplete",
+            "bundle_caveats": [
+                "verified formal verifications with trust caveats: "
+                "provider_payload_signature, trusted_provider_public_key, "
+                "provider_payload_signature_verified, checker_evidence_refs, "
+                "faithfulness_refs"
+            ],
+            "formal_verifications": 1,
+            "bundle_schema_valid": True,
+        },
+        "summary": {
+            "trusted_bundle": "passed",
+            "missing_evidence_bundle": "incomplete",
+            "trusted_schema_errors": [],
+            "missing_schema_errors": [],
+            "verdict": "passed",
+        },
+    }
+
+
+def _formal_provider_manifest() -> dict:
+    return {
+        "schema_version": "cognitive-firm-adapter-manifest/v1",
+        "adapter_id": "leanmill-formal-verification",
+        "family": "formal_verification_provider",
+        "protocol": "formal_verification_provider_payload",
+        "description": "LeanMill provider adapter declaration for governed evidence.",
+        "executable": {
+            "kind": "repository",
+            "ref": "leanmill",
+            "public_key_ref": "configure://leanmill-ed25519-public-key",
+        },
+        "trust_requirements": {
+            "payload_signature": "required",
+            "reverification_refs": "required",
+            "faithfulness_refs": "required",
+        },
+        "conformance_checks": [
+            "accepts_signed_verified_payload",
+            "rejects_forged_payload_signature",
+            "preserves_checker_evidence_refs",
+            "preserves_faithfulness_refs",
+            "governed_bundle_caveats_missing_trust",
+        ],
+    }
+
+
+def _formal_provider_conformance_config() -> dict:
+    return {
+        "schema_version": "cognitive-firm-adapter-conformance/v1",
+        "adapter_id": "leanmill-formal-verification",
+        "protocol": "formal_verification_provider_payload",
+        "fixture_command": "make formal-provider-bundle-demo",
+        "required_checks": [
+            {
+                "check_id": "accepts_signed_verified_payload",
+                "evidence": "tests/test_formal_verification.py",
+            },
+            {
+                "check_id": "rejects_forged_payload_signature",
+                "evidence": "tests/test_formal_verification.py",
+            },
+            {
+                "check_id": "preserves_checker_evidence_refs",
+                "evidence": "tests/test_formal_verification.py",
+            },
+            {
+                "check_id": "preserves_faithfulness_refs",
+                "evidence": "tests/test_formal_verification.py",
+            },
+            {
+                "check_id": "governed_bundle_caveats_missing_trust",
+                "evidence": "tests/test_governed_run_attestation_bundle.py",
+            },
+        ],
+        "runtime_boundary": {
+            "external_runtime_owns": [
+                "claim formalization",
+                "faithfulness checks",
+                "checker selection",
+                "certificate generation",
+                "counterexample extraction",
+            ],
+            "cognitive_firm_owns": [
+                "provider payload schema validation",
+                "org-installed provider trust policy",
+                "signature verification against configured provider keys",
+                "formal-verification rows",
+                "governed-run bundle caveats",
+            ],
+        },
+    }
+
+
+def _formal_provider_trust_policy() -> dict:
+    return {
+        "schema_version": FORMAL_VERIFICATION_TRUST_POLICY_VERSION,
+        "trusted_providers": [
+            {
+                "provider": "leanmill",
+                "public_key_ref": "configure://leanmill-ed25519-public-key",
+                "requires_payload_signature": True,
+                "requires_reverification_refs": True,
+                "requires_faithfulness_refs": True,
+            }
+        ],
+    }

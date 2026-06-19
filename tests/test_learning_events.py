@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from datetime import datetime, timedelta, timezone
@@ -12,6 +13,7 @@ from cognitive_firm.orchestration.learning_events import (  # noqa: E402
     create_compounded_learning_event,
     create_learning_event,
     learning_event_from_candidate,
+    learning_event_loop_projection,
     learning_event_resource,
     list_learning_event_encounters,
     list_learning_events,
@@ -20,6 +22,7 @@ from cognitive_firm.orchestration.learning_events import (  # noqa: E402
     replay_learning_events,
     summarize_learning_events,
     update_learning_event_status,
+    verify_learning_event_context_packet_use,
 )
 from cognitive_firm.orchestration.learning_transition_compiler import LearningTransitionCandidate  # noqa: E402
 from cognitive_firm.orchestration.outcome_links import (  # noqa: E402
@@ -29,6 +32,7 @@ from cognitive_firm.orchestration.outcome_links import (  # noqa: E402
 )
 from cognitive_firm.orchestration.resource_envelope import validate_resource  # noqa: E402
 from cognitive_firm.orchestration.routine_reviews import schedule_routine_review  # noqa: E402
+from cognitive_firm.orchestration.work_discovery import compute_context_packet_digest  # noqa: E402
 
 
 def test_learning_event_records_approved_behavior_change(tmp_path: Path):
@@ -330,7 +334,7 @@ def test_learning_event_summary_joins_units_encounters_outcomes_and_reviews(tmp_
         rationale="Review burden fell after the combined routine.",
         log_path=outcome_log,
     )
-    schedule_routine_review(
+    review = schedule_routine_review(
         routine_ref=f"learning_event:{compounded.learning_event_id}",
         routine_kind="learning_event",
         learning_event_id=compounded.learning_event_id,
@@ -364,6 +368,29 @@ def test_learning_event_summary_joins_units_encounters_outcomes_and_reviews(tmp_
     assert summary.overdue_routine_review_count == 1
     assert summary.overdue_learning_event_ids == [compounded.learning_event_id]
     assert summary.recommendation == "review or retire overdue learning routines"
+
+    loop = learning_event_loop_projection(
+        compounded.learning_event_id,
+        log_path=learning_log,
+        encounters_log_path=encounter_log,
+        outcome_links_log_path=outcome_log,
+        routine_reviews_log_path=review_log,
+    )
+    assert loop["read_only"] is True
+    assert loop["loop_state"] == "review_overdue"
+    assert loop["learned"]["decision_use"] == (
+        "Apply source-note and escalation gates together."
+    )
+    assert loop["future_context"]["cue"] == (
+        "comparator claim after repeated misses"
+    )
+    assert loop["encounter_counts"]["applied"] == 1
+    assert loop["outcome_link_count"] == 1
+    assert loop["outcome_verdict_coverage"] == 1.0
+    assert loop["outcome_verdict_counts"] == {"improved": 1}
+    assert loop["routine_review_count"] == 1
+    assert loop["overdue_review_ids"] == [review.review_id]
+    assert link.outcome_link_id in loop["evidence_refs"]
 
 
 def test_learning_events_cli_can_render_summary(tmp_path: Path, capsys):
@@ -604,6 +631,49 @@ def test_learning_event_encounter_records_future_use(tmp_path: Path):
     assert rows[0].work_ref == "project/demo/artifact-1"
 
 
+def test_learning_event_encounter_preserves_legacy_no_context_idempotency(
+    tmp_path: Path,
+):
+    encounter_log = tmp_path / "learning_encounters.jsonl"
+    legacy_payload = "\x1f".join(
+        [
+            "learn_source_gate",
+            "role.researcher",
+            "encountered",
+            "",
+            "",
+            "tenant-a",
+            "project-a",
+            "comparator claim",
+        ]
+    )
+    legacy_key = hashlib.sha256(legacy_payload.encode("utf-8")).hexdigest()
+
+    first = record_learning_event_encounter(
+        learning_event_id="learn_source_gate",
+        role="role.researcher",
+        cue="comparator claim",
+        outcome="encountered",
+        tenant_id="tenant-a",
+        project_id="project-a",
+        log_path=encounter_log,
+    )
+    replayed = record_learning_event_encounter(
+        learning_event_id="learn_source_gate",
+        role="role.researcher",
+        cue="comparator claim",
+        outcome="encountered",
+        tenant_id="tenant-a",
+        project_id="project-a",
+        log_path=encounter_log,
+    )
+
+    rows = list_learning_event_encounters(log_path=encounter_log)
+    assert first.metadata["idempotency_key"] == legacy_key
+    assert replayed.encounter_id == first.encounter_id
+    assert len(rows) == 1
+
+
 def test_learning_event_encounter_requires_auditable_use_receipts(tmp_path: Path):
     encounter_log = tmp_path / "learning_encounters.jsonl"
 
@@ -654,3 +724,70 @@ def test_learning_event_encounter_requires_auditable_use_receipts(tmp_path: Path
         log_path=encounter_log,
     )
     assert deferred.reason.startswith("Waiting for reviewer")
+
+
+def test_learning_event_context_packet_use_verification_is_read_only():
+    basis = {
+        "assigned_to": "role.manager",
+        "cue": "queue stalled",
+        "learning_event_ids": ["learn_queue_gate"],
+        "outcome_link_ids": [],
+        "overdue_review_ids": [],
+        "work_candidate_refs": [],
+        "work_candidates_included": False,
+    }
+    digest = compute_context_packet_digest(basis)
+    packet = {
+        "context_packet_id": f"ctx_{digest[:16]}",
+        "digest": digest,
+        "basis": basis,
+        "write_policy": "projection_only",
+        "canonical_store": None,
+    }
+
+    verified = verify_learning_event_context_packet_use(
+        learning_event_id="learn_queue_gate",
+        context_packet=packet,
+        context_packet_ref=packet["context_packet_id"],
+    )
+
+    assert verified["ok"] is True
+    assert verified["read_only"] is True
+    assert verified["context_packet_ref"] == packet["context_packet_id"]
+    assert verified["receipt_metadata"] == {
+        "context_packet_verification": "digest_basis_includes_learning_event",
+        "context_packet_digest": digest,
+        "context_packet_verification_policy": "digest_only_no_log_lookup",
+    }
+
+    wrong_event = verify_learning_event_context_packet_use(
+        learning_event_id="learn_other_gate",
+        context_packet=packet,
+    )
+    assert wrong_event["ok"] is False
+    assert wrong_event["packet_ok"] is True
+    assert "context_packet does not include learning_event_id learn_other_gate" in (
+        wrong_event["issues"]
+    )
+
+    mismatched_ref = verify_learning_event_context_packet_use(
+        learning_event_id="learn_queue_gate",
+        context_packet=packet,
+        context_packet_ref="ctx_wrong",
+    )
+    assert mismatched_ref["ok"] is False
+    assert "context_packet_ref does not match context_packet id" in mismatched_ref[
+        "issues"
+    ]
+
+    tampered = {
+        **packet,
+        "basis": {**basis, "learning_event_ids": ["learn_queue_gate", "learn_extra"]},
+    }
+    rejected = verify_learning_event_context_packet_use(
+        learning_event_id="learn_queue_gate",
+        context_packet=tampered,
+    )
+    assert rejected["ok"] is False
+    assert rejected["packet_ok"] is False
+    assert "context_packet.digest does not match basis" in rejected["issues"]

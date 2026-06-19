@@ -77,8 +77,9 @@ The receipt can be a note, artifact reference, external reference, or witness
 claim, depending on the session's `receipt_type`.
 
 For non-digitized or externally mediated human work, use
-`append_human_work_receipt(...)` or the `receipt` CLI command. A structured
-receipt records a bounded human claim:
+`append_human_work_receipt(...)`, `POST /kernel/human-work/{session_id}/receipt`,
+or `cognitive-firm-userland receipt`. A structured receipt records a bounded
+human claim:
 
 - who is making the claim;
 - the bounded summary needed for integration;
@@ -90,6 +91,11 @@ receipt records a bounded human claim:
 This does not turn human work into machine-observed work. It makes the claim
 explicit enough to review, sample, link to tenant-owned systems, or block
 integration when the receipt is missing.
+
+For "human reviewed this agent output" workflows, cite the agent output ref and
+the action-attestation ref as receipt subjects. The receipt is human evidence;
+it does not approve a governance change, execute a runtime step, or replace an
+outcome link.
 
 The key difference from a gate is that the human is producing or changing an
 artifact, source claim, external-world fact, or judgment. The key difference
@@ -111,11 +117,19 @@ source-connector work, or a mandate change. Repeated A2H sessions with
 be healthy constraints rather than automation targets.
 
 The kernel exposes this as a read model through
-`summarize_a2h_work_pressure(...)`, the organization surface, work discovery,
-and Orbit. The default pressure threshold is deliberately small: three active
-sessions for the same `(agent_counterparty_role, bottleneck_class)` group, any
-stale session, or any missing required receipt. Tenants can make the threshold
-stricter without changing the protocol.
+`summarize_a2h_work_pressure(...)`, `GET /kernel/human-work-pressure`,
+`cognitive-firm-userland human-pressure`, the organization surface, work
+discovery, and Orbit/adopter-built surfaces. The default pressure threshold is
+deliberately small: three active sessions for the same
+`(agent_counterparty_role, bottleneck_class)` group, any stale session, or any
+missing required receipt. Tenants can make the threshold stricter without
+changing the protocol. Service callers should use `tenant_id` and `project_id`
+selectors when reading multi-tenant logs; the route applies those filters
+before grouping pressure.
+Whole-firm pressure groups can also enter the conservative learning path via
+`GET /kernel/learning-transition-candidates?source=human_work` or
+`cognitive-firm-userland learning-candidates --source human_work`; these rows
+remain observer-only review candidates and do not reroute or close sessions.
 
 ## Resource Projection
 
@@ -140,10 +154,17 @@ CLI readers can emit either canonical rows or resource envelopes:
 
 ```bash
 python -m cognitive_firm.orchestration.human_work list --resource
+python -m cognitive_firm.orchestration.human_work followup --resource
 ```
 
-The command-path conformance fixture exercises the same CLI path and the
-receipt-before-integration invariant:
+`followup` is a read-only view over sessions in `handed_off` or `completed`
+state with `agent_followup_required=true`. It is the "prepared, not committed"
+state for A2H: the role office can see the human result is ready to consume,
+including whether a required receipt is missing, but the command does not
+schedule, assign, integrate, approve, or close the work.
+
+The command-path conformance fixture exercises the same CLI path, the
+ready-for-agent follow-up view, and the receipt-before-integration invariant:
 
 ```bash
 make a2h-command-conformance
@@ -157,6 +178,11 @@ A2H sessions appear in three places:
   `a2h_followup_sessions`, `a2h_missing_receipt_sessions`, and `a2h_pressure`;
 - `format_surface_brief(...)` prints A2H waiting, follow-up, missing receipts,
   and pressure groups;
+- `GET /kernel/human-work-pressure` and `cognitive-firm-userland
+  human-pressure` expose the same pressure groups as an observer-only surface;
+- `GET /kernel/learning-transition-candidates?source=human_work` and
+  `cognitive-firm-userland learning-candidates --source human_work` compile
+  whole-firm pressure groups into observer-only review candidates;
 - `discover_human_work_sessions(...)` routes sessions back to
   `agent_counterparty_role` after the human has handed off or completed the
   work.
@@ -197,6 +223,10 @@ Recommended T1 defaults:
 - `sample_for_review=false` for ordinary low-risk work;
 - `sample_for_review=true` for unobservable, relationship, safety, or
   authority work where repeated claims become consequential.
+- use `GET /kernel/human-speed-envelope` or
+  `cognitive-firm-userland speed-envelope` when the operator needs an explicit
+  accountable-speed recommendation before choosing agent speed, sampled review,
+  batched human review, a pre-action gate, or accountable closure.
 
 T2 adopters should add tenant policy for:
 

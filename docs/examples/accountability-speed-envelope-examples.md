@@ -3,6 +3,19 @@
 These examples turn `docs/accountability-speed-envelope.md` into concrete
 routing choices.
 
+You can inspect the same guidance from the service or terminal userland:
+
+```bash
+cognitive-firm-userland speed-envelope \
+  --risk-tier low \
+  --bottleneck-class other \
+  --deployment-class local
+```
+
+```text
+GET /kernel/human-speed-envelope?risk_tier=low&bottleneck_class=other&deployment_class=local
+```
+
 | Case | Default route | Kernel record |
 |---|---|---|
 | Local draft cleanup with no external effect | agent speed | transition or action attestation |

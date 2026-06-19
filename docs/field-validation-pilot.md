@@ -155,7 +155,10 @@ A completed field-validation pilot should produce:
 6. A summary of human-work sessions and receipts.
 7. A summary of action attestations and accountability cases.
 8. A learning-event summary showing what changed because of the pilot.
-9. A final before/after report.
+9. A human-speed envelope summary when the pilot uses speed classes, showing
+   chosen class, expected class, sampling coverage, rework, hidden burden, harm,
+   and residual-risk signals.
+10. A final before/after report.
 
 Starter templates live in `docs/templates/field-pilot/`:
 
@@ -186,6 +189,21 @@ python scripts/field_pilot_validate.py tenants/<tenant>/field-pilots/<pilot-name
   --min-action-impact-records 30
 ```
 
+For pilots that measure operator burden, compile the measured baseline/pilot
+rows into `operator-burden-field-pilot-summary.json`:
+
+```bash
+python scripts/field_pilot_operator_burden_compile.py tenants/<tenant>/field-pilots/<pilot-name> \
+  operator-burden-rows.csv \
+  --min-baseline-runs 3 \
+  --min-pilot-runs 3
+```
+
+The output is `operator_burden_field_pilot_summary.v1`, a read-only comparison
+of human touchpoints, coordination minutes, rework, missing receipts, hidden
+burden, and projection undercount. It is evidence for adoption review, not a
+work allocator or routing optimizer.
+
 The no-cost executable example is:
 
 ```bash
@@ -193,7 +211,13 @@ make field-pilot-action-impact-demo
 ```
 
 That demo turns measured pilot rows into a candidate route, conservative
-offline evaluation, and policy-promotion packet for governance review.
+offline evaluation, and policy-promotion packet for governance review. It also
+writes `human-speed-envelope-summary.json` and reports
+`human_speed_field_pilot_summary.v1`, a read-only check of whether observed
+speed-class choices matched the accountability envelope and whether sampled
+review, harm, rework, hidden burden, or open residual risk needs follow-up.
+The summary is evidence for human review; it does not change routing, schedule
+review, approve policy, or sample records.
 
 ## Open Research Questions
 

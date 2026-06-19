@@ -99,6 +99,26 @@ purpose: the situation was genuinely unspecified, so rejecting the record would
 only erase the evidence. The flag makes the irregularity reviewable instead of
 silent.
 
+### Holder Resolution and Authority Domains
+
+`get_residual_right_holder(...)` returns only the active residual-right
+assignment. That preserves the canonical contract: explicit assignment is what
+authorizes residual-decision recording.
+
+`resolve_residual_right_holder(...)` adds a read-side accountable-holder
+projection for surfaces and service adapters:
+
+- if an active residual-right assignment exists, it wins and the resolution is
+  `authoritative_for_decision_recording: true`;
+- if no assignment exists, an authority-domain match can project the accountable
+  role that should close the gap, with `source: "authority_domain"` and
+  `projection_only: true`;
+- if neither exists, the resolution is `source: "unassigned"` with issues.
+
+The authority-domain fallback does not create a residual-right assignment and
+does not make a residual decision authorized. It answers "who owns the missing
+contract?" without turning the primitive into workflow orchestration.
+
 ## Service Flow
 
 ```json
@@ -108,6 +128,12 @@ POST /kernel/residual-decisions              { "scope_kind": "...", "scope_ref":
 POST /kernel/residual-decisions/<id>/review  { "reviewed_by": "...", "review_outcome": "promote_to_mandate_clause" }
 GET  /kernel/decision-rights-summary
 ```
+
+The holder route preserves the old `holder` field for the active explicit
+assignment and adds `holder_resolution` plus a boundary block. Optional query
+context (`tenant_id`, `project_id`, `operating_unit_id`) helps authority-domain
+fallback resolve class-scoped requests such as `decision_class=policy_change`
+inside a tenant or project.
 
 Every transition emits a canonical [`KernelEvent`](kernel-events.md) with verbs
 `residual_right.assigned`, `residual_decision.recorded`, and
@@ -133,9 +159,14 @@ same facts through the common [Resource Envelope](resource-envelope.md):
 CLI readers can emit either canonical rows or resource envelopes:
 
 ```bash
+python -m cognitive_firm.orchestration.decision_rights holder --scope-kind decision_class --scope-ref policy_change --resolve-authority --org-root org
 python -m cognitive_firm.orchestration.decision_rights list-assignments --resource
 python -m cognitive_firm.orchestration.decision_rights list-decisions --resource
 ```
+
+The `holder --resolve-authority` form returns the same compatibility shape as
+the service route: explicit `holder`, `holder_resolution`, and a boundary block
+marking authority-domain fallback as projection-only.
 
 ## T1 And T2 Modes
 

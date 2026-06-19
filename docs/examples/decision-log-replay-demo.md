@@ -17,6 +17,8 @@ action-impact rows
 -> business-function candidate proposer
 -> kernel-service offline policy evaluation route
 -> kernel-service governance review packet route
+-> run checkpoint + action attestation + outcome verdict
+-> governed-run attestation bundle
 ```
 
 The expected result is one review-ready packet and one blocked packet:
@@ -33,5 +35,11 @@ This is deliberately not an online optimizer. The reusable primitive is
 It only emits a candidate context-to-arm map plus diagnostics. The existing
 `action_impact` evaluator and `PolicyPromotionPacket` turn that candidate into
 review evidence through `/kernel/action-impact/*` routes, so the demo exercises
-the same service boundary an adopter would use. A tenant still needs governance
-approval before any live routing policy changes.
+the same service boundary an adopter would use.
+
+The demo also wraps the replay in a completed governed run. It records
+checkpoints, a verified action attestation over the replayed packet rows, an
+outcome link with a verdict, and a governed-run attestation bundle whose schema
+validation passes. That proves the conclusion is reconstructable from logs and
+portable as a reviewer handoff. A tenant still needs governance approval before
+any live routing policy changes.

@@ -64,6 +64,13 @@ summary, receipt type/ref, subject refs, artifact refs, confidence, and review
 flag. It does not mechanize the work; it makes the claim visible enough for
 integration, sampling, and accountability.
 
+The service-native receipt path is
+`POST /kernel/human-work/{session_id}/receipt`, also exposed as
+`cognitive-firm-userland receipt`. For human review of agent output, include
+the agent output ref and the action-attestation ref as receipt subjects; later
+attestations, outcome links, or timeline views can cite those refs without
+turning human review into a workflow stage engine.
+
 ### 4. Accountable closure
 
 Accountable closure is required when ordinary follow-up is not enough. It names
@@ -164,9 +171,14 @@ Likely human-preserved boundaries:
 - private judgment;
 - residual-risk acceptance.
 
-The organization surface exposes A2H pressure by role and bottleneck class so
-tenants can decide whether to preserve, batch, sample, delegate, or automate a
-boundary.
+The organization surface, `GET /kernel/human-work-pressure`, and
+`cognitive-firm-userland human-pressure` expose A2H pressure by role and
+bottleneck class so tenants can decide whether to preserve, batch, sample,
+delegate, or automate a boundary.
+When pressure should enter a whole-firm review queue,
+`GET /kernel/learning-transition-candidates?source=human_work` and
+`cognitive-firm-userland learning-candidates --source human_work` compile it
+into observer-only candidates with source refs back to human-work sessions.
 
 ## How This Maps To The Kernel
 

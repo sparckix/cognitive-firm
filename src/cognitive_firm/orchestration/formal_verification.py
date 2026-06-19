@@ -566,6 +566,26 @@ class FormalVerificationProviderPayload:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class FormalProviderProofPackInput:
+    """Observed provider-demo output and declarations for a proof pack.
+
+    The payload should come from an already-run deterministic fixture. The
+    builder checks evidence shape; it does not execute provers, install
+    providers, approve trust, or write kernel state.
+    """
+
+    adapter_id: str
+    provider_id: str
+    demo_payload: dict[str, Any]
+    manifest: dict[str, Any] | None = None
+    conformance_config: dict[str, Any] | None = None
+    trust_policy: dict[str, Any] | None = None
+    generated_at_utc: str | None = None
+    evidence_refs: tuple[str, ...] = ()
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -867,6 +887,452 @@ def create_formal_verification_from_provider_payload(
         action_attestation_log_path=action_attestation_log_path,
         create_attestation=create_attestation,
     )
+
+
+def build_formal_provider_proof_pack(
+    pack_input: FormalProviderProofPackInput,
+) -> dict[str, Any]:
+    """Build a read-only proof pack for a formal-verification provider overlay."""
+
+    checks: list[dict[str, Any]] = []
+    checks.append(
+        _proof_pack_check(
+            "formal_provider_adapter_manifest",
+            not _formal_provider_manifest_errors(pack_input),
+            detail="adapter manifest declares a formal-verification provider payload boundary",
+            errors=_formal_provider_manifest_errors(pack_input),
+        )
+    )
+    checks.append(
+        _proof_pack_check(
+            "formal_provider_conformance_config",
+            not _formal_provider_config_errors(pack_input),
+            detail="conformance config aligns with manifest checks and boundary ownership",
+            errors=_formal_provider_config_errors(pack_input),
+        )
+    )
+    checks.append(
+        _proof_pack_check(
+            "formal_provider_trust_policy",
+            not _formal_provider_trust_policy_errors(pack_input),
+            detail="trust policy requires signed, re-runnable, faithfulness-backed evidence",
+            errors=_formal_provider_trust_policy_errors(pack_input),
+        )
+    )
+    checks.append(
+        _proof_pack_check(
+            "signed_provider_bundle_contract",
+            not _trusted_provider_demo_errors(pack_input.demo_payload),
+            detail="signed trusted provider evidence clears the governed-run bundle",
+            errors=_trusted_provider_demo_errors(pack_input.demo_payload),
+            evidence_refs=_provider_demo_refs(pack_input.demo_payload, "trusted_provider"),
+        )
+    )
+    checks.append(
+        _proof_pack_check(
+            "missing_evidence_falsifier_contract",
+            not _missing_provider_demo_errors(pack_input.demo_payload),
+            detail="missing trust evidence stays caveated instead of being inferred as safe",
+            errors=_missing_provider_demo_errors(pack_input.demo_payload),
+            evidence_refs=_provider_demo_refs(
+                pack_input.demo_payload,
+                "missing_provider_evidence",
+            ),
+        )
+    )
+    checks.append(
+        _proof_pack_check(
+            "surface_neutral_demo_contract",
+            not _formal_provider_surface_errors(pack_input.demo_payload),
+            detail="demo emits a bounded surface-neutral packet with no external calls",
+            errors=_formal_provider_surface_errors(pack_input.demo_payload),
+        )
+    )
+
+    blockers = [check for check in checks if check["required"] and check["status"] != "passed"]
+    trusted = _dict_child(pack_input.demo_payload, "trusted_provider")
+    missing = _dict_child(pack_input.demo_payload, "missing_provider_evidence")
+    packet = {
+        "schema": "formal_provider_proof_pack.v1",
+        "adapter_id": pack_input.adapter_id,
+        "provider_id": pack_input.provider_id,
+        "generated_at_utc": pack_input.generated_at_utc,
+        "read_only": True,
+        "projection_only": True,
+        "summary": {
+            "ok": not blockers,
+            "checks": len(checks),
+            "required_blockers": len(blockers),
+            "demo": pack_input.demo_payload.get("demo"),
+            "trusted_run_id": trusted.get("run_id"),
+            "trusted_verification_id": trusted.get("verification_id"),
+            "missing_evidence_run_id": missing.get("run_id"),
+            "missing_evidence_verification_id": missing.get("verification_id"),
+            "trusted_bundle_verdict": trusted.get("bundle_verdict"),
+            "missing_evidence_bundle_verdict": missing.get("bundle_verdict"),
+        },
+        "checks": checks,
+        "manifest": dict(pack_input.manifest or {}),
+        "conformance_config": dict(pack_input.conformance_config or {}),
+        "trust_policy": dict(pack_input.trust_policy or {}),
+        "provider_boundary": _dict_child(pack_input.conformance_config or {}, "runtime_boundary"),
+        "isomorphism_takeaways": [
+            "treat proof-provider adoption like substrate equivalence, not runtime ownership",
+            "provider-owned certificates enter as signed evidence refs, not kernel-executed proof search",
+            "faithfulness and checker evidence stay explicit because theorem success is not mandate truth",
+            "the missing-evidence path is a first-class falsifier, not an edge-case failure",
+        ],
+        "review_questions": _formal_provider_review_questions(checks),
+        "evidence_refs": _dedupe_text_refs(
+            list(pack_input.evidence_refs)
+            + _provider_demo_refs(pack_input.demo_payload, "trusted_provider")
+            + _provider_demo_refs(pack_input.demo_payload, "missing_provider_evidence")
+        ),
+        "boundary": {
+            "checker_does_not_execute_provider": True,
+            "checker_does_not_install_provider": True,
+            "checker_does_not_approve_provider_trust": True,
+            "checker_does_not_mutate_kernel_state": True,
+            "demo_commands_use_bounded_temp_state": True,
+            "claim_formalization_remains_provider_or_human_owned": True,
+        },
+        "metadata": dict(pack_input.metadata or {}),
+    }
+    packet["markdown"] = render_formal_provider_proof_pack_markdown(packet)
+    return packet
+
+
+def render_formal_provider_proof_pack_markdown(packet: dict[str, Any]) -> str:
+    """Render a formal-provider proof pack for human review."""
+
+    if packet.get("schema") != "formal_provider_proof_pack.v1":
+        raise ValueError("packet schema must be formal_provider_proof_pack.v1")
+    summary = packet.get("summary") or {}
+    lines = [
+        "# Formal Provider Proof Pack",
+        "",
+        "## Summary",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Adapter | {_md(packet.get('adapter_id', ''))} |",
+        f"| Provider | {_md(packet.get('provider_id', ''))} |",
+        f"| OK | {_md(summary.get('ok', False))} |",
+        f"| Required blockers | {_md(summary.get('required_blockers', 0))} |",
+        f"| Trusted bundle | {_md(summary.get('trusted_bundle_verdict', ''))} |",
+        f"| Missing-evidence bundle | {_md(summary.get('missing_evidence_bundle_verdict', ''))} |",
+        f"| Trusted verification | {_md(summary.get('trusted_verification_id', ''))} |",
+        f"| Missing-evidence verification | {_md(summary.get('missing_evidence_verification_id', ''))} |",
+        "",
+        "## Checks",
+        "",
+        "| Check | Status | Evidence |",
+        "| --- | --- | --- |",
+    ]
+    for check in packet.get("checks") or []:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _md(check.get("check_id", "")),
+                    _md(check.get("status", "")),
+                    _md(", ".join(check.get("evidence_refs") or [])),
+                ]
+            )
+            + " |"
+        )
+    if packet.get("review_questions"):
+        lines.extend(["", "## Review Questions", ""])
+        for question in packet["review_questions"]:
+            lines.append(f"- {_md(question)}")
+    lines.extend(
+        [
+            "",
+            "## Boundary",
+            "",
+            "- The proof-pack checker does not execute or install the external provider.",
+            "- The demo commands use bounded temporary state.",
+            "- The packet does not approve provider trust or mutate kernel state.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _formal_provider_manifest_errors(pack_input: FormalProviderProofPackInput) -> list[str]:
+    manifest = pack_input.manifest
+    if manifest is None:
+        return ["adapter manifest is missing"]
+    errors: list[str] = []
+    if manifest.get("adapter_id") != pack_input.adapter_id:
+        errors.append(
+            f"manifest adapter_id {manifest.get('adapter_id')!r} != {pack_input.adapter_id!r}"
+        )
+    if manifest.get("family") != "formal_verification_provider":
+        errors.append(
+            "manifest family must be 'formal_verification_provider', "
+            f"got {manifest.get('family')!r}"
+        )
+    if manifest.get("protocol") != "formal_verification_provider_payload":
+        errors.append(
+            "manifest protocol must be 'formal_verification_provider_payload', "
+            f"got {manifest.get('protocol')!r}"
+        )
+    checks = [str(check) for check in manifest.get("conformance_checks") or []]
+    if not checks:
+        errors.append("manifest conformance_checks are required")
+    trust = manifest.get("trust_requirements")
+    if not isinstance(trust, dict):
+        errors.append("manifest trust_requirements must be a JSON object")
+    else:
+        for key in ("payload_signature", "reverification_refs", "faithfulness_refs"):
+            if str(trust.get(key) or "").lower() != "required":
+                errors.append(f"manifest trust_requirements.{key} must be 'required'")
+    return errors
+
+
+def _formal_provider_config_errors(pack_input: FormalProviderProofPackInput) -> list[str]:
+    config = pack_input.conformance_config
+    if config is None:
+        return ["adapter conformance config is missing"]
+    errors: list[str] = []
+    if config.get("adapter_id") != pack_input.adapter_id:
+        errors.append(
+            f"config adapter_id {config.get('adapter_id')!r} != {pack_input.adapter_id!r}"
+        )
+    if config.get("protocol") != "formal_verification_provider_payload":
+        errors.append(
+            "config protocol must be 'formal_verification_provider_payload', "
+            f"got {config.get('protocol')!r}"
+        )
+    manifest_checks = [
+        str(check)
+        for check in (pack_input.manifest or {}).get("conformance_checks") or []
+        if str(check).strip()
+    ]
+    required_checks = [
+        str(check.get("check_id"))
+        for check in config.get("required_checks") or []
+        if isinstance(check, dict) and str(check.get("check_id") or "").strip()
+    ]
+    missing = sorted(set(manifest_checks) - set(required_checks))
+    if missing:
+        errors.append(
+            "conformance config missing manifest checks: " + ", ".join(missing)
+        )
+    expected = {
+        "accepts_signed_verified_payload",
+        "rejects_forged_payload_signature",
+        "preserves_checker_evidence_refs",
+        "preserves_faithfulness_refs",
+        "governed_bundle_caveats_missing_trust",
+    }
+    missing_expected = sorted(expected - set(required_checks))
+    if missing_expected:
+        errors.append(
+            "conformance config missing provider proof checks: "
+            + ", ".join(missing_expected)
+        )
+    errors.extend(_formal_provider_boundary_errors(_dict_child(config, "runtime_boundary")))
+    return errors
+
+
+def _formal_provider_trust_policy_errors(pack_input: FormalProviderProofPackInput) -> list[str]:
+    policy = pack_input.trust_policy
+    if policy is None:
+        return ["formal-verification trust policy is missing"]
+    errors: list[str] = []
+    if policy.get("schema_version") != FORMAL_VERIFICATION_TRUST_POLICY_VERSION:
+        errors.append(
+            "trust policy schema_version "
+            f"{policy.get('schema_version')!r} != {FORMAL_VERIFICATION_TRUST_POLICY_VERSION!r}"
+        )
+    entries = policy.get("trusted_providers")
+    if not isinstance(entries, list):
+        return errors + ["trust policy trusted_providers must be a list"]
+    entry = None
+    for candidate in entries:
+        if not isinstance(candidate, dict):
+            continue
+        if str(candidate.get("provider") or "").strip().lower() == pack_input.provider_id:
+            entry = candidate
+            break
+    if entry is None:
+        return errors + [f"provider {pack_input.provider_id!r} is not in trust policy"]
+    for key in (
+        "requires_payload_signature",
+        "requires_reverification_refs",
+        "requires_faithfulness_refs",
+    ):
+        if entry.get(key) is not True:
+            errors.append(f"trusted provider {pack_input.provider_id}.{key} must be true")
+    if not entry.get("public_key_pem") and not entry.get("public_key_ref"):
+        errors.append(
+            f"trusted provider {pack_input.provider_id} needs public_key_pem or public_key_ref"
+        )
+    return errors
+
+
+def _trusted_provider_demo_errors(payload: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    trusted = _dict_child(payload, "trusted_provider")
+    if trusted.get("bundle_verdict") != "passed":
+        errors.append("trusted_provider.bundle_verdict must be 'passed'")
+    if trusted.get("bundle_caveats") != []:
+        errors.append("trusted_provider.bundle_caveats must be empty")
+    if trusted.get("signature_verified") is not True:
+        errors.append("trusted_provider.signature_verified must be true")
+    if int(trusted.get("formal_verifications") or 0) < 1:
+        errors.append("trusted_provider.formal_verifications must be at least 1")
+    if trusted.get("bundle_schema_valid") is not True:
+        errors.append("trusted_provider.bundle_schema_valid must be true")
+    for key in ("run_id", "verification_id"):
+        if not trusted.get(key):
+            errors.append(f"trusted_provider.{key} is required")
+    return errors
+
+
+def _missing_provider_demo_errors(payload: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = _dict_child(payload, "missing_provider_evidence")
+    if missing.get("bundle_verdict") != "incomplete":
+        errors.append("missing_provider_evidence.bundle_verdict must be 'incomplete'")
+    caveats = [str(caveat) for caveat in missing.get("bundle_caveats") or []]
+    if not caveats:
+        errors.append("missing_provider_evidence.bundle_caveats are required")
+    joined = " ".join(caveats)
+    for phrase in (
+        "provider_payload_signature",
+        "checker_evidence_refs",
+        "faithfulness_refs",
+    ):
+        if phrase not in joined:
+            errors.append(
+                f"missing_provider_evidence.bundle_caveats must mention {phrase}"
+            )
+    if int(missing.get("formal_verifications") or 0) < 1:
+        errors.append("missing_provider_evidence.formal_verifications must be at least 1")
+    if missing.get("bundle_schema_valid") is not True:
+        errors.append("missing_provider_evidence.bundle_schema_valid must be true")
+    for key in ("run_id", "verification_id"):
+        if not missing.get(key):
+            errors.append(f"missing_provider_evidence.{key} is required")
+    return errors
+
+
+def _formal_provider_surface_errors(payload: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if payload.get("demo") != "formal_provider_bundle":
+        errors.append("demo must be 'formal_provider_bundle'")
+    if payload.get("no_external_calls") is not True:
+        errors.append("no_external_calls must be true")
+    summary = _dict_child(payload, "summary")
+    if summary.get("verdict") != "passed":
+        errors.append("summary.verdict must be 'passed'")
+    if summary.get("trusted_bundle") != "passed":
+        errors.append("summary.trusted_bundle must be 'passed'")
+    if summary.get("missing_evidence_bundle") != "incomplete":
+        errors.append("summary.missing_evidence_bundle must be 'incomplete'")
+    if summary.get("trusted_schema_errors") != []:
+        errors.append("summary.trusted_schema_errors must be empty")
+    if summary.get("missing_schema_errors") != []:
+        errors.append("summary.missing_schema_errors must be empty")
+    return errors
+
+
+def _formal_provider_boundary_errors(boundary: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    external = [str(item).lower() for item in boundary.get("external_runtime_owns") or []]
+    kernel = [str(item).lower() for item in boundary.get("cognitive_firm_owns") or []]
+    expected_external = (
+        "claim formalization",
+        "faithfulness",
+        "checker",
+        "certificate",
+    )
+    expected_kernel = (
+        "provider payload schema",
+        "provider trust policy",
+        "signature verification",
+        "formal-verification",
+        "bundle caveats",
+    )
+    for phrase in expected_external:
+        if not any(phrase in item for item in external):
+            errors.append(f"provider boundary external owner missing {phrase!r}")
+    for phrase in expected_kernel:
+        if not any(phrase in item for item in kernel):
+            errors.append(f"provider boundary kernel owner missing {phrase!r}")
+    return errors
+
+
+def _provider_demo_refs(payload: dict[str, Any], key: str) -> list[str]:
+    item = _dict_child(payload, key)
+    refs: list[str] = []
+    run_id = item.get("run_id")
+    if run_id:
+        refs.append(f"{key}:run:{run_id}")
+    verification_id = item.get("verification_id")
+    if verification_id:
+        refs.append(f"{key}:formal_verification:{verification_id}")
+    return _dedupe_text_refs(refs)
+
+
+def _formal_provider_review_questions(checks: list[dict[str, Any]]) -> list[str]:
+    blockers = [check["check_id"] for check in checks if check["status"] != "passed"]
+    questions = [
+        "Does the real provider emit the same signed provider-payload contract as the fixture?",
+        "Are faithfulness and checker evidence refs independently reviewable by the adopting org?",
+        "Does the integration package remain policy and conformance declaration only?",
+    ]
+    if blockers:
+        questions.append(
+            "Which blocker must be repaired before provider support review: "
+            + ", ".join(blockers)
+            + "?"
+        )
+    return questions
+
+
+def _proof_pack_check(
+    check_id: str,
+    passed: bool,
+    *,
+    detail: str,
+    errors: list[str] | None = None,
+    evidence_refs: list[str] | None = None,
+    required: bool = True,
+) -> dict[str, Any]:
+    errors = list(errors or [])
+    return {
+        "check_id": check_id,
+        "required": required,
+        "status": "passed" if passed else "failed" if required else "warning",
+        "detail": detail,
+        "errors": errors,
+        "evidence_refs": _dedupe_text_refs(list(evidence_refs or [])),
+    }
+
+
+def _dict_child(payload: dict[str, Any], key: str) -> dict[str, Any]:
+    value = payload.get(key)
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _dedupe_text_refs(refs: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for ref in refs:
+        text = str(ref).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        deduped.append(text)
+    return deduped
+
+
+def _md(value: Any) -> str:
+    return str(value).replace("|", "\\|").replace("\n", " ")
 
 
 def list_formal_verifications(

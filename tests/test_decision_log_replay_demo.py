@@ -20,6 +20,7 @@ def test_decision_log_replay_demo_reconstructs_safe_and_blocked_packets(tmp_path
         "packets": 2,
         "review_ready": 1,
         "blocked": 1,
+        "bundle_verdict": "passed",
         "verdict": "passed",
     }
     assert payload["candidate_proposer"] == {
@@ -44,6 +45,14 @@ def test_decision_log_replay_demo_reconstructs_safe_and_blocked_packets(tmp_path
     assert unsafe["delta_mean_reward"] > 0
     assert any("negative externality rate" in blocker for blocker in unsafe["review_blockers"])
     assert any("human review rate" in blocker for blocker in unsafe["review_blockers"])
+    assert payload["bundle_validation"] == {"ok": True, "errors": []}
+    bundle = payload["governed_run_bundle"]
+    assert bundle["run_id"] == "run_decision_log_replay"
+    assert bundle["verdict"] == "passed"
+    assert bundle["counts"]["checkpoints"] == 2
+    assert bundle["counts"]["action_attestations"] == 1
+    assert bundle["counts"]["outcome_links"] == 1
+    assert bundle["counts"]["evidence_hashes"] > 0
 
 
 def test_decision_log_replay_demo_cli_compact(capsys):
@@ -54,9 +63,13 @@ def test_decision_log_replay_demo_cli_compact(capsys):
     assert payload["no_external_calls"] is True
     assert payload["logs_only_replay"] is True
     assert payload["summary"]["verdict"] == "passed"
+    assert payload["summary"]["bundle_verdict"] == "passed"
+    assert payload["bundle_validation"]["ok"] is True
+    assert payload["governed_run_bundle"]["verdict"] == "passed"
     assert payload["candidate_proposer"]["safe_status"] == "candidate"
     assert payload["candidate_proposer"]["unsafe_status"] == "no_candidate"
     assert "log_paths" not in payload
+    assert "governed_run_attestation" not in payload
     assert {row["packet_status"] for row in payload["replayed_packets"]} == {
         "review_ready",
         "blocked",
@@ -69,5 +82,7 @@ def test_decision_log_replay_demo_cli_full_json_keeps_logs(tmp_path: Path, capsy
 
     assert payload["summary"]["verdict"] == "passed"
     assert "log_paths" in payload
+    assert payload["bundle_validation"]["ok"] is True
+    assert payload["governed_run_attestation"]["verdict"] == "passed"
     for path in payload["log_paths"].values():
         assert Path(path).exists()

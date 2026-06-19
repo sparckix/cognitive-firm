@@ -28,6 +28,7 @@ SELF_EVOLVING_WORKLOAD_EXECUTOR_LIMIT ?= 0
 SELF_EVOLVING_LIVE_WORKLOAD_LIMIT ?= 3
 SELF_EVOLVING_CODEX_WORKLOAD_LIMIT ?= $(SELF_EVOLVING_LIVE_WORKLOAD_LIMIT)
 SELF_EVOLVING_WORKLOAD_EXECUTOR_TIMEOUT_SECONDS ?= 180
+AGENT_FLEET_AUDIT_OUTDIR ?= .cognitive-firm-runs/agent-fleet-audit
 MODEL_ID ?=
 AGENT_RUNTIME ?= $(COGNITIVE_FIRM_SUBSCRIPTION_RUNTIME)
 AGENT_CLI ?= $(if $(AGENT_RUNTIME),$(AGENT_RUNTIME),$(COGNITIVE_FIRM_AGENT_CLI))
@@ -38,7 +39,7 @@ SELF_EVOLVING_REVIEWER_TIMEOUT_SECONDS ?=
 SELF_EVOLVING_AGENT_RUNTIME := $(if $(filter command line,$(origin AGENT_CLI)),$(AGENT_CLI),$(if $(AGENT_RUNTIME),$(AGENT_RUNTIME),$(AGENT_CLI)))
 SELF_EVOLVING_PLANNER_JSON ?= workspace/daemon_planner_steps.json
 
-.PHONY: help test org-surface first-gated-action agent-fleet-audit-demo runtime-adapter-smoke native-e2e-demo native-e2e-demo-full-smoke governance-failure-benchmark decision-log-replay-demo field-pilot-action-impact-compile-help field-pilot-action-impact-demo formal-provider-bundle-demo langgraph-governance-demo self-evolving-org self-evolving-org-demo self-evolving-org-view self-evolving-feedback-comparison self-evolving-org-compare self-evolving-org-compare-serve self-evolving-org-serve self-evolving-org-realtime-view self-evolving-org-realtime-serve self-evolving-daemon-smoke self-evolving-daemon-governed-smoke self-evolving-daemon-live-governed-demo self-evolving-agent-adapters self-evolving-agent-preflight self-evolving-planner-validate self-evolving-org-agent-demo self-evolving-org-codex self-evolving-org-api-demo multi-agent-trace-attribution-demo phase-execution-demo protocol-experiment-demo capability-signal-demo adoption-demo kernel-service-smoke app-integration-conformance app-service-integration-smoke kernel-conformance-smoke a2h-command-conformance source-coverage-walkthrough learning-loop-walkthrough multi-actor-authority-walkthrough backup-restore-smoke package-smoke docs-surface-check public-claims-check release-hygiene-check release-diff-audit field-pilot-scaffold-smoke field-pilot-validate-smoke orbit-install orbit-build orbit-smoke-build audit-manifest audit-verify mcp-linear-live-smoke smoke-public smoke-docker release-candidate-check
+.PHONY: help test org-surface first-gated-action agent-fleet-audit-demo agent-fleet-review-packet runtime-adapter-smoke runtime-interrupt-command-conformance native-e2e-demo native-e2e-demo-full-smoke governance-failure-benchmark decision-log-replay-demo field-pilot-action-impact-compile-help field-pilot-operator-burden-compile-help field-pilot-action-impact-demo formal-provider-bundle-demo formal-provider-proof-pack langgraph-governance-demo langgraph-adapter-policy-preview runtime-adapter-proof-pack self-evolving-org self-evolving-org-demo self-evolving-org-view self-evolving-feedback-comparison self-evolving-org-compare self-evolving-org-compare-serve self-evolving-org-serve self-evolving-org-realtime-view self-evolving-org-realtime-serve self-evolving-daemon-smoke self-evolving-daemon-governed-smoke self-evolving-daemon-live-governed-demo self-evolving-agent-adapters self-evolving-agent-preflight self-evolving-planner-validate self-evolving-org-agent-demo self-evolving-org-codex self-evolving-org-api-demo multi-agent-trace-attribution-demo phase-execution-demo protocol-experiment-demo capability-signal-demo adoption-demo adoption-readiness-packet adoption-onramp-packet adoption-onramp-replay adoption-onramp-full-replay kernel-service-smoke app-integration-conformance app-service-integration-smoke kernel-conformance-smoke a2h-command-conformance a2a-delegation-command-conformance a2a-h2a-command-conformance saga-command-conformance source-coverage-walkthrough learning-loop-walkthrough multi-actor-authority-walkthrough backup-restore-smoke package-smoke docs-surface-check public-claims-check release-hygiene-check release-diff-audit field-pilot-scaffold-smoke field-pilot-validate-smoke orbit-install orbit-build orbit-smoke-build audit-manifest audit-verify mcp-linear-live-smoke smoke-public smoke-docker release-candidate-check
 
 help:
 	@echo "cognitive-firm commands"
@@ -46,15 +47,21 @@ help:
 	@echo "  make org-surface   # render the generic organization surface"
 	@echo "  make first-gated-action  # shortest no-cost path: one governed action + receipt bundle"
 	@echo "  make agent-fleet-audit-demo  # local agent invocation receipt -> attestation bundle"
+	@echo "  make agent-fleet-review-packet  # persistent agent-fleet audit packet + Markdown runbook"
 	@echo "  make runtime-adapter-smoke  # exercise framework-neutral runtime events"
+	@echo "  make runtime-interrupt-command-conformance  # CLI fixture for runtime interrupt -> A2H pause"
 	@echo "  make native-e2e-demo  # no-cost native kernel path: authority -> work -> run -> attestation"
 	@echo "  make native-e2e-demo-full-smoke  # validate native demo full JSON export quietly"
 	@echo "  make governance-failure-benchmark  # no-cost fixtures for blocked/flagged governance failures"
 	@echo "  make decision-log-replay-demo  # replay action-impact logs into governance packets"
 	@echo "  make field-pilot-action-impact-compile-help  # show pilot row compiler usage"
+	@echo "  make field-pilot-operator-burden-compile-help  # show operator-burden row compiler usage"
 	@echo "  make field-pilot-action-impact-demo  # field-pilot action-impact evidence to review packet"
 	@echo "  make formal-provider-bundle-demo  # signed formal-provider payloads into governed-run bundles"
+	@echo "  make formal-provider-proof-pack  # prove formal-provider package adoption boundary"
 	@echo "  make langgraph-governance-demo  # runtime interrupt -> human work -> attestation bundle"
+	@echo "  make langgraph-adapter-policy-preview  # prove bundled LangGraph policy overlay is authority-neutral"
+	@echo "  make runtime-adapter-proof-pack  # native/runtime demos share one governed-run contract"
 	@echo "  make self-evolving-org  # one-command demo; set SELF_EVOLVING_RUNTIME=fixture|codex|claude and SELF_EVOLVING_FEEDBACK=score_totals|withheld|compare"
 	@echo "      optional: set SELF_EVOLVING_SERVE=1 to serve the generated viewer over localhost"
 	@echo "  make self-evolving-org-demo  # no-cost governed org-evolution proof fixture"
@@ -81,11 +88,18 @@ help:
 	@echo "  make protocol-experiment-demo  # compare coordination protocols before governed promotion"
 	@echo "  make capability-signal-demo  # typed abstention/capability gap routing evidence"
 	@echo "  make adoption-demo  # no-cost governed-run, adapter, failure, and org-evolution suite"
+	@echo "  make adoption-readiness-packet  # render latest on-ramp reviewer packet, or expected proof gaps"
+	@echo "  make adoption-onramp-packet  # collect no-cost proof outputs and build the reviewer packet"
+	@echo "  make adoption-onramp-replay  # replay the first-review on-ramp from a clean public copy"
+	@echo "  make adoption-onramp-full-replay  # replay the full first-review proof set from a clean public copy"
 	@echo "  make kernel-service-smoke  # exercise service + SQLite fenced mutation path"
 	@echo "  make app-integration-conformance  # deterministic MCP/webhook fixtures"
 	@echo "  make app-service-integration-smoke  # actor -> membership -> lease -> service mutation -> org surface"
 	@echo "  make kernel-conformance-smoke  # runtime interrupt, OTel projection, policy, inventory"
-	@echo "  make a2h-command-conformance  # CLI fixture for A2H receipt-before-integration"
+	@echo "  make a2h-command-conformance  # CLI fixture for A2H follow-up + receipt-before-integration"
+	@echo "  make a2a-delegation-command-conformance  # service fixture for A2A delegation policy + handoff lifecycle"
+	@echo "  make a2a-h2a-command-conformance  # service/CLI fixture for blocked A2A -> A2H receipt -> closure"
+	@echo "  make saga-command-conformance  # CLI fixture for saga compensation emit/active/clear"
 	@echo "  make source-coverage-walkthrough  # source-health and source-repair fixture"
 	@echo "  make learning-loop-walkthrough  # evidence/human-work/action-impact to learning fixture"
 	@echo "  make multi-actor-authority-walkthrough  # two humans + two services authority fixture"
@@ -119,8 +133,14 @@ first-gated-action:
 agent-fleet-audit-demo:
 	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/agent_fleet_audit_demo.py
 
+agent-fleet-review-packet:
+	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/agent_fleet_audit_demo.py --output-dir $(AGENT_FLEET_AUDIT_OUTDIR) --output $(AGENT_FLEET_AUDIT_OUTDIR)/agent-fleet-audit-summary.json
+
 runtime-adapter-smoke:
 	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/runtime_adapter_smoke.py
+
+runtime-interrupt-command-conformance:
+	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/runtime_interrupt_command_conformance.py
 
 native-e2e-demo:
 	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/native_e2e_demo.py
@@ -137,14 +157,26 @@ decision-log-replay-demo:
 field-pilot-action-impact-compile-help:
 	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/field_pilot_action_impact_compile.py --help
 
+field-pilot-operator-burden-compile-help:
+	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/field_pilot_operator_burden_compile.py --help
+
 field-pilot-action-impact-demo:
 	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/field_pilot_action_impact_demo.py
 
 formal-provider-bundle-demo:
 	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/formal_provider_bundle_demo.py
 
+formal-provider-proof-pack:
+	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/formal_provider_proof_pack.py
+
 langgraph-governance-demo:
 	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/langgraph_governance_demo.py
+
+langgraph-adapter-policy-preview:
+	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/langgraph_adapter_policy_preview.py
+
+runtime-adapter-proof-pack:
+	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/runtime_adapter_proof_pack.py
 
 self-evolving-org:
 ifeq ($(SELF_EVOLVING_FEEDBACK),compare)
@@ -291,6 +323,18 @@ capability-signal-demo:
 
 adoption-demo: native-e2e-demo agent-fleet-audit-demo governance-failure-benchmark decision-log-replay-demo field-pilot-action-impact-demo formal-provider-bundle-demo langgraph-governance-demo self-evolving-org-demo self-evolving-daemon-smoke multi-agent-trace-attribution-demo phase-execution-demo protocol-experiment-demo capability-signal-demo
 
+adoption-readiness-packet:
+	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/adoption_readiness_packet.py --markdown --latest-onramp
+
+adoption-onramp-packet:
+	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/adoption_onramp_packet.py
+
+adoption-onramp-replay:
+	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/adoption_onramp_replay.py
+
+adoption-onramp-full-replay:
+	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/adoption_onramp_replay.py --include-optional
+
 kernel-service-smoke:
 	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/kernel_service_smoke.py
 
@@ -305,6 +349,15 @@ kernel-conformance-smoke:
 
 a2h-command-conformance:
 	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/a2h_command_conformance.py
+
+a2a-delegation-command-conformance:
+	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/a2a_delegation_command_conformance.py
+
+a2a-h2a-command-conformance:
+	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/a2a_h2a_command_conformance.py
+
+saga-command-conformance:
+	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/saga_command_conformance.py
 
 source-coverage-walkthrough:
 	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/source_coverage_walkthrough.py
@@ -358,7 +411,7 @@ audit-verify:
 mcp-linear-live-smoke:
 	PYTHONPATH=$(CF_PYTHONPATH) $(PYTHON) scripts/mcp_linear_live_smoke.py
 
-smoke-public: test org-surface runtime-adapter-smoke native-e2e-demo native-e2e-demo-full-smoke agent-fleet-audit-demo governance-failure-benchmark decision-log-replay-demo field-pilot-action-impact-compile-help field-pilot-action-impact-demo formal-provider-bundle-demo langgraph-governance-demo self-evolving-org-demo self-evolving-daemon-smoke multi-agent-trace-attribution-demo phase-execution-demo protocol-experiment-demo capability-signal-demo kernel-service-smoke app-integration-conformance app-service-integration-smoke kernel-conformance-smoke a2h-command-conformance source-coverage-walkthrough learning-loop-walkthrough multi-actor-authority-walkthrough backup-restore-smoke package-smoke docs-surface-check public-claims-check release-hygiene-check field-pilot-validate-smoke orbit-smoke-build
+smoke-public: test org-surface runtime-adapter-smoke runtime-interrupt-command-conformance native-e2e-demo native-e2e-demo-full-smoke agent-fleet-audit-demo agent-fleet-review-packet governance-failure-benchmark decision-log-replay-demo field-pilot-action-impact-compile-help field-pilot-operator-burden-compile-help field-pilot-action-impact-demo formal-provider-bundle-demo formal-provider-proof-pack langgraph-governance-demo langgraph-adapter-policy-preview runtime-adapter-proof-pack adoption-onramp-packet adoption-onramp-replay adoption-onramp-full-replay self-evolving-org-demo self-evolving-daemon-smoke multi-agent-trace-attribution-demo phase-execution-demo protocol-experiment-demo capability-signal-demo kernel-service-smoke app-integration-conformance app-service-integration-smoke kernel-conformance-smoke a2h-command-conformance a2a-delegation-command-conformance a2a-h2a-command-conformance saga-command-conformance source-coverage-walkthrough learning-loop-walkthrough multi-actor-authority-walkthrough backup-restore-smoke package-smoke docs-surface-check public-claims-check release-hygiene-check field-pilot-validate-smoke orbit-smoke-build
 
 smoke-docker:
 	bash scripts/docker_smoke.sh

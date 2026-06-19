@@ -94,7 +94,9 @@ resource-envelope projection for adapter and dashboard compatibility.
 Formal verification (orthogonal): provider-agnostic certificate rows from Lean,
 SMT, Isabelle, Coq, Alloy, TLA+, or tenant checkers. A refuted or invalid
 certificate fails the governed-run bundle; an inconclusive certificate makes it
-incomplete.
+incomplete. Signed provider payloads can be packaged into
+`formal_provider_proof_pack.v1` adoption receipts; missing provider trust,
+checker evidence, or faithfulness refs remain explicit bundle caveats.
 
 Audit integrity (orthogonal): chained manifests over JSONL state logs, with
 optional HMAC verification and external timestamp/transparency-log proof
@@ -155,7 +157,7 @@ Schema to validate custom primitive payloads without a kernel change.
 
 How role offices coordinate with each other inside the kernel. Typed `AgentMessage` envelopes, seven performative kinds (`request`, `proposal`, `handoff`, `inform`, `clarification`, `refusal`, `status`), an **obligation lifecycle** distinct from envelope status (so "B is blocked waiting on A's output" is structurally visible, not inferred), and a **content-addressed artifact-dependency primitive** so "task B requires task A's output X with property Y" is a typed event rather than implicit knowledge.
 
-Status: shipped for single-authority governance kernels. Phase A (obligation lifecycle), Phase B (artifact dependencies), and Phase C (saga compensation) all shipped. Remote adapter (cross-VPS role-to-role messaging) remains queued for T2 deployments.
+Status: shipped for single-authority governance kernels. Phase A (obligation lifecycle), Phase B (artifact dependencies), and Phase C (saga compensation) all shipped. `make a2a-delegation-command-conformance` exercises standalone role-policy and handoff lifecycle, `make a2a-h2a-command-conformance` exercises the blocked-obligation-to-human-work seam, and `make saga-command-conformance` exercises the saga compensation command path. Remote adapter (cross-VPS role-to-role messaging) remains queued for T2 deployments.
 
 ### [H2A — Human-to-Agent](protocols/h2a.md)
 
@@ -213,7 +215,10 @@ smoke remains optional and credentialed.
 The fixture matrix every app, runtime, provider, identity, state, notification,
 or tenant adapter should satisfy before it is treated as supported.
 
-Status: public protocol and deterministic conformance helpers shipped.
+Status: public protocol and deterministic conformance helpers shipped. Runtime
+adapter support now also has `make runtime-adapter-proof-pack`, which compares
+native and external-runtime governed-run evidence without installing or
+running the external framework.
 
 ### [Inbound Events](protocols/inbound-events.md)
 
@@ -459,6 +464,9 @@ unauthorized decider rather than rejecting the record, and can be promoted to a
 new mandate clause. Both canonical row types expose resource-envelope
 projections for adapter and dashboard compatibility while keeping the JSONL
 rows authoritative. This keeps mandate-gap decisions reviewable.
+The holder-resolution read model also projects the accountable authority-domain
+role when no explicit assignment exists, while preserving explicit assignments
+as the only residual-decision authorization source.
 
 Status: first-party interfaces, kernel-service routes, CLI, and tests shipped.
 
@@ -515,9 +523,16 @@ organizational projection as canonical `run.*` transition rows. Interrupted
 runs are bridged into A2H human-work sessions; the external runtime keeps its
 own resume token.
 
-Status: framework-neutral adapter and tests shipped. First-party vendor
-wrappers are intentionally left to tenants until a concrete integration needs
-one.
+Status: framework-neutral adapter and tests shipped.
+`make runtime-interrupt-command-conformance` exercises the CLI path for
+external-runtime HITL pauses: pre-start checkpoints and incomplete interrupts
+are rejected, a valid interrupt pauses the run, creates one receipt-required
+A2H human-work request, preserves the resume ref, and reuses that request on
+interrupt replay. `make runtime-adapter-proof-pack` validates the bundled
+LangGraph adapter-policy manifest/config and proves that native and
+LangGraph-style demos share one governed-run evidence contract. First-party
+vendor wrappers are intentionally left to tenants until a concrete integration
+needs one.
 
 ### [Agent Runtime Invocation Policy](protocols/agent-runtime-invocation.md)
 
@@ -600,7 +615,11 @@ How local app surfaces call kernel commands through HTTP without reimplementing
 primitive lifecycle rules. The service is stdlib-only and calls the same Python
 functions as the CLI and tests.
 
-Status: local service adapter shipped.
+Status: local service adapter shipped, including v0.4 read/write surfaces for
+proposal templates, review projections, proposal review packets, human-work
+receipts and pressure, human-speed envelopes, human-work pressure learning candidates, pre-work
+learning context packets, learning-use receipts, provenance timeline,
+projection-only provenance graph, and portable provenance handoff reports.
 
 ### [Kernel Event Envelope](protocols/kernel-events.md)
 
@@ -686,8 +705,9 @@ candidates. The compiler is a generic bridge from learning carriers to possible
 durable state changes, but it remains observer-only: tenants decide who reviews
 the candidates and which, if any, become real updates.
 
-Status: compiler, execution-evidence candidate service projection,
-candidate-to-governance proposal route, and tests shipped.
+Status: compiler, human-work/attention/execution candidate service
+projections, candidate-to-governance proposal route, userland inspection, and
+tests shipped.
 
 ### [Approved Learning Events](protocols/learning-events.md)
 
@@ -696,7 +716,8 @@ Approved learning events record decision-use, source carriers, before/after
 state, approval references, and future application cues without applying the
 referenced mutation themselves.
 
-Status: filesystem adapter and tests shipped.
+Status: filesystem adapter, deterministic replay, context-packet projection,
+learning-use receipts, loop projection, userland commands, and tests shipped.
 
 ### [Distribution](protocols/distribution.md)
 
@@ -753,7 +774,12 @@ gaps, open evidence gaps, human work sessions, blocked obligations, damage
 signals, invalid project charters, forecast-market health, action-impact
 review items, strategy-review findings, active approved learning events, plus
 active and failed long-running runs. The learning-transition compiler can be
-run over that surface to produce reviewable candidates.
+run over that surface to produce reviewable candidates. The service can also
+compile the routed attention feed into observer-only candidates for unrouted,
+stale, or repeated attention pressure without changing routing behavior.
+Repeated or critical damage signals can likewise compile into observer-only
+review candidates; accountability cases remain the explicit write-side closure
+path.
 
 Deployment-class boundaries are documented in the
 [`T1 / T2 upgrade matrix`](t1_t2_upgrade_matrix.md).

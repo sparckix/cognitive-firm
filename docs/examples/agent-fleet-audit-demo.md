@@ -11,7 +11,16 @@ Run:
 make agent-fleet-audit-demo
 ```
 
-To keep the inspection artifacts after the command exits:
+To write the persistent review packet and Markdown runbook:
+
+```bash
+make agent-fleet-review-packet
+```
+
+By default this writes under `.cognitive-firm-runs/agent-fleet-audit`. Override
+the destination with `AGENT_FLEET_AUDIT_OUTDIR=/path/to/review-dir`.
+
+Equivalent direct script form:
 
 ```bash
 PYTHONPATH=src python scripts/agent_fleet_audit_demo.py \
@@ -23,6 +32,7 @@ This writes:
 - `.cognitive-firm-runs/agent-fleet-audit/agent-fleet-audit-runbook.md`
 - `.cognitive-firm-runs/agent-fleet-audit/agent-fleet-audit-runbook.json`
 - `.cognitive-firm-runs/agent-fleet-audit/agent-fleet-audit-packet.json`
+- `.cognitive-firm-runs/agent-fleet-audit/operator-burden-field-pilot-summary.json`
 
 The fixture does not call Claude, Codex, an API model, a subscription runtime,
 the network, or an external service. It simulates one local agent subprocess
@@ -59,6 +69,13 @@ The optional runbook uses `governed_run_operator_summary.v1` from
 [`governed-run-recipes`](../protocols/governed-run-recipes.md). It is an
 inspection projection only: the invocation receipt, action attestation, runtime
 events, and governed-run bundle remain the source records.
+
+The compact output also includes `operator_burden_field_pilot_summary.v1`.
+That summary compares fixture baseline and pilot rows for human touchpoints,
+coordination minutes, rework, missing receipts, hidden burden, and runbook
+projection undercount. It is no-cost adoption evidence, not proof that a real
+tenant has reduced burden; real pilots should replace the fixture rows with
+measured local rows before treating the result as validation.
 
 This mirrors real daemon dispatch: `scripts/agent_daemon.py` writes the same
 receipt into `agent_cli_dispatch` action-attestation metadata and includes

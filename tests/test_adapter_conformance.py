@@ -8,6 +8,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from cognitive_firm.orchestration.adapter_conformance import (  # noqa: E402
     AdapterManifestError,
+    RuntimeAdapterProofPackInput,
+    build_runtime_adapter_proof_pack,
     load_adapter_conformance_config,
     load_adapter_manifest,
     main as adapter_conformance_main,
@@ -242,3 +244,157 @@ def test_adapter_conformance_cli_validates_config(capsys):
     ) == 0
     out = capsys.readouterr().out
     assert '"adapter_id": "langgraph-runtime-adapter"' in out
+
+
+def test_runtime_adapter_proof_pack_compares_native_and_runtime_contracts():
+    manifest = load_adapter_manifest(
+        ROOT
+        / "distro"
+        / "langgraph-runtime-adapter"
+        / "files"
+        / "adapters"
+        / "langgraph-runtime-adapter.yaml"
+    )
+    config = load_adapter_conformance_config(
+        ROOT
+        / "distro"
+        / "langgraph-runtime-adapter"
+        / "files"
+        / "adapter_conformance"
+        / "langgraph-runtime-adapter.json"
+    )
+
+    packet = build_runtime_adapter_proof_pack(
+        RuntimeAdapterProofPackInput(
+            adapter_id="langgraph-runtime-adapter",
+            native_payload=_proof_payload("native_cognitive_firm_e2e", "native"),
+            runtime_payload=_proof_payload(
+                "langgraph_governance_projection",
+                "runtime",
+                include_runtime_projection=True,
+            ),
+            manifest=manifest,
+            conformance_config=config,
+        )
+    )
+
+    assert packet["schema"] == "runtime_adapter_proof_pack.v1"
+    assert packet["summary"]["ok"] is True
+    assert packet["boundary"]["checker_does_not_execute_runtime"] is True
+    assert "same governed-run contract" in " ".join(packet["isomorphism_takeaways"])
+
+
+def test_runtime_adapter_proof_pack_blocks_missing_runtime_resume_ref():
+    manifest = load_adapter_manifest(
+        ROOT
+        / "distro"
+        / "langgraph-runtime-adapter"
+        / "files"
+        / "adapters"
+        / "langgraph-runtime-adapter.yaml"
+    )
+    config = load_adapter_conformance_config(
+        ROOT
+        / "distro"
+        / "langgraph-runtime-adapter"
+        / "files"
+        / "adapter_conformance"
+        / "langgraph-runtime-adapter.json"
+    )
+    runtime_payload = _proof_payload(
+        "langgraph_governance_projection",
+        "runtime",
+        include_runtime_projection=True,
+    )
+    del runtime_payload["run_projection"]["runtime_projection"]["resume_ref"]
+
+    packet = build_runtime_adapter_proof_pack(
+        RuntimeAdapterProofPackInput(
+            adapter_id="langgraph-runtime-adapter",
+            native_payload=_proof_payload("native_cognitive_firm_e2e", "native"),
+            runtime_payload=runtime_payload,
+            manifest=manifest,
+            conformance_config=config,
+        )
+    )
+
+    assert packet["summary"]["ok"] is False
+    failing = {
+        check["check_id"]: check
+        for check in packet["checks"]
+        if check["status"] != "passed"
+    }
+    assert "runtime_projection_keeps_runtime_owned_refs" in failing
+    assert any("resume_ref" in error for error in failing["runtime_projection_keeps_runtime_owned_refs"]["errors"])
+
+
+def _proof_payload(
+    demo: str,
+    suffix: str,
+    *,
+    include_runtime_projection: bool = False,
+) -> dict:
+    run_id = f"run_{suffix}"
+    payload = {
+        "demo": demo,
+        "bundle_validation": {"ok": True, "errors": []},
+        "summary": {
+            "authority_snapshot": {
+                "mandate_hash": f"hash_{suffix}",
+                "mandate_ref": f"org/mandates/{suffix}.md",
+                "owner_role": f"role.{suffix}",
+                "role_ref": f"org/roles/{suffix}.yaml",
+                "status": "resolved",
+            },
+            "bundle_digest": "sha256:" + "a" * 64,
+            "bundle_id": f"gab_{suffix}",
+            "caveats": [],
+            "counts": {
+                "accountability_cases": 1,
+                "action_attestations": 1,
+                "approval_events": 0,
+                "checkpoints": 1,
+                "evidence_hashes": 1,
+                "formal_verifications": 0,
+                "human_work_sessions": 1,
+                "leases": 0,
+                "observability_refs": 1,
+                "outcome_links": 1,
+                "work_items": 0,
+            },
+            "ids": {
+                "accountability_cases": [f"acct_{suffix}"],
+                "action_attestations": [f"aat_{suffix}"],
+                "approval_events": [],
+                "evidence_hashes": [f"record_set_digest:run:{run_id}"],
+                "formal_verifications": [],
+                "human_work_sessions": [f"hws_{suffix}"],
+                "leases": [],
+                "observability_refs": [f"cognitive_firm.run:{run_id}"],
+                "outcome_links": [f"olink_{suffix}"],
+                "work_items": [],
+            },
+            "objective": f"prove {suffix}",
+            "owner_role": f"role.{suffix}",
+            "project_id": f"project-{suffix}",
+            "run_id": run_id,
+            "run_state": "completed",
+            "tenant_id": f"tenant-{suffix}",
+            "verdict": "passed",
+        },
+    }
+    if include_runtime_projection:
+        payload["run_projection"] = {
+            "state": "completed",
+            "runtime_projection": {
+                "runtime_name": "langgraph",
+                "external_run_id": "thread-proof",
+                "resume_ref": "langgraph://thread-proof/resume/approval-1",
+                "evidence_refs": [
+                    f"run:{run_id}",
+                    f"human_work:hws_{suffix}",
+                    f"outcome_link:olink_{suffix}",
+                ],
+            },
+        }
+    return payload

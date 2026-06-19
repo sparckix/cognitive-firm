@@ -8,11 +8,12 @@ import re
 import shlex
 import shutil
 import sys
-import tempfile
 import subprocess
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import yaml
 
@@ -421,6 +422,7 @@ def run_demo(
         planner_prompt_mode=planner_prompt_mode,
         planner_timeout_seconds=planner_timeout_seconds,
     )
+    selection = _selection_with_workload_probe_evidence(selection, workload_probe)
     return _run_governed_evolution(
         demo_firm=demo_firm,
         config=config,
@@ -1427,13 +1429,25 @@ def _run_governed_evolution(
     report["summary"]["mutation_proof_replay_valid"] = all(
         row["valid"] and row["matches_saved"] for row in mutation_proof_replay
     )
+    reports_dir = demo_firm / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report["provenance_reports"] = _write_step_provenance_reports(
+        config=config,
+        reports_dir=reports_dir,
+        steps=applied_steps,
+    )
+    report["proposal_review_packets"] = _write_proposal_review_packets(
+        config=config,
+        reports_dir=reports_dir,
+        steps=applied_steps,
+        blocked_proposals=blocked_proposals,
+    )
+    _attach_v04_evidence_summary(report)
     report["company_state"] = _build_company_state_projection(
         demo_firm,
         report,
     )
     report["operator_runbook"] = _build_operator_runbook(report)
-    reports_dir = demo_firm / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
     (reports_dir / "self-evolving-org-demo.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -1521,6 +1535,145 @@ def _write_company_state_live_snapshot(
         encoding="utf-8",
     )
     return company_state
+
+
+def _write_step_provenance_reports(
+    *,
+    config: KernelServiceConfig,
+    reports_dir: Path,
+    steps: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Write reusable provenance handoff reports for accepted governed steps."""
+    if not steps:
+        return []
+    provenance_dir = reports_dir / "provenance"
+    provenance_dir.mkdir(parents=True, exist_ok=True)
+    manifests: list[dict[str, Any]] = []
+    for step in steps:
+        step_id = str(step.get("step_id") or "step").strip() or "step"
+        run_id = str(step.get("run_id") or "").strip()
+        if not run_id:
+            continue
+        response = dispatch_kernel_request(
+            "GET",
+            f"/kernel/provenance-report?run_id={run_id}&event_limit=10",
+            config=config,
+        )
+        _assert_status(response.status, 200, f"provenance report {step_id}")
+        provenance_report = response.payload["report"]
+        slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", step_id).strip("_") or "step"
+        json_name = f"{slug}-provenance-report.json"
+        markdown_name = f"{slug}-provenance-report.md"
+        (provenance_dir / json_name).write_text(
+            json.dumps(provenance_report, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (provenance_dir / markdown_name).write_text(
+            str(provenance_report.get("markdown") or ""),
+            encoding="utf-8",
+        )
+        manifests.append(
+            {
+                "step_id": step_id,
+                "run_id": run_id,
+                "report_ref": f"file://reports/provenance/{json_name}",
+                "markdown_ref": f"file://reports/provenance/{markdown_name}",
+                "report_kind": provenance_report.get("report_kind"),
+                "read_only": provenance_report.get("read_only"),
+                "projection_only": provenance_report.get("projection_only"),
+                "coverage": dict(provenance_report.get("coverage") or {}),
+                "follow_through": dict(
+                    provenance_report.get("follow_through") or {}
+                ),
+                "summary": dict(provenance_report.get("summary") or {}),
+                "evidence_ref_count": len(
+                    provenance_report.get("evidence_refs") or []
+                ),
+            }
+        )
+    return manifests
+
+
+def _write_proposal_review_packets(
+    *,
+    config: KernelServiceConfig,
+    reports_dir: Path,
+    steps: list[dict[str, Any]],
+    blocked_proposals: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Write reusable proposal review packets for accepted and blocked changes."""
+    proposal_rows: list[dict[str, Any]] = []
+    for step in steps:
+        proposal_id = str(step.get("proposal_id") or "").strip()
+        if proposal_id:
+            proposal_rows.append(
+                {
+                    "proposal_id": proposal_id,
+                    "step_id": step.get("step_id"),
+                    "target_ref": step.get("target_ref"),
+                    "proposal_outcome": "accepted",
+                }
+            )
+    for blocked in blocked_proposals:
+        proposal_id = str(blocked.get("proposal_id") or "").strip()
+        if proposal_id:
+            proposal_rows.append(
+                {
+                    "proposal_id": proposal_id,
+                    "step_id": blocked.get("step_id"),
+                    "target_ref": blocked.get("target_ref"),
+                    "proposal_outcome": "blocked",
+                    "blocked_by": blocked.get("blocked_by"),
+                }
+            )
+    if not proposal_rows:
+        return []
+    proposal_dir = reports_dir / "proposals"
+    proposal_dir.mkdir(parents=True, exist_ok=True)
+    manifests: list[dict[str, Any]] = []
+    for row in proposal_rows:
+        proposal_id = row["proposal_id"]
+        response = dispatch_kernel_request(
+            "GET",
+            f"/kernel/governance-changes/{proposal_id}/review-packet?event_limit=8",
+            config=config,
+        )
+        _assert_status(response.status, 200, f"proposal review packet {proposal_id}")
+        packet = response.payload["packet"]
+        slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", proposal_id).strip("_") or "proposal"
+        json_name = f"{slug}-proposal-review-packet.json"
+        markdown_name = f"{slug}-proposal-review-packet.md"
+        (proposal_dir / json_name).write_text(
+            json.dumps(packet, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (proposal_dir / markdown_name).write_text(
+            str(packet.get("markdown") or ""),
+            encoding="utf-8",
+        )
+        review = packet.get("review") or {}
+        provenance = packet.get("provenance_report") or {}
+        follow_through = packet.get("follow_through") or {}
+        manifests.append(
+            {
+                **row,
+                "packet_kind": packet.get("packet_kind"),
+                "read_only": packet.get("read_only"),
+                "projection_only": packet.get("projection_only"),
+                "review_state": review.get("review_state"),
+                "status": review.get("status"),
+                "decision_route": packet.get("decision_route"),
+                "proof_obligations": list(packet.get("proof_obligations") or []),
+                "follow_through": dict(follow_through),
+                "evidence_ref_count": len(packet.get("evidence_refs") or []),
+                "provenance_event_count": (
+                    provenance.get("summary") or {}
+                ).get("event_count", 0),
+                "report_ref": f"file://reports/proposals/{json_name}",
+                "markdown_ref": f"file://reports/proposals/{markdown_name}",
+            }
+        )
+    return manifests
 
 
 def _build_company_state_report(
@@ -1649,6 +1802,48 @@ def _attach_workload_probe_summary(report: dict[str, Any]) -> None:
     )
 
 
+def _attach_v04_evidence_summary(report: dict[str, Any]) -> None:
+    summary = report.setdefault("summary", {})
+    steps = list(report.get("steps") or [])
+    summary["learning_use_receipts"] = sum(
+        1 for step in steps if step.get("learning_use_receipt")
+    )
+    summary["context_packets"] = sum(
+        1 for step in steps if step.get("context_packet_id")
+    )
+    summary["verified_context_packets"] = sum(
+        1
+        for step in steps
+        if (step.get("context_packet_verification") or {}).get("ok") is True
+    )
+    summary["provenance_reports"] = len(report.get("provenance_reports") or [])
+    summary["proposal_review_packets"] = len(
+        report.get("proposal_review_packets") or []
+    )
+    proposal_follow_through = _follow_through_status_counts(
+        report.get("proposal_review_packets") or []
+    )
+    summary["proposal_review_follow_through_closed_loop"] = (
+        proposal_follow_through.get("closed_loop_observed", 0)
+    )
+    summary["proposal_review_follow_through_decision_observed"] = (
+        proposal_follow_through.get("decision_observed", 0)
+    )
+    summary["proposal_review_follow_through_proposal_only"] = (
+        proposal_follow_through.get("proposal_only", 0)
+    )
+
+
+def _follow_through_status_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        status = str((row.get("follow_through") or {}).get("status") or "")
+        if not status:
+            continue
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
 def _render_demo_markdown_report(report: dict[str, Any]) -> str:
     summary = report["summary"]
     lines = [
@@ -1686,6 +1881,9 @@ def _render_demo_markdown_report(report: dict[str, Any]) -> str:
         f"| Workload feedback | {_md(summary.get('workload_feedback_visibility', ''))} |",
         f"| Firm received workload scores | {str(summary.get('workload_firm_received_scores')).lower()} |",
         f"| Workload score per budget | {_md(summary.get('workload_capability_score_per_budget_unit', ''))} |",
+        f"| Proposal review closed-loop packets | {summary.get('proposal_review_follow_through_closed_loop', 0)} |",
+        f"| Proposal review decision-observed packets | {summary.get('proposal_review_follow_through_decision_observed', 0)} |",
+        f"| Proposal review proposal-only packets | {summary.get('proposal_review_follow_through_proposal_only', 0)} |",
         "",
         "## Planner Receipts",
         "",
@@ -1705,6 +1903,65 @@ def _render_demo_markdown_report(report: dict[str, Any]) -> str:
             )
             + " |"
         )
+    if report.get("provenance_reports"):
+        lines.extend(
+            [
+                "",
+                "## Provenance Reports",
+                "",
+                "| Step | Coverage | Follow-Through | Events | Report | Markdown |",
+                "| --- | --- | --- | ---: | --- | --- |",
+            ]
+        )
+        for provenance in report["provenance_reports"]:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        _md(provenance.get("step_id", "")),
+                        _md((provenance.get("coverage") or {}).get("status", "")),
+                        _md(
+                            (provenance.get("follow_through") or {}).get(
+                                "status", ""
+                            )
+                        ),
+                        _md((provenance.get("summary") or {}).get("event_count", 0)),
+                        _md(provenance.get("report_ref", "")),
+                        _md(provenance.get("markdown_ref", "")),
+                    ]
+                )
+                + " |"
+            )
+    if report.get("proposal_review_packets"):
+        lines.extend(
+            [
+                "",
+                "## Proposal Review Packets",
+                "",
+                "| Proposal | Outcome | Review State | Follow-Through | Evidence Refs | Report | Markdown |",
+                "| --- | --- | --- | --- | ---: | --- | --- |",
+            ]
+        )
+        for packet in report["proposal_review_packets"]:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        _md(packet.get("proposal_id", "")),
+                        _md(packet.get("proposal_outcome", "")),
+                        _md(packet.get("review_state", "")),
+                        _md(
+                            (packet.get("follow_through") or {}).get(
+                                "status", ""
+                            )
+                        ),
+                        _md(packet.get("evidence_ref_count", 0)),
+                        _md(packet.get("report_ref", "")),
+                        _md(packet.get("markdown_ref", "")),
+                    ]
+                )
+                + " |"
+            )
     daemon_dispatch = report.get("daemon_dispatch")
     if daemon_dispatch:
         lines.extend(
@@ -2098,7 +2355,66 @@ def _build_operator_runbook(report: dict[str, Any]) -> dict[str, Any]:
                 "purpose": "Planner command metadata, prompt/response digests, and parsed step refs.",
             }
         )
+    for provenance in report.get("provenance_reports", []):
+        step_id = provenance.get("step_id", "step")
+        artifacts.append(
+            {
+                "label": f"provenance_report:{step_id}",
+                "ref": provenance.get("report_ref", ""),
+                "purpose": "Reusable v0.4 provenance handoff over the accepted mutation run.",
+            }
+        )
+    for packet in report.get("proposal_review_packets", []):
+        proposal_id = packet.get("proposal_id", "proposal")
+        artifacts.append(
+            {
+                "label": f"proposal_review_packet:{proposal_id}",
+                "ref": packet.get("report_ref", ""),
+                "purpose": "Reusable governance-change review handoff for accepted or blocked proposal state.",
+            }
+        )
     execution_health = _operator_execution_health(report)
+    bundle_summaries = [
+        step.get("bundle", {})
+        for step in report.get("steps", [])
+        if step.get("bundle")
+    ]
+    learning_closure = [
+        {
+            "step_id": step.get("step_id"),
+            "title": step.get("title"),
+            "learning_event_id": step.get("learning_event_id"),
+            "learning_use_receipt_id": step.get("learning_encounter_id"),
+            "changed_context_ref": step.get("target_ref"),
+            "future_work_context": (step.get("future_replay") or {}).get("intent"),
+            "future_replay_source": (step.get("future_replay") or {}).get(
+                "candidate_source"
+            ),
+            "context_packet_refs": [step.get("context_packet_id")]
+            if step.get("context_packet_id")
+            else [],
+            "outcome_link_id": step.get("outcome_link_id"),
+            "outcome_review_status": (
+                step.get("outcome_prediction_review") or {}
+            ).get("status"),
+            "outcome_recommended_action": (
+                step.get("outcome_prediction_review") or {}
+            ).get("recommended_action"),
+            "routine_review_id": step.get("routine_review_id"),
+            "routine_review_status": "scheduled",
+            "evidence_refs": [
+                *list(step.get("proof_evidence_carrier_refs") or []),
+                *list(step.get("planner_evidence_refs") or []),
+            ],
+        }
+        for step in report.get("steps", [])
+        if step.get("learning_event_id")
+    ]
+    review_candidates = sum(
+        1
+        for candidate in execution_health["learning_candidates"]
+        if candidate.get("status") in {"open", "review_ready"}
+    )
     runbook = build_governed_run_operator_summary(
         GovernedRunOperatorSummaryInput(
             run_label="self_evolving_org",
@@ -2113,15 +2429,19 @@ def _build_operator_runbook(report: dict[str, Any]) -> dict[str, Any]:
                 "mutation_proofs",
                 "git_history",
             ],
-            bundle_summaries=[
-                step.get("bundle", {})
-                for step in report.get("steps", [])
-                if step.get("bundle")
-            ],
+            bundle_summaries=bundle_summaries,
             mutation_proofs=report.get("mutation_proofs", []),
             execution_signals=execution_health["execution_signals"],
             learning_candidates=execution_health["learning_candidates"],
             phase_plans=execution_health["phase_plans"],
+            learning_closure=learning_closure,
+            operator_burden={
+                "review_candidates": review_candidates,
+                "review_questions": [
+                    "Did the run reduce coordination/rework enough to justify the operator review surface?",
+                    "Which repeated review signals should become source repair instead of more human checking?",
+                ],
+            },
             metadata={
                 "demo": report.get("demo"),
                 "demo_firm": demo_firm,
@@ -2197,6 +2517,10 @@ def _build_company_state_projection(
             "future_replay_candidate_source": step.get("future_replay", {}).get(
                 "candidate_source"
             ),
+            "context_packet_ref": step.get("context_packet_ref"),
+            "context_packet_verified": (
+                step.get("context_packet_verification") or {}
+            ).get("ok"),
             "learning_steward_review_ref": step.get("learning_steward_review_ref"),
             "evidence_refs": step.get("proof_evidence_carrier_refs", []),
         }
@@ -3602,6 +3926,7 @@ def _render_company_state_html(state: dict[str, Any]) -> str:
         learning.appendChild(item(unit.learning_event_id, [
           {{ value: `${{tick.tick_label || ''}} ${{unit.step_id}}`, mono: true }},
           {{ value: unit.future_replay_intent || '', muted: true }},
+          {{ value: `context packet: ${{unit.context_packet_ref || 'none'}}${{unit.context_packet_verified ? ' / verified' : ''}}`, mono: true }},
           {{ value: `learning steward: ${{unit.learning_steward_review_ref || 'n/a'}}`, mono: true }},
           {{ value: `evidence refs: ${{unit.evidence_refs.length}}` }},
         ]));
@@ -3680,6 +4005,9 @@ def _render_company_state_html(state: dict[str, Any]) -> str:
           if (position.invocation && position.invocation.artifact_refs) {{
             el.appendChild(artifactList(Object.values(position.invocation.artifact_refs)));
           }}
+          if (position.invocation && position.invocation.input_refs) {{
+            el.appendChild(detailsBlock('Reviewer input evidence', (position.invocation.input_refs || []).join('\\n')));
+          }}
           agentDiscussion.appendChild(el);
         }}
         agentDiscussion.appendChild(agentStep(
@@ -3688,6 +4016,49 @@ def _render_company_state_html(state: dict[str, Any]) -> str:
           'The Principal remains the authority holder; reviewer votes are evidence for the decision, not a replacement for decision rights.',
           mutation.commit ? `git receipt: ${{mutation.commit}}` : '',
         ));
+      }}
+      for (const blockedProposal of blocked) {{
+        const result = blockedProposal.decision_aggregation_result || {{}};
+        agentDiscussion.appendChild(agentStep(
+          'Governance',
+          'Blocked proposal',
+          shortText(blockedProposal.reason || 'Reviewer quorum did not approve this proposal.', 620),
+          blockedProposal.decision_aggregation_case_ref || blockedProposal.proposal_id || '',
+        ));
+        const header = document.createElement('div');
+        header.className = 'muted';
+        header.textContent = `Blocked reviewer positions for ${{blockedProposal.target_ref || blockedProposal.proposal_id || 'proposal'}}`;
+        agentDiscussion.appendChild(header);
+        const positions = blockedProposal.decision_positions || [];
+        if (positions.length) {{
+          for (const position of positions) {{
+            const el = document.createElement('div');
+            el.className = 'role-note';
+            el.dataset.position = position.position || '';
+            const title = document.createElement('strong');
+            title.textContent = `${{roleName(position.role_id)}}: ${{position.position || 'position'}}`;
+            const rationale = document.createElement('div');
+            rationale.className = 'muted';
+            rationale.textContent = shortText(position.rationale || '', 520);
+            el.append(title, rationale);
+            if (position.invocation && position.invocation.artifact_refs) {{
+              el.appendChild(artifactList(Object.values(position.invocation.artifact_refs)));
+            }}
+            if (position.invocation && position.invocation.input_refs) {{
+              el.appendChild(detailsBlock('Reviewer input evidence', (position.invocation.input_refs || []).join('\\n')));
+            }}
+            agentDiscussion.appendChild(el);
+          }}
+        }} else {{
+          agentDiscussion.appendChild(storyCard(
+            `Decision aggregation: ${{result.recommendation || blockedProposal.status || 'blocked'}}`,
+            shortText(blockedProposal.reason || result.rationale || '', 520),
+            `approvals ${{result.approvals || 0}} / quorum ${{result.quorum || 'n/a'}}`,
+          ));
+          if (Array.isArray(result.evidence_refs) && result.evidence_refs.length) {{
+            agentDiscussion.appendChild(detailsBlock('Blocked evidence refs', result.evidence_refs.join('\\n')));
+          }}
+        }}
       }}
       if (!agentDiscussion.textContent.trim()) {{
         agentDiscussion.appendChild(storyCard(
@@ -5476,6 +5847,35 @@ def _select_evolution_steps(
     ).steps
 
 
+def _selection_with_workload_probe_evidence(
+    selection: PlannerSelection,
+    workload_probe: dict[str, Any],
+) -> PlannerSelection:
+    if workload_probe.get("schema") != "workload_probe_execution.v1":
+        return selection
+    refs = [
+        "file://reports/workload-probes/workload-probe-summary.json",
+        "file://org/workload/executions/README.md",
+    ]
+    evidence_refs = _dedupe_preserve_order([*selection.evidence_refs, *refs])
+    return PlannerSelection(
+        steps=selection.steps,
+        receipts=selection.receipts,
+        evidence_refs=evidence_refs,
+    )
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
 def _select_evolution_plan(
     demo_firm: Path,
     *,
@@ -6053,6 +6453,8 @@ def _run_live_reviewer(
             "timeout_seconds": reviewer.timeout_seconds,
             "prompt_mode": reviewer.prompt_mode,
             "artifact_refs": artifact_refs,
+            "input_refs": [artifact_refs["prompt_ref"], *evidence_refs],
+            "output_refs": [artifact_refs["stdout_ref"], artifact_refs["review_ref"]],
             "verification_status": verification_status,
         },
     )
@@ -6333,6 +6735,12 @@ def _llm_evolution_prompt(
             "org/mandates/, or org/policies/. Do not create new roles unless "
             "necessary.\n"
         )
+    workload_context = _planner_workload_evidence_context(demo_firm)
+    workload_section = (
+        f"\nCurrent workload evidence:\n{workload_context}\n"
+        if workload_context
+        else ""
+    )
     return f"""You are proposing bounded organization-structure improvements for a cognitive-firm demo.
 
 Return ONLY JSON. No markdown, no prose outside JSON.
@@ -6369,6 +6777,7 @@ Constraints:
 - Keep changes general-purpose, not tied to a single industry.
 - The governance kernel will still require proposal, approval, attestation, learning,
   outcome link, routine review, bundle validation, and git commit before mutation is accepted.
+{workload_section}
 
 JSON schema:
 {{
@@ -6391,6 +6800,50 @@ JSON schema:
 Current starter firm context:
 {context}
 """
+
+
+def _planner_workload_evidence_context(demo_firm: Path) -> str:
+    summary_path = demo_firm / "reports" / "workload-probes" / "workload-probe-summary.json"
+    if not summary_path.exists():
+        return ""
+    try:
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    summary = payload.get("summary") or {}
+    if not isinstance(summary, dict):
+        return ""
+    lines = [
+        "- Evidence carrier: file://reports/workload-probes/workload-probe-summary.json",
+        "- Visible receipt index: file://org/workload/executions/README.md",
+        f"- Workload packets: {summary.get('packet_count', 0)}",
+        f"- Total budget units: {summary.get('total_budget_units', 0)}",
+        f"- Feedback visibility: {summary.get('feedback_visibility', 'unknown')}",
+        f"- Firm received score totals: {str(summary.get('firm_received_scores', False)).lower()}",
+        f"- Rubric visible to firm: {str(summary.get('rubric_visible_to_firm', False)).lower()}",
+        f"- Live executor packets: {summary.get('live_executor_packets', 0)}",
+    ]
+    if summary.get("firm_received_scores"):
+        lines.extend(
+            [
+                f"- Visible total score: {summary.get('total_score')}",
+                f"- Visible max score: {summary.get('total_max_score')}",
+                "- Visible capability score per budget unit: "
+                f"{summary.get('capability_score_per_budget_unit')}",
+            ]
+        )
+    else:
+        lines.append(
+            "- Numeric score totals are withheld from firm-visible state; do not "
+            "cite operator-only score values as proposal evidence."
+        )
+    lines.append(
+        "- Use these refs when making measurement claims; do not infer hidden "
+        "rubric lines or operator-only scorecards."
+    )
+    return "\n".join(lines)
 
 
 def _planner_context_sort_key(path: Path) -> tuple[int, str]:
@@ -7185,6 +7638,8 @@ def _run_step(
             decision_case_id=decision_case_id,
             decision_case_ref=decision_case_ref,
             decision_case_result=decision_case_result,
+            decision_positions=decision_positions,
+            reviewer_invocations=reviewer_invocations,
             reason=(
                 "Live reviewer decision aggregation did not approve "
                 f"{step.step_id}: {decision_case_result}"
@@ -7481,28 +7936,6 @@ def _run_step(
     learning_event_id = learning["learning_event_id"]
     attestation_id = attestation["attestation_id"]
 
-    encounter = dispatch_kernel_request(
-        "POST",
-        "/kernel/learning-event-encounters",
-        {
-            "learning_event_id": learning_event_id,
-            "role": "role.org_evolver",
-            "cue": step.rationale,
-            "outcome": "applied",
-            "work_ref": f"work:{work_id}",
-            "evidence_refs": [
-                f"run:{run_id}",
-                f"governance_change:{proposal_id}",
-                *a2a_refs,
-                decision_case_ref,
-                *planner_evidence_refs,
-            ],
-            "metadata": {"demo": "self_evolving_org", "step_id": step.step_id},
-        },
-        config=config,
-    )
-    _assert_status(encounter.status, 201, f"record learning encounter {step.step_id}")
-
     replay_candidates = discover_relevant_learning_events(
         assigned_to="role.org_evolver",
         cue=step.rationale,
@@ -7684,6 +8117,69 @@ def _run_step(
     )
     _assert_status(review_response.status, 201, f"schedule routine review {step.step_id}")
     routine_review_id = review_response.payload["routine_review"]["review_id"]
+    context_query = urlencode(
+        {
+            "assigned_to": "role.org_evolver",
+            "cue": step.rationale,
+            "max_per_source": "5",
+        }
+    )
+    future_context_response = dispatch_kernel_request(
+        "GET",
+        f"/kernel/work-discovery?{context_query}",
+        config=config,
+    )
+    _assert_status(
+        future_context_response.status,
+        200,
+        f"future context packet {step.step_id}",
+    )
+    future_context_packet = future_context_response.payload["context_packet"]
+    future_context_verification = dispatch_kernel_request(
+        "POST",
+        "/kernel/work-discovery/context-packet/verify",
+        {"context_packet": future_context_packet},
+        config=config,
+    )
+    _assert_status(
+        future_context_verification.status,
+        200,
+        f"verify future context packet {step.step_id}",
+    )
+    if not future_context_verification.payload["verification"]["ok"]:
+        raise AssertionError(
+            "invalid future context packet for "
+            f"{step.step_id}: {future_context_verification.payload['verification']}"
+        )
+    encounter = dispatch_kernel_request(
+        "POST",
+        "/kernel/learning-event-encounters",
+        {
+            "learning_event_id": learning_event_id,
+            "role": "role.org_evolver",
+            "cue": step.rationale,
+            "outcome": "applied",
+            "work_ref": f"work:{work_id}",
+            "context_packet": future_context_packet,
+            "evidence_refs": [
+                f"run:{run_id}",
+                f"governance_change:{proposal_id}",
+                f"outcome_link:{outcome_link_id}",
+                f"routine_review:{routine_review_id}",
+                f"context_packet:{future_context_packet['context_packet_id']}",
+                *a2a_refs,
+                decision_case_ref,
+                *planner_evidence_refs,
+            ],
+            "metadata": {"demo": "self_evolving_org", "step_id": step.step_id},
+        },
+        config=config,
+    )
+    _assert_status(
+        encounter.status,
+        201,
+        f"record verified learning-use encounter {step.step_id}",
+    )
     evidence_pack = build_governed_mutation_evidence_pack(
         GovernedMutationEvidenceInput(
             proposal_id=proposal_id,
@@ -7857,6 +8353,18 @@ def _run_step(
         "decision_event_id": event_id,
         "learning_event_id": learning_event_id,
         "learning_encounter_id": encounter.payload["encounter"]["encounter_id"],
+        "learning_use_receipt": encounter.payload["encounter"],
+        "context_packet_id": future_context_packet["context_packet_id"],
+        "context_packet_ref": f"context_packet:{future_context_packet['context_packet_id']}",
+        "context_packet_verification": future_context_verification.payload[
+            "verification"
+        ],
+        "future_context_packet": {
+            "context_packet_id": future_context_packet["context_packet_id"],
+            "digest": future_context_packet["digest"],
+            "basis": future_context_packet["basis"],
+            "verification": future_context_verification.payload["verification"],
+        },
         "future_replay": future_replay,
         "outcome_link_id": outcome_link_id,
         "outcome_prediction_review": outcome_link.get("metadata", {}).get(
@@ -8087,6 +8595,8 @@ def _run_reviewer_blocked_candidate(
     decision_case_id: str,
     decision_case_ref: str,
     decision_case_result: dict[str, Any],
+    decision_positions: list[ReviewPosition],
+    reviewer_invocations: list[dict[str, Any]],
     reason: str,
     evidence_refs: list[str],
 ) -> dict[str, Any]:
@@ -8147,6 +8657,8 @@ def _run_reviewer_blocked_candidate(
         "decision_aggregation_case_id": decision_case_id,
         "decision_aggregation_case_ref": decision_case_ref,
         "decision_aggregation_result": decision_case_result,
+        "decision_positions": [asdict(position) for position in decision_positions],
+        "reviewer_invocations": reviewer_invocations,
         "route_packet": routed.payload["route_packet"],
     }
 

@@ -70,6 +70,11 @@ def main(argv: list[str] | None = None) -> int:
             / "policy_promotion_packets.jsonl",
             outcome_links_log=root / "org" / "outcome_links" / "outcome_links.jsonl",
             routine_reviews_log=root / "org" / "routine_reviews" / "routine_reviews.jsonl",
+            learning_events_log=root / "org" / "learning_events" / "learning_events.jsonl",
+            learning_encounters_log=root
+            / "org"
+            / "learning_events"
+            / "learning_event_encounters.jsonl",
             mutation_backend=backend,
         )
 
@@ -229,6 +234,17 @@ def main(argv: list[str] | None = None) -> int:
         _assert_status(bundle.status, 200, "governed-run bundle build")
         if bundle.payload["summary"]["verdict"] != "passed":
             raise AssertionError(f"bundle did not pass: {bundle.payload}")
+        _seed_closed_loop_provenance_records(
+            config=config,
+            actor_context=actor_context,
+            run_id=run_id,
+            proposal_id=proposal_id,
+            attestation_id=attestation.payload["action_attestation"]["attestation_id"],
+        )
+        provenance_report_counts = _check_provenance_report_route(
+            config=config,
+            run_id=run_id,
+        )
         proof = dispatch_kernel_request(
             "POST",
             "/kernel/mutation-proofs/build",
@@ -267,6 +283,13 @@ def main(argv: list[str] | None = None) -> int:
         if not proof_validation.payload["valid"]:
             raise AssertionError(f"mutation proof failed: {proof_validation.payload}")
 
+        human_work_pressure_counts = _seed_and_check_human_work_pressure_routes(
+            config=config,
+            actor_context=actor_context,
+        )
+        human_speed_envelope_counts = _check_human_speed_envelope_route(
+            config=config,
+        )
         execution_projection_counts = _seed_and_check_execution_carrier_routes(
             config=config,
             actor_context=actor_context,
@@ -292,9 +315,12 @@ def main(argv: list[str] | None = None) -> int:
                 "governance_decision": governance_decision.payload["result"][
                     "decision"
                 ],
+                "human_work_pressure_counts": human_work_pressure_counts,
+                "human_speed_envelope_counts": human_speed_envelope_counts,
                 "execution_projection_counts": execution_projection_counts,
                 "action_impact_counts": action_impact_counts,
                 "prediction_review_counts": prediction_review_counts,
+                "provenance_report_counts": provenance_report_counts,
                 "governed_run_bundle_verdict": bundle.payload["summary"]["verdict"],
                 "mutation_proof_validated": proof_validation.payload["valid"],
                 "stale_rejected": True,
@@ -306,6 +332,282 @@ def main(argv: list[str] | None = None) -> int:
             args.output.write_text(rendered + "\n", encoding="utf-8")
         print(rendered)
     return 0
+
+
+def _check_human_speed_envelope_route(config: KernelServiceConfig) -> dict[str, object]:
+    envelope = dispatch_kernel_request(
+        "GET",
+        (
+            "/kernel/human-speed-envelope?"
+            "risk_tier=irreversible&"
+            "bottleneck_class=authority&"
+            "deployment_class=external_write&"
+            "external_side_effect=true"
+        ),
+        config=config,
+    )
+    _assert_status(envelope.status, 200, "human-speed envelope")
+    row = envelope.payload["envelope"]
+    if row["schema"] != "human_speed_envelope.v1":
+        raise AssertionError(f"unexpected human-speed schema: {envelope.payload}")
+    if row["speed_class"] != "gate_before_action":
+        raise AssertionError(f"unexpected human-speed class: {envelope.payload}")
+    if row["required_record"] != "policy_decision_or_gate_plus_lease":
+        raise AssertionError(f"unexpected human-speed record: {envelope.payload}")
+    boundary = row.get("boundary") or {}
+    if boundary.get("does_not_dispatch_work") is not True:
+        raise AssertionError(f"human-speed boundary weakened: {envelope.payload}")
+
+    return {
+        "schema": row["schema"],
+        "speed_class": row["speed_class"],
+        "required_record": row["required_record"],
+        "observer_only": envelope.payload["observer_only"],
+        "dispatch_boundary": boundary["does_not_dispatch_work"],
+    }
+
+
+def _seed_closed_loop_provenance_records(
+    *,
+    config: KernelServiceConfig,
+    actor_context: dict[str, str],
+    run_id: str,
+    proposal_id: str,
+    attestation_id: str,
+) -> None:
+    learning = dispatch_kernel_request(
+        "POST",
+        "/kernel/learning-events",
+        {
+            "learning_unit_kind": "routine_change",
+            "decision_use": "Treat governed smoke runs as reviewable evidence chains.",
+            "future_application_cue": "governed run review",
+            "approved_by": "role.manager",
+            "approval_ref": f"governance_change:{proposal_id}",
+            "source_carrier_refs": [
+                run_id,
+                f"run:{run_id}",
+                f"action_attestation:{attestation_id}",
+            ],
+            "owner_role": "role.manager",
+            "metadata": {"run_id": run_id, "proposal_id": proposal_id},
+            "actor_context": actor_context,
+        },
+        config=config,
+    )
+    _assert_status(learning.status, 201, "learning event create")
+    learning_event_id = learning.payload["learning_event"]["learning_event_id"]
+
+    outcome = dispatch_kernel_request(
+        "POST",
+        "/kernel/outcome-links",
+        {
+            "change_ref": f"run:{run_id}",
+            "change_kind": "governed_run",
+            "learning_event_id": learning_event_id,
+            "metric_name": "reviewability",
+            "metric_unit": "verdict",
+            "created_by": "role.manager",
+            "owner_role": "role.manager",
+            "metadata": {"run_id": run_id, "proposal_id": proposal_id},
+            "actor_context": actor_context,
+        },
+        config=config,
+    )
+    _assert_status(outcome.status, 201, "outcome link create")
+    outcome_link_id = outcome.payload["outcome_link"]["outcome_link_id"]
+
+    for kind, value in (("baseline", 0.0), ("post", 1.0)):
+        snapshot = dispatch_kernel_request(
+            "POST",
+            f"/kernel/outcome-links/{outcome_link_id}/snapshots",
+            {
+                "kind": kind,
+                "value": value,
+                "captured_by": "role.manager",
+                "measurement_ref": f"smoke:reviewability:{kind}",
+                "actor_context": actor_context,
+            },
+            config=config,
+        )
+        _assert_status(snapshot.status, 200, f"outcome {kind} snapshot")
+
+    verdict = dispatch_kernel_request(
+        "POST",
+        f"/kernel/outcome-links/{outcome_link_id}/verdict",
+        {
+            "verdict": "improved",
+            "rationale": "The run now carries a compact provenance handoff.",
+            "recorded_by": "role.manager",
+            "actor_context": actor_context,
+        },
+        config=config,
+    )
+    _assert_status(verdict.status, 200, "outcome verdict record")
+
+    review = dispatch_kernel_request(
+        "POST",
+        "/kernel/routine-reviews",
+        {
+            "routine_ref": f"learning_event:{learning_event_id}",
+            "routine_kind": "learning_event",
+            "learning_event_id": learning_event_id,
+            "review_due_utc": "2030-01-01T00:00:00+00:00",
+            "scheduled_by": "role.manager",
+            "reason": "Verify that the smoke learning still improves reviewability.",
+            "metadata": {"run_id": run_id, "proposal_id": proposal_id},
+            "actor_context": actor_context,
+        },
+        config=config,
+    )
+    _assert_status(review.status, 201, "routine review schedule")
+
+    encounter = dispatch_kernel_request(
+        "POST",
+        "/kernel/learning-event-encounters",
+        {
+            "learning_event_id": learning_event_id,
+            "role": "role.manager",
+            "cue": "governed run review",
+            "outcome": "applied",
+            "work_ref": f"run:{run_id}",
+            "evidence_refs": [
+                f"outcome_link:{outcome_link_id}",
+                f"action_attestation:{attestation_id}",
+            ],
+            "actor_context": actor_context,
+        },
+        config=config,
+    )
+    _assert_status(encounter.status, 201, "learning-use receipt")
+
+
+def _check_provenance_report_route(
+    *,
+    config: KernelServiceConfig,
+    run_id: str,
+) -> dict[str, object]:
+    report_response = dispatch_kernel_request(
+        "GET",
+        f"/kernel/provenance-report?run_id={run_id}&event_limit=4",
+        config=config,
+    )
+    _assert_status(report_response.status, 200, "provenance report")
+    report = report_response.payload["report"]
+    if report["read_only"] is not True or report["projection_only"] is not True:
+        raise AssertionError(f"provenance report is not projection-only: {report}")
+    if report["report_kind"] != "provenance_handoff":
+        raise AssertionError(f"unexpected provenance report kind: {report}")
+    source_counts = report["summary"]["source_counts"]
+    if source_counts.get("action_attestations") != 1:
+        raise AssertionError(f"attestation missing from provenance report: {report}")
+    if report["summary"]["event_count"] < 3:
+        raise AssertionError(f"too few provenance events: {report}")
+    if "# Provenance Report" not in report["markdown"]:
+        raise AssertionError(f"markdown export missing: {report}")
+    if "## Follow-Through" not in report["markdown"]:
+        raise AssertionError(f"markdown follow-through missing: {report}")
+    follow = report["follow_through"]
+    if follow["status"] != "closed_loop_observed":
+        raise AssertionError(f"closed-loop follow-through missing: {report}")
+    if follow["outcome_links"] < 1 or follow["routine_reviews"] < 1:
+        raise AssertionError(f"outcome/review follow-through missing: {report}")
+    if follow["learning_events"] < 1 or follow["learning_use_receipts"] < 1:
+        raise AssertionError(f"learning follow-through missing: {report}")
+    refs = {row["ref"] for row in report["evidence_refs"]}
+    if "workspace/smoke-report.md" not in refs:
+        raise AssertionError(f"artifact ref missing from provenance report: {report}")
+    return {
+        "provenance_report_events": report["summary"]["event_count"],
+        "provenance_report_refs": len(report["evidence_refs"]),
+        "provenance_report_coverage": report["coverage"]["status"],
+        "provenance_follow_through": follow["status"],
+        "provenance_outcome_links": follow["outcome_links"],
+        "provenance_routine_reviews": follow["routine_reviews"],
+        "provenance_learning_events": follow["learning_events"],
+        "provenance_learning_use_receipts": follow["learning_use_receipts"],
+    }
+
+
+def _seed_and_check_human_work_pressure_routes(
+    *,
+    config: KernelServiceConfig,
+    actor_context: dict[str, str],
+) -> dict[str, object]:
+    for index in range(3):
+        response = dispatch_kernel_request(
+            "POST",
+            "/kernel/human-work",
+            {
+                "coordination_pattern": "a2h_work_request",
+                "requested_by": "role.researcher",
+                "human_actor": f"human.source_reviewer_{index}",
+                "objective": f"Check restricted source {index}.",
+                "work_mode": "source_check",
+                "bottleneck_class": "access",
+                "human_deliverable": "bounded source receipt",
+                "tenant_id": "tenant-smoke",
+                "project_id": "project-smoke",
+                "receipt_required": True,
+                "actor_context": actor_context,
+            },
+            config=config,
+        )
+        _assert_status(response.status, 201, "human-work create")
+
+    pressure = dispatch_kernel_request(
+        "GET",
+        "/kernel/human-work-pressure?tenant_id=tenant-smoke&project_id=project-smoke",
+        config=config,
+    )
+    _assert_status(pressure.status, 200, "human-work pressure")
+    pressure_groups = pressure.payload["pressure"]
+    if len(pressure_groups) != 1:
+        raise AssertionError(f"unexpected human-work pressure: {pressure.payload}")
+    if pressure_groups[0]["missing_receipt_count"] != 3:
+        raise AssertionError(f"missing receipt pressure absent: {pressure.payload}")
+
+    candidates = dispatch_kernel_request(
+        "GET",
+        "/kernel/learning-transition-candidates?source=human_work",
+        config=config,
+    )
+    _assert_status(candidates.status, 200, "human-work learning candidates")
+    candidate_rows = candidates.payload["candidates"]
+    if len(candidate_rows) != 1:
+        raise AssertionError(f"unexpected human-work candidates: {candidates.payload}")
+    candidate = candidate_rows[0]
+    if candidate["source_kind"] != "a2h_pressure":
+        raise AssertionError(f"wrong human-work candidate kind: {candidates.payload}")
+
+    promoted = dispatch_kernel_request(
+        "POST",
+        f"/kernel/learning-transition-candidates/{candidate['candidate_id']}/governance-change",
+        {
+            "source": "human_work",
+            "target_ref": "org/policies/smoke-source-access.md",
+            "proposed_by": "role.researcher",
+            "expected_behavior_change": (
+                "Review repeated source-access pressure before future routing changes."
+            ),
+            "risk_summary": "May over-automate useful human source checks.",
+            "rollback_plan": "Discard the temporary smoke proposal.",
+            "actor_context": actor_context,
+        },
+        config=config,
+    )
+    _assert_status(promoted.status, 201, "human-work candidate promotion")
+    promotion_status = promoted.payload["proposal"]["status"]
+    if promotion_status != "blocked":
+        raise AssertionError(
+            f"human-work candidate should remain blocked without invariants: {promoted.payload}"
+        )
+
+    return {
+        "a2h_pressure_groups": len(pressure_groups),
+        "human_work_learning_candidates": len(candidate_rows),
+        "human_work_candidate_promotion": promotion_status,
+    }
 
 
 def _seed_and_check_execution_carrier_routes(

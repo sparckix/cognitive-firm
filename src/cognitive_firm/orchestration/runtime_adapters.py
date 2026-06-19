@@ -387,12 +387,27 @@ def _find_interrupt_session(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Record external runtime events into cognitive-firm.")
     parser.add_argument("--log-path", type=Path)
+    parser.add_argument(
+        "--human-work-log-path",
+        type=Path,
+        help="Write human-work sessions created by interrupted events to this JSONL log.",
+    )
     parser.add_argument("--event-json", required=True, help="JSON object matching RuntimeEvent fields")
     args = parser.parse_args(argv)
 
     payload = json.loads(args.event_json)
     event = RuntimeEvent(**payload)
-    print(json.dumps(record_runtime_event(event, log_path=args.log_path), indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            record_runtime_event(
+                event,
+                log_path=args.log_path,
+                human_work_log_path=args.human_work_log_path,
+            ),
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

@@ -325,6 +325,183 @@ def test_discover_relevant_learning_events_accepts_explicit_log_path(tmp_path: P
     ]
 
 
+def test_discover_relevant_learning_events_ignores_blank_structured_selectors(
+    tmp_path: Path,
+):
+    learning_log = tmp_path / "learning_events.jsonl"
+    create_learning_event(
+        learning_unit_kind="routine_change",
+        decision_use="Do not replay from a blank selector.",
+        future_application_cue="queue repair repeats",
+        approved_by="role.manager",
+        approval_ref="review/learning/blank-selector",
+        log_path=learning_log,
+    )
+
+    candidates = discover_relevant_learning_events(
+        assigned_to=None,
+        cue="  ",
+        cue_signature="  ",
+        resource_refs=[" ", ""],
+        topology_refs=[" "],
+        log_path=learning_log,
+    )
+
+    assert candidates == []
+
+
+def test_structured_learning_context_matches_non_role_topology_refs(tmp_path: Path):
+    learning_log = tmp_path / "learning_events.jsonl"
+    matching = create_learning_event(
+        learning_unit_kind="routine_change",
+        decision_use="Use the provider proof packet before trusting checker output.",
+        future_application_cue="formal verifier provider handoff",
+        approved_by="role.manager",
+        approval_ref="review/learning/provider-proof",
+        owner_role=None,
+        tenant_id="tenant-a",
+        metadata={
+            "cue_signatures": [" formal_verification.provider_payload ", None, ""],
+            "resource_refs": [" formal_provider:trusted_checker ", None, ""],
+            "topology_refs": [" state_surface:formal_verifications ", None, ""],
+            "negative_cues": [" sandbox_probe ", None, ""],
+        },
+        log_path=learning_log,
+    )
+    create_learning_event(
+        learning_unit_kind="routine_change",
+        decision_use="Do not match a different verifier surface.",
+        future_application_cue="unrelated verifier",
+        approved_by="role.manager",
+        approval_ref="review/learning/other",
+        tenant_id="tenant-a",
+        metadata={
+            "cue_signatures": ["formal_verification.provider_payload"],
+            "resource_refs": ["formal_provider:other"],
+            "topology_refs": ["state_surface:other"],
+        },
+        log_path=learning_log,
+    )
+
+    context = build_role_learning_context(
+        assigned_to=None,
+        tenant_id="tenant-a",
+        cue=" formal verifier provider handoff ",
+        cue_signature=" formal_verification.provider_payload ",
+        resource_refs=[
+            " formal_provider:trusted_checker ",
+            "formal_provider:trusted_checker",
+        ],
+        topology_refs=[
+            " state_surface:formal_verifications ",
+            "state_surface:formal_verifications",
+        ],
+        learning_events_log_path=learning_log,
+        include_work_candidates=False,
+    )
+
+    assert context["assigned_to"] is None
+    assert context["cue"] == "formal verifier provider handoff"
+    assert context["cue_signature"] == "formal_verification.provider_payload"
+    assert context["resource_refs"] == ["formal_provider:trusted_checker"]
+    assert context["topology_refs"] == ["state_surface:formal_verifications"]
+    assert context["context_packet"]["basis"]["cue_signature"] == (
+        "formal_verification.provider_payload"
+    )
+    assert context["context_packet"]["basis"]["resource_refs"] == [
+        "formal_provider:trusted_checker"
+    ]
+    assert context["context_packet"]["basis"]["topology_refs"] == [
+        "state_surface:formal_verifications"
+    ]
+    assert [
+        row["learning_event"]["learning_event_id"]
+        for row in context["learning_context"]
+    ] == [matching.learning_event_id]
+
+
+def test_structured_learning_context_without_role_stays_learning_only(
+    tmp_path: Path,
+    monkeypatch,
+):
+    learning_log = tmp_path / "learning_events.jsonl"
+    gap_log = tmp_path / "evidence_gaps.jsonl"
+    monkeypatch.setattr(evidence_gaps, "DEFAULT_EVIDENCE_GAPS_LOG", gap_log)
+    create_evidence_gap(
+        gap_type="missing_source",
+        target="unrelated generic work",
+        description="This should not enter an exact structured context packet.",
+        severity="blocking",
+        producer="role.researcher",
+        log_path=gap_log,
+    )
+    matching = create_learning_event(
+        learning_unit_kind="routine_change",
+        decision_use="Use the provider proof packet before trusting checker output.",
+        future_application_cue="formal verifier provider handoff",
+        approved_by="role.manager",
+        approval_ref="review/learning/provider-proof",
+        owner_role=None,
+        tenant_id="tenant-a",
+        metadata={
+            "cue_signatures": ["formal_verification.provider_payload"],
+            "resource_refs": ["formal_provider:trusted_checker"],
+            "topology_refs": ["state_surface:formal_verifications"],
+        },
+        log_path=learning_log,
+    )
+
+    context = build_role_learning_context(
+        assigned_to=None,
+        tenant_id="tenant-a",
+        cue_signature="formal_verification.provider_payload",
+        resource_refs=["formal_provider:trusted_checker"],
+        topology_refs=["state_surface:formal_verifications"],
+        learning_events_log_path=learning_log,
+    )
+
+    assert [
+        row["learning_event"]["learning_event_id"]
+        for row in context["learning_context"]
+    ] == [matching.learning_event_id]
+    assert context["work_candidates"] == []
+    assert context["context_packet"]["basis"]["work_candidate_refs"] == []
+    assert context["context_packet"]["basis"]["work_candidates_included"] is False
+
+
+def test_structured_learning_context_respects_negative_cues(tmp_path: Path):
+    learning_log = tmp_path / "learning_events.jsonl"
+    create_learning_event(
+        learning_unit_kind="routine_change",
+        decision_use="Use the provider proof packet before trusting checker output.",
+        future_application_cue="formal verifier provider handoff",
+        approved_by="role.manager",
+        approval_ref="review/learning/provider-proof",
+        tenant_id="tenant-a",
+        metadata={
+            "cue_signatures": ["formal_verification.provider_payload"],
+            "resource_refs": ["formal_provider:trusted_checker"],
+            "topology_refs": ["state_surface:formal_verifications"],
+            "negative_cues": ["sandbox_probe"],
+        },
+        log_path=learning_log,
+    )
+
+    context = build_role_learning_context(
+        assigned_to=None,
+        tenant_id="tenant-a",
+        cue="sandbox_probe for formal verifier provider",
+        cue_signature="formal_verification.provider_payload",
+        resource_refs=["formal_provider:trusted_checker"],
+        topology_refs=["state_surface:formal_verifications"],
+        learning_events_log_path=learning_log,
+        include_work_candidates=False,
+    )
+
+    assert context["learning_context"] == []
+    assert context["context_packet"]["basis"]["learning_event_ids"] == []
+
+
 def test_role_learning_context_joins_outcomes_reviews_without_recording_encounters(
     tmp_path: Path,
 ):
@@ -406,6 +583,49 @@ def test_role_learning_context_joins_outcomes_reviews_without_recording_encounte
         for candidate in context["work_candidates"]
         if candidate["source"] == "learning-event-replay"
     ] == [event.learning_event_id]
+
+
+def test_context_packet_verification_is_digest_only_and_no_write(tmp_path: Path):
+    learning_log = tmp_path / "learning_events.jsonl"
+    event = create_learning_event(
+        learning_unit_kind="routine_change",
+        decision_use="Route queue stalls through reviewer handoff before escalation.",
+        future_application_cue="queue stalls",
+        approved_by="role.owner",
+        approval_ref="decision:learning-queue",
+        owner_role="role.manager",
+        tenant_id="tenant-a",
+        log_path=learning_log,
+    )
+    context = build_role_learning_context(
+        assigned_to="role.manager",
+        tenant_id="tenant-a",
+        cue="queue stalls",
+        learning_events_log_path=learning_log,
+        include_work_candidates=False,
+    )
+
+    verified = work_discovery.verify_context_packet(context["context_packet"])
+
+    assert verified["ok"] is True
+    assert verified["read_only"] is True
+    assert verified["verification_policy"] == "digest_only_no_log_lookup"
+    assert verified["context_packet_id"] == context["context_packet"]["context_packet_id"]
+    assert verified["basis"]["learning_event_ids"] == [event.learning_event_id]
+
+    tampered = dict(context["context_packet"])
+    tampered["basis"] = {
+        **context["context_packet"]["basis"],
+        "learning_event_ids": ["learn_tampered"],
+    }
+    rejected = work_discovery.verify_context_packet(tampered)
+
+    assert rejected["ok"] is False
+    assert "context_packet.digest does not match basis" in rejected["issues"]
+    assert (
+        "context_packet.context_packet_id does not match digest"
+        in rejected["issues"]
+    )
 
 
 def test_discover_open_debates_returns_valid_candidate(tmp_path: Path, monkeypatch):

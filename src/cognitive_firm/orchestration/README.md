@@ -78,6 +78,7 @@ _Folder index. Prose may be added above the auto-index block._
 - [predicates.py](predicates.py)
 - [project_charter.py](project_charter.py)
 - [protocol_experiments.py](protocol_experiments.py)
+- [provenance_timeline.py](provenance_timeline.py)
 - [resource_allocation.py](resource_allocation.py)
 - [resource_envelope.py](resource_envelope.py)
 - [routine_reviews.py](routine_reviews.py)
@@ -94,6 +95,6 @@ _Folder index. Prose may be added above the auto-index block._
 - [work_items.py](work_items.py)
 - [worker_taxonomy.py](worker_taxonomy.py)
 
-<sub>2 sub-folder(s), 80 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
+<sub>2 sub-folder(s), 81 document(s). Auto-generated; re-run `scripts/gen_folder_index.py` after adding files.</sub>
 
 <!-- AUTO-INDEX:END -->

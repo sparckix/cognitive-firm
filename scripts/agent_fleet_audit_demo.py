@@ -24,6 +24,7 @@ from cognitive_firm.orchestration.governed_run_recipes import (
     GovernedRunOperatorSummaryInput,
     build_governed_run_operator_summary,
     render_governed_run_operator_summary_markdown,
+    summarize_operator_burden_field_pilot,
 )
 
 
@@ -45,6 +46,11 @@ def main(argv: list[str] | None = None) -> int:
             "Optional directory for persistent runbook artifacts. "
             "Use a gitignored path such as .cognitive-firm-runs/agent-fleet-audit."
         ),
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Optional path for the rendered JSON result. Stdout is still written.",
     )
     args = parser.parse_args(argv)
 
@@ -170,6 +176,11 @@ def main(argv: list[str] | None = None) -> int:
         validation = bundle_response.payload["validation"]
         validation_errors = validation["errors"]
         summary = bundle_response.payload["summary"]
+        operator_burden_field_pilot = summarize_operator_burden_field_pilot(
+            _operator_burden_field_pilot_rows(run_id),
+            min_baseline_runs=3,
+            min_pilot_runs=3,
+        )
         runbook_paths = _write_operator_runbook(
             output_dir=Path(args.output_dir) if args.output_dir else None,
             run_id=run_id,
@@ -177,12 +188,14 @@ def main(argv: list[str] | None = None) -> int:
             bundle=bundle,
             invocation_receipt=invocation_receipt,
             receipt_ref=receipt_ref,
+            operator_burden_field_pilot=operator_burden_field_pilot,
         )
         payload = (
             {
                 "agent_invocation_receipt": invocation_receipt,
                 "action_attestation": attestation,
                 "governed_run_attestation": bundle,
+                "operator_burden_field_pilot": operator_burden_field_pilot,
                 "bundle_validation": {
                     "ok": validation["ok"],
                     "errors": validation_errors,
@@ -208,9 +221,29 @@ def main(argv: list[str] | None = None) -> int:
                     "receipt_ref": receipt_ref,
                 },
                 "operator_runbook": runbook_paths,
+                "operator_burden_field_pilot": {
+                    "schema": operator_burden_field_pilot["schema"],
+                    "measurement_status": operator_burden_field_pilot[
+                        "measurement_status"
+                    ],
+                    "n_total": operator_burden_field_pilot["n_total"],
+                    "mean_touchpoint_delta": operator_burden_field_pilot["deltas"][
+                        "mean_actual_human_touchpoints"
+                    ],
+                    "projection_undercounted_rows": len(
+                        operator_burden_field_pilot["projection_fit"][
+                            "undercounted_rows"
+                        ]
+                    ),
+                    "review_reasons": operator_burden_field_pilot["review_reasons"],
+                },
             }
         )
-        print(json.dumps(payload, indent=2, sort_keys=True))
+        rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(rendered, encoding="utf-8")
+        print(rendered, end="")
     return 0
 
 
@@ -223,6 +256,56 @@ def _digest_text(text: str) -> str:
     return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _operator_burden_field_pilot_rows(run_id: str) -> list[dict]:
+    return [
+        {
+            "phase": "baseline",
+            "run_ref": "field-pilot://manual-agent-audit/baseline-1",
+            "actual_human_touchpoints": 4,
+            "coordination_minutes": 34,
+            "rework_count": 1,
+            "missing_receipts": 1,
+        },
+        {
+            "phase": "baseline",
+            "run_ref": "field-pilot://manual-agent-audit/baseline-2",
+            "actual_human_touchpoints": 3,
+            "coordination_minutes": 29,
+            "rework_count": 1,
+        },
+        {
+            "phase": "baseline",
+            "run_ref": "field-pilot://manual-agent-audit/baseline-3",
+            "actual_human_touchpoints": 5,
+            "coordination_minutes": 41,
+            "rework_count": 2,
+        },
+        {
+            "phase": "pilot",
+            "run_ref": "field-pilot://agent-fleet-audit/pilot-1",
+            "actual_human_touchpoints": 2,
+            "projected_human_touchpoints": 2,
+            "coordination_minutes": 18,
+        },
+        {
+            "phase": "pilot",
+            "run_ref": "field-pilot://agent-fleet-audit/pilot-2",
+            "actual_human_touchpoints": 2,
+            "operator_burden_projection": {
+                "summary": {"estimated_human_touchpoints": 2}
+            },
+            "coordination_minutes": 20,
+        },
+        {
+            "phase": "pilot",
+            "run_ref": f"run:{run_id}",
+            "actual_human_touchpoints": 1,
+            "projected_human_touchpoints": 1,
+            "coordination_minutes": 12,
+        },
+    ]
+
+
 def _write_operator_runbook(
     *,
     output_dir: Path | None,
@@ -231,6 +314,7 @@ def _write_operator_runbook(
     bundle: dict,
     invocation_receipt: dict,
     receipt_ref: str,
+    operator_burden_field_pilot: dict,
 ) -> dict:
     if output_dir is None:
         return {}
@@ -238,6 +322,7 @@ def _write_operator_runbook(
     full_packet_path = output_dir / "agent-fleet-audit-packet.json"
     runbook_json_path = output_dir / "agent-fleet-audit-runbook.json"
     runbook_md_path = output_dir / "agent-fleet-audit-runbook.md"
+    operator_burden_path = output_dir / "operator-burden-field-pilot-summary.json"
 
     full_packet_path.write_text(
         json.dumps(
@@ -293,6 +378,12 @@ def _write_operator_runbook(
                 "governed-run attestation bundle",
             ],
             bundle_summaries=[summary],
+            operator_burden={
+                "review_questions": [
+                    "Did the audit trail reduce hidden review work enough to justify the receipt burden?",
+                    "Would repeated missing-receipt decisions need a connector, mandate clarification, or batching?",
+                ],
+            },
             metadata={
                 "demo": "agent_fleet_audit_trail",
                 "no_external_calls": True,
@@ -308,10 +399,14 @@ def _write_operator_runbook(
     runbook_md_path.write_text(
         render_governed_run_operator_summary_markdown(operator_summary) + "\n"
     )
+    operator_burden_path.write_text(
+        json.dumps(operator_burden_field_pilot, indent=2, sort_keys=True) + "\n"
+    )
     return {
         "json": str(runbook_json_path),
         "markdown": str(runbook_md_path),
         "packet": str(full_packet_path),
+        "operator_burden_field_pilot": str(operator_burden_path),
     }
 
 

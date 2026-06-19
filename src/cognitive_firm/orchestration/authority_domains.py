@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import deque
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -91,6 +92,23 @@ class AuthorityResolution:
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self) | {"resolved": self.resolved}
+
+
+@dataclass(frozen=True)
+class RoleEscalationTrace:
+    """Whether one role's escalation chain reaches scoped authority."""
+
+    role_id: str
+    target_authority_role_id: str | None
+    reaches_authority: bool
+    escalation_path: list[str]
+    domain_id: str | None = None
+    scope_kind: str | None = None
+    scope_id: str | None = None
+    issues: list[str] | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 def authority_domains_path(org_root: Path) -> Path:
@@ -182,6 +200,164 @@ def validate_authority_domains(
                     f"non-authority role: {domain.authority_role_id}"
                 )
     return issues
+
+
+def validate_authority_role_graph(
+    roles: dict[str, dict[str, Any]],
+    *,
+    domains: list[AuthorityDomain] | None = None,
+) -> list[str]:
+    """Validate that role escalation can terminate at declared authority.
+
+    This is intentionally structural. It checks role YAML references and
+    escalation reachability; it does not inspect mandates, IAM policy, HRIS, or
+    tenant-specific approval rules.
+    """
+
+    issues: list[str] = []
+    domains = domains or []
+    authorities = sorted(
+        role_id for role_id, role in roles.items() if role.get("role_class") == "authority"
+    )
+    if domains:
+        issues.extend(validate_authority_domains(domains, roles=roles))
+        scoped_authorities = authority_roles_in_domains(domains)
+        unscoped = sorted(set(authorities) - scoped_authorities)
+        if unscoped:
+            issues.append(
+                "authority roles are missing authority-domain records: "
+                + ", ".join(unscoped)
+            )
+    if not authorities:
+        issues.append(
+            "no role has role_class 'authority' - escalation cannot terminate"
+        )
+    elif len(authorities) > 1 and not domains:
+        issues.append(
+            f"multiple authority roles ({', '.join(authorities)}) - "
+            "exactly one is required unless authority domains are declared"
+        )
+
+    escalation, reference_issues = _role_reference_index(roles)
+    issues.extend(reference_issues)
+
+    authority_set = set(authorities)
+    for role_id in roles:
+        if role_id in authority_set:
+            continue
+        if not _reaches_authority(role_id, escalation, authority_set):
+            issues.append(
+                f"role {role_id} escalation chain never reaches an authority "
+                "role - the org has an ungoverned decision path"
+            )
+    return issues
+
+
+def trace_role_escalation_for_scope(
+    roles: dict[str, dict[str, Any]],
+    domains: list[AuthorityDomain] | None = None,
+    *,
+    role_id: str,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    operating_unit_id: str | None = None,
+    resource_class: str | None = None,
+    decision_class: str | None = None,
+) -> RoleEscalationTrace:
+    """Trace whether ``role_id`` reaches the authority resolved for a scope.
+
+    This is the scoped companion to ``validate_authority_role_graph``. The
+    graph validator proves every non-authority can reach *some* authority; this
+    helper proves a specific source role can reach the authority that owns a
+    tenant/project/resource/decision scope.
+    """
+
+    domains = domains or []
+    source_role = _normalize_role_id(role_id)
+    issues: list[str] = []
+    escalation, reference_issues = _role_reference_index(roles)
+    issues.extend(reference_issues)
+
+    if source_role not in roles:
+        issues.append(f"role {source_role} is not defined")
+
+    target_domain: AuthorityDomain | None = None
+    target_authority: str | None = None
+    if domains:
+        target_domain = resolve_authority_domain_for_scope(
+            domains,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            operating_unit_id=operating_unit_id,
+            resource_class=resource_class,
+            decision_class=decision_class,
+        )
+        if target_domain is None:
+            issues.append(
+                "no authority domain resolves "
+                + _scope_label(
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                    operating_unit_id=operating_unit_id,
+                    resource_class=resource_class,
+                    decision_class=decision_class,
+                )
+            )
+        else:
+            target_authority = target_domain.authority_role_id
+    else:
+        authorities = sorted(
+            role
+            for role, payload in roles.items()
+            if payload.get("role_class") == "authority"
+        )
+        if len(authorities) == 1:
+            target_authority = authorities[0]
+        elif authorities:
+            issues.append(
+                "multiple authority roles require authority domains for scoped "
+                "escalation validation"
+            )
+        else:
+            issues.append("no role has role_class 'authority'")
+
+    path: list[str] = []
+    reaches_authority = False
+    if target_authority is not None:
+        if target_authority not in roles:
+            issues.append(
+                f"resolved authority role is not defined: {target_authority}"
+            )
+        elif source_role in roles:
+            path = _path_to_authority(
+                source_role,
+                escalation,
+                target_authority,
+            ) or []
+            reaches_authority = bool(path)
+            if not reaches_authority:
+                issues.append(
+                    f"role {source_role} escalation chain does not reach "
+                    f"scoped authority role {target_authority} for "
+                    + _scope_label(
+                        tenant_id=tenant_id,
+                        project_id=project_id,
+                        operating_unit_id=operating_unit_id,
+                        resource_class=resource_class,
+                        decision_class=decision_class,
+                    )
+                )
+
+    return RoleEscalationTrace(
+        role_id=source_role,
+        target_authority_role_id=target_authority,
+        reaches_authority=reaches_authority,
+        escalation_path=path,
+        domain_id=target_domain.domain_id if target_domain else None,
+        scope_kind=target_domain.scope_kind if target_domain else None,
+        scope_id=target_domain.scope_id if target_domain else None,
+        issues=issues,
+    )
 
 
 def resolve_authority_role_for_scope(
@@ -462,6 +638,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     resolve.add_argument("--json", action="store_true", help="Emit JSON.")
 
+    trace = sub.add_parser(
+        "trace-escalation",
+        help="Trace a role's escalation path to the authority for a scope.",
+    )
+    trace.add_argument("--role-id", required=True)
+    trace.add_argument("--tenant-id")
+    trace.add_argument("--project-id")
+    trace.add_argument("--operating-unit-id")
+    trace.add_argument("--resource-class")
+    trace.add_argument("--decision-class")
+    trace.add_argument("--json", action="store_true", help="Emit JSON.")
+
     args = parser.parse_args(argv)
     domains = load_authority_domains(args.org_root, path=args.path)
 
@@ -483,7 +671,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "validate":
         roles = _load_role_index(args.org_root)
-        issues = validate_authority_domains(domains, roles=roles)
+        issues = validate_authority_role_graph(roles, domains=domains)
         if args.json:
             print(
                 json.dumps(
@@ -524,6 +712,33 @@ def main(argv: list[str] | None = None) -> int:
                 print("UNRESOLVED")
         return 0 if resolution.authority_role_id else 1
 
+    if args.cmd == "trace-escalation":
+        roles = load_role_index(args.org_root)
+        trace_result = trace_role_escalation_for_scope(
+            roles,
+            domains,
+            role_id=args.role_id,
+            tenant_id=args.tenant_id,
+            project_id=args.project_id,
+            operating_unit_id=args.operating_unit_id,
+            resource_class=args.resource_class,
+            decision_class=args.decision_class,
+        )
+        if args.json:
+            print(json.dumps(trace_result.as_dict(), sort_keys=True))
+        else:
+            if trace_result.escalation_path:
+                path = " -> ".join(
+                    f"role.{role_id}"
+                    for role_id in trace_result.escalation_path
+                )
+                print(path)
+            else:
+                print("UNRESOLVED")
+            for issue in trace_result.issues or []:
+                print(issue)
+        return 0 if trace_result.reaches_authority else 1
+
     return 1
 
 
@@ -553,6 +768,19 @@ def _normalize_role_id(value: object) -> str:
     return text
 
 
+def _role_ref(ref: object, roles: dict[str, dict[str, Any]]) -> str | None:
+    text = str(ref or "").strip()
+    if not text:
+        return None
+    if text.startswith(_ROLE_REF_PREFIX):
+        return text[len(_ROLE_REF_PREFIX):]
+    if text in roles:
+        return text
+    if all(ch.isalnum() or ch in {"_", "-"} for ch in text):
+        return text
+    return None
+
+
 def _scope_candidates(
     *,
     tenant_id: str | None = None,
@@ -571,7 +799,9 @@ def _scope_candidates(
     }
 
 
-def _load_role_index(org_root: Path) -> dict[str, dict[str, Any]]:
+def load_role_index(org_root: Path) -> dict[str, dict[str, Any]]:
+    """Load role YAML files into a role-id keyed index."""
+
     import yaml
 
     roles_dir = Path(org_root) / "roles"
@@ -586,6 +816,99 @@ def _load_role_index(org_root: Path) -> dict[str, dict[str, Any]]:
         if isinstance(data, dict) and data.get("role_id"):
             roles[str(data["role_id"])] = data
     return roles
+
+
+def _load_role_index(org_root: Path) -> dict[str, dict[str, Any]]:
+    return load_role_index(org_root)
+
+
+def _role_reference_index(
+    roles: dict[str, dict[str, Any]],
+) -> tuple[dict[str, list[str]], list[str]]:
+    escalation: dict[str, list[str]] = {}
+    issues: list[str] = []
+    for role_id, role in roles.items():
+        resolved_escalations: list[str] = []
+        for ref in role.get("escalates_to") or []:
+            target = _role_ref(ref, roles)
+            if target is None:
+                continue
+            if target not in roles:
+                issues.append(f"role {role_id} escalates_to unknown role: {ref}")
+            else:
+                resolved_escalations.append(target)
+        escalation[role_id] = resolved_escalations
+        for ref in role.get("delegates_to") or []:
+            target = _role_ref(ref, roles)
+            if target is not None and target not in roles:
+                issues.append(f"role {role_id} delegates_to unknown role: {ref}")
+    return escalation, issues
+
+
+def _reaches_authority(
+    start: str,
+    escalation: dict[str, list[str]],
+    authority_set: set[str],
+) -> bool:
+    seen: set[str] = {start}
+    queue: deque[str] = deque(escalation.get(start, []))
+    while queue:
+        node = queue.popleft()
+        if node in authority_set:
+            return True
+        if node in seen:
+            continue
+        seen.add(node)
+        queue.extend(escalation.get(node, []))
+    return False
+
+
+def _path_to_authority(
+    start: str,
+    escalation: dict[str, list[str]],
+    target_authority: str,
+) -> list[str] | None:
+    if start == target_authority:
+        return [start]
+    seen: set[str] = {start}
+    queue: deque[tuple[str, list[str]]] = deque(
+        (node, [start, node])
+        for node in escalation.get(start, [])
+    )
+    while queue:
+        node, path = queue.popleft()
+        if node == target_authority:
+            return path
+        if node in seen:
+            continue
+        seen.add(node)
+        queue.extend(
+            (next_node, [*path, next_node])
+            for next_node in escalation.get(node, [])
+        )
+    return None
+
+
+def _scope_label(
+    *,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    operating_unit_id: str | None = None,
+    resource_class: str | None = None,
+    decision_class: str | None = None,
+) -> str:
+    parts: list[str] = []
+    if operating_unit_id:
+        parts.append(f"operating_unit:{operating_unit_id}")
+    if project_id:
+        parts.append(f"project:{project_id}")
+    if tenant_id:
+        parts.append(f"tenant:{tenant_id}")
+    if decision_class:
+        parts.append(f"decision_class:{decision_class}")
+    if resource_class:
+        parts.append(f"resource_class:{resource_class}")
+    return ", ".join(parts) or "global scope"
 
 
 if __name__ == "__main__":

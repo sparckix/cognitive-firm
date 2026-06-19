@@ -13,6 +13,7 @@ from cognitive_firm.orchestration.human_work import (  # noqa: E402
     append_human_work_receipt,
     append_human_work_interaction,
     append_human_work_note,
+    build_human_speed_envelope,
     create_agent_requested_human_work_session,
     create_human_work_session,
     human_work_resource,
@@ -460,6 +461,64 @@ def test_a2h_read_models_surface_followup_receipts_and_pressure(tmp_path: Path):
     assert "source connector" in pressure[0].recommendation
 
 
+def test_human_speed_envelope_classifies_accountable_speed() -> None:
+    agent_speed = build_human_speed_envelope(
+        risk_tier="low",
+        bottleneck_class="other",
+        deployment_class="local",
+    )
+    assert agent_speed.speed_class == "agent_speed"
+    assert agent_speed.required_record == "transition_or_action_attestation"
+    assert agent_speed.boundary["does_not_authorize_work"] is True
+
+    sampled = build_human_speed_envelope(
+        risk_tier="medium",
+        bottleneck_class="labor",
+        deployment_class="internal",
+        repeated_similar=True,
+    )
+    assert sampled.speed_class == "sampled_review"
+    assert sampled.sample_for_review is True
+    assert sampled.sample_rate == 0.2
+
+    batched = build_human_speed_envelope(
+        risk_tier="medium",
+        bottleneck_class="relationship",
+        deployment_class="customer_facing",
+        private_context=True,
+    )
+    assert batched.speed_class == "batched_human_review"
+    assert batched.receipt_required is True
+    assert batched.required_record == "human_work_session_with_receipt"
+
+    gated = build_human_speed_envelope(
+        risk_tier="irreversible",
+        bottleneck_class="authority",
+        deployment_class="external_write",
+        reversible=False,
+        external_side_effect=True,
+    )
+    assert gated.speed_class == "gate_before_action"
+    assert gated.gate_required is True
+
+    regulated = build_human_speed_envelope(
+        risk_tier="medium",
+        bottleneck_class="other",
+        deployment_class="regulated",
+    )
+    assert regulated.speed_class == "gate_before_action"
+    assert regulated.required_record == "policy_decision_or_gate_plus_lease"
+
+    closure = build_human_speed_envelope(
+        risk_tier="high",
+        bottleneck_class="safety",
+        deployment_class="physical_world",
+        harm_occurred=True,
+    )
+    assert closure.speed_class == "accountable_closure"
+    assert closure.accountability_case_recommended is True
+
+
 def test_receipt_required_human_work_cannot_integrate_without_receipt(tmp_path: Path):
     log = tmp_path / "human_work.jsonl"
     session = create_human_work_session(
@@ -646,6 +705,47 @@ def test_human_work_cli_can_render_resource_envelopes(tmp_path: Path, capsys):
     assert [payload["kind"] for payload in payloads] == ["HumanWorkSession"]
     assert payloads[0]["metadata"]["name"] == session.session_id
     assert payloads[0]["spec"]["objective"] == "verify source"
+
+
+def test_human_work_cli_followup_lists_ready_a2h_sessions(tmp_path: Path, capsys):
+    log = tmp_path / "human_work.jsonl"
+    session = create_agent_requested_human_work_session(
+        requested_by_role="role.researcher",
+        human_actor="human.operator",
+        objective="Check private source and hand back a bounded claim.",
+        work_mode="source_check",
+        bottleneck_class="access",
+        human_deliverable="source-support claim",
+        log_path=log,
+    )
+    update_human_work_state(session.session_id, "claimed", log_path=log)
+    update_human_work_state(session.session_id, "in_progress", log_path=log)
+    update_human_work_state(
+        session.session_id,
+        "handed_off",
+        completion_summary="Private source supports the claim.",
+        log_path=log,
+    )
+
+    rc = human_work_main(
+        [
+            "followup",
+            "--agent-counterparty-role",
+            "role.researcher",
+            "--log-path",
+            str(log),
+            "--resource",
+        ]
+    )
+
+    assert rc == 0
+    payloads = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert len(payloads) == 1
+    assert payloads[0]["kind"] == "HumanWorkSession"
+    assert payloads[0]["metadata"]["name"] == session.session_id
+    assert payloads[0]["status"]["state"] == "handed_off"
+    assert payloads[0]["spec"]["agent_followup_required"] is True
+    assert payloads[0]["status"]["receipt_present"] is False
 
 
 def test_invalid_human_work_fields_fail(tmp_path: Path):

@@ -151,6 +151,40 @@ coordination becomes durable evidence without being treated as an approved
 decision. The route does not resolve the case, override the aggregation result,
 approve a governance change, or mutate files.
 
+## Terminal Userland
+
+`cognitive-firm-userland` exposes the same service flow as thin terminal
+carriers:
+
+```bash
+cognitive-firm-userland decision-profiles
+cognitive-firm-userland decision-cases --status escalated
+cognitive-firm-userland decision-open \
+  --subject-ref governance_change:gcp_1 \
+  --decision-class route_policy_change \
+  --scope-kind tenant \
+  --scope-ref tenant-a \
+  --procedure-profile majority \
+  --eligibility-basis "reviewer sample" \
+  --eligible-role role.reviewer_a \
+  --eligible-role role.reviewer_b \
+  --eligible-role role.reviewer_c
+cognitive-firm-userland decision-position dac_1 \
+  --actor-id human.alice \
+  --role-id role.reviewer_a \
+  --position approve \
+  --rationale "reviewed the evidence"
+cognitive-firm-userland decision-compute dac_1
+cognitive-firm-userland decision-route-escalation dac_1 \
+  --summary "reviewer quorum failed" \
+  --owner-role role.manager
+```
+
+The commands call kernel-service routes and print evidence summaries. They do
+not decide authority, approve governance, dispatch work, or mutate files.
+Write commands accept `--lease-id` and `--fencing-token` when the service runs
+with required mutation leases.
+
 ## Boundary
 
 The kernel owns:

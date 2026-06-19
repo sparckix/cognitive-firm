@@ -15,7 +15,9 @@ from cognitive_firm.orchestration.authority_domains import (
     resolve_authority_assignment_from_org,
     resolve_authority_assignment_for_scope,
     resolve_authority_role_for_scope,
+    trace_role_escalation_for_scope,
     validate_authority_domains,
+    validate_authority_role_graph,
 )
 from cognitive_firm.orchestration.resource_envelope import validate_resource
 
@@ -83,6 +85,146 @@ def test_authority_validation_checks_role_class_and_duplicate_scope():
     assert any("non-authority role: lead" in issue for issue in issues)
     assert any("unknown authority role: missing" in issue for issue in issues)
     assert any("duplicate authority scope: tenant:tenant-a" in issue for issue in issues)
+
+
+def test_authority_role_graph_accepts_bare_escalation_ref() -> None:
+    roles = {
+        "principal": {"role_id": "principal", "role_class": "authority"},
+        "reviewer": {
+            "role_id": "reviewer",
+            "role_class": "reviewer",
+            "escalates_to": ["principal"],
+        },
+    }
+
+    assert validate_authority_role_graph(roles) == []
+
+
+def test_authority_role_graph_rejects_dead_end_escalation() -> None:
+    roles = {
+        "principal": {"role_id": "principal", "role_class": "authority"},
+        "worker": {
+            "role_id": "worker",
+            "role_class": "specialist",
+            "escalates_to": ["role.manager"],
+        },
+        "manager": {
+            "role_id": "manager",
+            "role_class": "manager",
+            "escalates_to": [],
+        },
+    }
+
+    issues = validate_authority_role_graph(roles)
+
+    assert any(
+        "role manager escalation chain never reaches an authority role" in issue
+        for issue in issues
+    )
+    assert any(
+        "role worker escalation chain never reaches an authority role" in issue
+        for issue in issues
+    )
+
+
+def test_authority_role_graph_scopes_multiple_authorities_with_domains() -> None:
+    roles = {
+        "principal": {"role_id": "principal", "role_class": "authority"},
+        "tenant_owner": {"role_id": "tenant_owner", "role_class": "authority"},
+        "analyst": {
+            "role_id": "analyst",
+            "role_class": "specialist",
+            "escalates_to": ["role.tenant_owner"],
+        },
+    }
+    domains = [
+        AuthorityDomain("global", "principal", "global", "*"),
+        AuthorityDomain("tenant_a", "tenant_owner", "tenant", "tenant-a"),
+    ]
+
+    assert validate_authority_role_graph(roles, domains=domains) == []
+
+
+def test_trace_role_escalation_for_scope_reaches_typed_authority() -> None:
+    roles = {
+        "principal": {"role_id": "principal", "role_class": "authority"},
+        "policy_authority": {
+            "role_id": "policy_authority",
+            "role_class": "authority",
+        },
+        "manager": {
+            "role_id": "manager",
+            "role_class": "manager",
+            "escalates_to": ["role.policy_authority"],
+        },
+        "worker": {
+            "role_id": "worker",
+            "role_class": "specialist",
+            "escalates_to": ["manager"],
+        },
+    }
+    domains = [
+        AuthorityDomain("global", "principal", "global", "*"),
+        AuthorityDomain(
+            "policy_change",
+            "policy_authority",
+            "decision_class",
+            "policy_change",
+        ),
+    ]
+
+    trace = trace_role_escalation_for_scope(
+        roles,
+        domains,
+        role_id="role.worker",
+        decision_class="policy_change",
+    )
+
+    assert trace.reaches_authority is True
+    assert trace.target_authority_role_id == "policy_authority"
+    assert trace.escalation_path == ["worker", "manager", "policy_authority"]
+    assert trace.issues == []
+
+
+def test_trace_role_escalation_for_scope_blocks_wrong_authority_path() -> None:
+    roles = {
+        "principal": {"role_id": "principal", "role_class": "authority"},
+        "policy_authority": {
+            "role_id": "policy_authority",
+            "role_class": "authority",
+        },
+        "worker": {
+            "role_id": "worker",
+            "role_class": "specialist",
+            "escalates_to": ["principal"],
+        },
+    }
+    domains = [
+        AuthorityDomain("global", "principal", "global", "*"),
+        AuthorityDomain(
+            "policy_change",
+            "policy_authority",
+            "decision_class",
+            "policy_change",
+        ),
+    ]
+
+    assert validate_authority_role_graph(roles, domains=domains) == []
+    trace = trace_role_escalation_for_scope(
+        roles,
+        domains,
+        role_id="worker",
+        decision_class="policy_change",
+    )
+
+    assert trace.reaches_authority is False
+    assert trace.target_authority_role_id == "policy_authority"
+    assert trace.escalation_path == []
+    assert any(
+        "role worker escalation chain does not reach scoped authority role "
+        "policy_authority" in issue
+        for issue in trace.issues or []
+    )
 
 
 def test_authority_domain_projects_to_resource_envelope():
@@ -209,6 +351,61 @@ def test_authority_domains_cli_resolves_scope(tmp_path: Path, capsys):
     assert capsys.readouterr().out.strip() == "OK"
 
 
+def test_authority_domains_cli_traces_scoped_escalation(tmp_path: Path, capsys):
+    org_root = tmp_path / "org"
+    roles = org_root / "roles"
+    roles.mkdir(parents=True)
+    (roles / "principal.yaml").write_text(
+        "role_id: principal\nrole_class: authority\nescalates_to: []\n"
+    )
+    (roles / "policy_authority.yaml").write_text(
+        "role_id: policy_authority\nrole_class: authority\nescalates_to: []\n"
+    )
+    (roles / "worker.yaml").write_text(
+        "role_id: worker\nrole_class: specialist\n"
+        "escalates_to:\n  - role.policy_authority\n"
+    )
+    domains = org_root / "authority_domains" / "authority_domains.json"
+    domains.parent.mkdir()
+    domains.write_text(
+        json.dumps(
+            {
+                "authority_domains": [
+                    {
+                        "domain_id": "global",
+                        "authority_role_id": "role.principal",
+                        "scope_kind": "global",
+                        "scope_id": "*",
+                    },
+                    {
+                        "domain_id": "policy_change",
+                        "authority_role_id": "role.policy_authority",
+                        "scope_kind": "decision_class",
+                        "scope_id": "policy_change",
+                    },
+                ]
+            }
+        )
+    )
+
+    rc = main(
+        [
+            "--org-root",
+            str(org_root),
+            "trace-escalation",
+            "--role-id",
+            "role.worker",
+            "--decision-class",
+            "policy_change",
+        ]
+    )
+
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == (
+        "role.worker -> role.policy_authority"
+    )
+
+
 def test_authority_domains_cli_lists_resource_envelopes(tmp_path: Path, capsys):
     org_root = tmp_path / "org"
     domains = org_root / "authority_domains" / "authority_domains.json"
@@ -260,3 +457,39 @@ def test_authority_domains_cli_validate_fails_on_bad_role(tmp_path: Path, capsys
 
     assert main(["--org-root", str(org_root), "validate"]) == 1
     assert "non-authority role: lead" in capsys.readouterr().out
+
+
+def test_authority_domains_cli_validate_catches_dead_end_escalation(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    org_root = tmp_path / "org"
+    roles = org_root / "roles"
+    roles.mkdir(parents=True)
+    (roles / "principal.yaml").write_text(
+        "role_id: principal\nrole_class: authority\nescalates_to: []\n"
+    )
+    (roles / "manager.yaml").write_text(
+        "role_id: manager\nrole_class: manager\nescalates_to: []\n"
+    )
+    domains = org_root / "authority_domains" / "authority_domains.json"
+    domains.parent.mkdir()
+    domains.write_text(
+        json.dumps(
+            {
+                "authority_domains": [
+                    {
+                        "domain_id": "global",
+                        "authority_role_id": "role.principal",
+                        "scope_kind": "global",
+                        "scope_id": "*",
+                    }
+                ]
+            }
+        )
+    )
+
+    assert main(["--org-root", str(org_root), "validate"]) == 1
+    assert "role manager escalation chain never reaches an authority role" in (
+        capsys.readouterr().out
+    )

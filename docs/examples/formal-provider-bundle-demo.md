@@ -32,3 +32,13 @@ This is the intended provider boundary. A formal checker may live in LeanMill,
 SMT, Isabelle, Coq, Alloy, TLA+, or another package. cognitive-firm records the
 certificate row, checks org trust policy, and exports bundle evidence. It does
 not import or run the checker.
+
+For adoption review, run:
+
+```bash
+make formal-provider-proof-pack
+```
+
+That command emits `formal_provider_proof_pack.v1`: the same signed-provider
+and missing-evidence paths plus the bundled manifest, conformance config, and
+trust-policy declarations.

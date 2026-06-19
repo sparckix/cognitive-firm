@@ -19,6 +19,7 @@ from typing import Any
 from cognitive_firm.kernel_service import KernelServiceConfig, dispatch_kernel_request
 from cognitive_firm.orchestration.action_impact import load_summary_from_json
 from cognitive_firm.orchestration.business_function_bandit import propose_business_function_policy
+from cognitive_firm.orchestration.human_work import summarize_human_speed_field_pilot
 
 from field_pilot_validate import validate_pilot
 
@@ -72,6 +73,54 @@ def _pilot_rows() -> list[dict[str, Any]]:
     return rows
 
 
+def _human_speed_rows() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for idx in range(24):
+        rows.append(
+            {
+                "row_id": f"requirement-{idx}",
+                "risk_tier": "medium",
+                "bottleneck_class": "authority",
+                "deployment_class": "customer_facing",
+                "external_side_effect": True,
+                "reversible": True,
+                "chosen_speed_class": "gate_before_action",
+                "receipt_present": True,
+                "sampled_for_review": False,
+                "error_occurred": False,
+                "rework_required": False,
+                "hidden_burden_detected": False,
+                "residual_risk_open": False,
+                "harm_occurred": False,
+                "cycle_time_hours": 6.0,
+                "human_touchpoints": 2,
+            }
+        )
+    for idx in range(10):
+        rows.append(
+            {
+                "row_id": f"copy-{idx}",
+                "risk_tier": "low",
+                "bottleneck_class": "labor",
+                "deployment_class": "internal",
+                "repeated_similar": True,
+                "reversible": True,
+                "chosen_speed_class": "sampled_review",
+                "sampled_for_review": idx in {0, 5},
+                "expected_sample_rate": 0.1,
+                "receipt_present": True,
+                "error_occurred": False,
+                "rework_required": False,
+                "hidden_burden_detected": False,
+                "residual_risk_open": False,
+                "harm_occurred": False,
+                "cycle_time_hours": 0.5,
+                "human_touchpoints": 0 if idx not in {0, 5} else 1,
+            }
+        )
+    return rows
+
+
 def _scaffold_completed_pilot(root: Path) -> dict[str, Path]:
     root.mkdir(parents=True, exist_ok=True)
     for source in TEMPLATE_DIR.glob("*.md"):
@@ -81,6 +130,18 @@ def _scaffold_completed_pilot(root: Path) -> dict[str, Path]:
     action_impact = root / "action-impact-summary.json"
     action_impact.write_text(
         json.dumps({"records": _pilot_rows()}, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    human_speed = root / "human-speed-envelope-summary.json"
+    human_speed.write_text(
+        json.dumps(
+            summarize_human_speed_field_pilot(
+                _human_speed_rows(),
+                min_records=30,
+            ).as_dict(),
+            indent=2,
+            sort_keys=True,
+        ),
         encoding="utf-8",
     )
     authority_diff = root / "authority-diff-specialist-review.json"
@@ -99,6 +160,7 @@ def _scaffold_completed_pilot(root: Path) -> dict[str, Path]:
     return {
         "pilot": root,
         "action_impact": action_impact,
+        "human_speed": human_speed,
         "authority_diff": authority_diff,
         "evaluations": root / "policy-evaluations.jsonl",
         "packets": root / "policy-promotion-packets.jsonl",
@@ -159,6 +221,7 @@ def run_demo(root: Path) -> dict[str, Any]:
         min_action_impact_records=30,
     )
     summary = load_summary_from_json(logs["action_impact"])
+    human_speed_summary = json.loads(logs["human_speed"].read_text(encoding="utf-8"))
     proposal = propose_business_function_policy(
         summary.records,
         candidate_policy_id="policy.field_pilot.specialist_requirement_review",
@@ -225,8 +288,21 @@ def run_demo(root: Path) -> dict[str, Any]:
             "review_blockers": packet["review_blockers"],
             "candidate_policy_id": packet["candidate_policy_id"],
         },
+        "human_speed_envelope": {
+            "schema": human_speed_summary["schema"],
+            "measurement_status": human_speed_summary["measurement_status"],
+            "n_total": human_speed_summary["n_total"],
+            "expected_matches": human_speed_summary["expected_matches"],
+            "expected_mismatches": len(human_speed_summary["expected_mismatches"]),
+            "sampled_review_observed_rate": human_speed_summary["sample_policy"][
+                "observed_sample_rate"
+            ],
+            "review_reasons": human_speed_summary["review_reasons"],
+        },
         "summary": {
             "action_impact_records": len(summary.records),
+            "human_speed_records": human_speed_summary["n_total"],
+            "human_speed_status": human_speed_summary["measurement_status"],
             "validation_ok": bool(validation["ok"]),
             "packet_status": packet["status"],
             "verdict": "passed"
@@ -234,6 +310,7 @@ def run_demo(root: Path) -> dict[str, Any]:
             and proposal.status == "candidate"
             and safe_report["status"] == "promotable"
             and packet["status"] == "review_ready"
+            and human_speed_summary["measurement_status"] == "stable"
             else "failed",
         },
         "log_paths": {name: str(path) for name, path in logs.items()},
@@ -253,6 +330,7 @@ def _compact(payload: dict[str, Any]) -> dict[str, Any]:
         "candidate_proposal": payload["candidate_proposal"],
         "policy_evaluation": payload["policy_evaluation"],
         "promotion_packet": payload["promotion_packet"],
+        "human_speed_envelope": payload["human_speed_envelope"],
         "summary": payload["summary"],
     }
 
@@ -263,6 +341,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--workdir", type=Path)
     parser.add_argument("--full-json", action="store_true")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Optional path for the rendered JSON result. Stdout is still written.",
+    )
     args = parser.parse_args(argv)
 
     if args.workdir:
@@ -271,7 +354,11 @@ def main(argv: list[str] | None = None) -> int:
         with tempfile.TemporaryDirectory(prefix="cf-field-pilot-action-impact-") as raw:
             payload = run_demo(Path(raw))
     output = payload if args.full_json else _compact(payload)
-    print(json.dumps(output, indent=2, sort_keys=True))
+    rendered = json.dumps(output, indent=2, sort_keys=True) + "\n"
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(rendered, encoding="utf-8")
+    print(rendered, end="")
     return 0 if payload["summary"]["verdict"] == "passed" else 1
 
 

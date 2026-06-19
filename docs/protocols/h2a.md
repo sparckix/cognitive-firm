@@ -126,7 +126,11 @@ Direct shell invocation of scripts. Used for:
 - Daemon dispatch (`scripts/agent_daemon.py`)
 - One-shot operator tools
 
-CLI is the slow-layer fallback. Any operation that has a CLI form should also have an Orbit form, but CLI is the source-of-truth interface — Orbit is a projection over CLI primitives.
+CLI is the slow-layer fallback and inspection surface. The source of truth is
+the kernel state/logs behind the service and userland contracts; CLI and Orbit
+are replaceable clients over those contracts. Add an Orbit form when the
+operation benefits from a visual operator surface, but do not treat Orbit parity
+as a requirement for every CLI entrypoint.
 
 ## Joint Work Sessions
 
@@ -171,6 +175,17 @@ the distinction operational:
 The protocol therefore does not treat the human only as a decision gate. A
 human can be an active work producer, with bounded receipts and artifact
 references, while the agent remains responsible for integration.
+
+The service/CLI seam is covered by:
+
+```bash
+make a2a-h2a-command-conformance
+```
+
+That fixture creates a blocked A2A obligation, links a bounded A2H human-work
+session by `obligation_id`, enforces receipt-before-integration, and closes the
+A2A obligation only after the receipt-backed human work is integrated. It is a
+trace fixture, not a reminder, scheduler, or workflow engine.
 
 This separates "needs your decision" from "you are doing work." The distinction
 matters for bottleneck measurement: authority, taste, relationship, and safety
@@ -246,9 +261,9 @@ The chat reply prompt includes the role's `conversation_state.json`:
 }
 ```
 
-The role's reply ends with a `STATE_UPDATE:` line containing a one-line JSON object describing what to add to `pinned_facts` / `ongoing_topics`. The handler parses it, merges, and persists. The role thus extends its own memory without requiring principal intervention — but the principal can edit the file directly to remove or correct entries.
+The role's reply ends with a `STATE_UPDATE:` line containing a one-line JSON object describing what to add to `pinned_facts` / `ongoing_topics`. The handler parses it, merges, and persists. This is chat-continuity state for the role surface, not an approved learning event or organizational-memory primitive. The principal can edit the file directly to remove or correct entries.
 
-This is the cognitive-firm-side mirror of the OpenAI / Anthropic / Google "system prompt + memory" pattern, but persisted in the kernel's filesystem of record rather than in vendor cloud storage.
+This mirrors the vendor "system prompt + memory" pattern only at the conversation-continuity layer. Durable organizational learning still flows through approved learning events, receipts, outcome links, and routine reviews.
 
 ## Decision tree: which surface for which signal
 

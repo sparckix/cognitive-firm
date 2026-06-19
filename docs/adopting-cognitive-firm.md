@@ -16,15 +16,21 @@ adopt the kernel shape and focuses on setup boundaries.
 - role offices and mandates;
 - human approval and human work sessions;
 - agent-to-agent messages and obligation state;
+- work items, leases, and scoped resource allocation;
 - capability-gated MCP calls;
 - notification-channel intents with provider adapters;
 - project charters;
+- governance-change proposals, approvals, and review packets;
 - evidence gaps;
+- action attestations and governed-run bundles;
+- approved learning events, learning-use receipts, outcome links, and routine
+  reviews;
 - damage signals;
 - forecast-market read models;
 - action-impact read models;
 - organizational surface reads;
 - local kernel service calls for app surfaces;
+- userland commands and provenance projections for adopter-built surfaces;
 - actor identity and per-action attribution;
 - actor memberships for scoped human, agent, or service authority;
 - optional leases over mutable resources.
@@ -79,15 +85,92 @@ writing governance files directly.
 
 Useful commands:
 
+For a first serious review, start with the first three commands: the public
+smoke, the on-ramp evidence collector, and the read-only readiness handoff. The
+remaining commands are integration surfaces for teams that are already wiring a
+tenant, daemon, or service deployment. The command surface exposes the same
+sequence as read-only metadata through
+`cognitive-firm-userland commands "first serious review"` or directly through
+`cognitive-firm-userland operator-path first_review`.
+
 ```bash
 make smoke-public
+make adoption-onramp-packet
+make adoption-readiness-packet
 pip install -e .
 python scripts/org_role_preflight.py --role research_director
 python scripts/agent_daemon.py --role research_director --tick-once --dry-run
 python -m cognitive_firm.orchestration.org_surface
 python -m cognitive_firm.orchestration.org_surface --json
 cognitive-firm-kernel-service --host 127.0.0.1 --port 8765
+cognitive-firm-userland operator-path first_review
+cognitive-firm-userland commands "adoption readiness packet"
 ```
+
+`make adoption-onramp-packet` runs the fixed no-cost first-review proof set
+with timeouts and writes observed JSON outputs, command logs, and
+`adoption-readiness-packet.md` under `.cognitive-firm-runs/adoption-onramp/...`.
+It is a bounded evidence collector, not a planner or workflow engine. If a
+bounded live-agent run or release gate was produced separately, pass it through
+`scripts/adoption_onramp_packet.py --result CHECK_ID=path`; the collector cites
+the artifact without running that substrate. For `bounded_live_agent_run`, pass
+the generated `reports/self-evolving-org-demo.json` report rather than a
+clipped stdout summary so the reviewer packet can inspect the v0.4
+learning-use, verified context-packet, provenance, and proposal-review counts,
+including proposal follow-through that shows whether at least one proposal
+reached closed-loop evidence. Those counts must be present and nonzero for the
+live-agent row to count as fully reviewable. Missing optional evidence stays
+visible as deferred evidence, but a supplied optional artifact that fails its
+checks blocks the packet from reporting `ok: true`.
+
+`make adoption-onramp-replay` is the portability check for that same path. It
+copies the public repo surface into an isolated worktree, excludes `internal/`,
+local run state, virtualenvs, and `.env`, and runs the core on-ramp collector
+from the copy. Use it when reviewing whether the on-ramp is clean-clone
+replayable rather than dependent on author-local files.
+
+`make adoption-onramp-full-replay` runs the same clean-copy replay with the full
+no-cost collector, including adapter-policy preview, formal-provider proof pack,
+runtime-adapter proof pack, agent-fleet audit, and field-pilot rows.
+
+`make adoption-readiness-packet` prints a read-only packet. After
+`make adoption-onramp-packet`, it re-renders the latest collected on-ramp
+packet; before any on-ramp exists, it falls back to the expected first-run proof
+paths and records missing checks explicitly instead of pretending the setup is
+complete. To mark checks as observed manually, pass JSON outputs to
+`scripts/adoption_readiness_packet.py --result CHECK_ID=path`.
+For observed first-gated-action and learning-loop outputs, the packet also
+embeds a governed-action composition matrix. That matrix checks whether the
+proof chain actually carries the expected authority, work, human-work,
+attestation, outcome, bundle, context-packet, and learning-use links. A command
+can pass while the adoption packet still blocks review if those links are not
+present.
+Each check row also reports expected, present, and missing evidence fields. A
+required check can pass its command expectations but still block review when the
+payload is too thin to carry the expected evidence.
+The Markdown handoff includes a `Reviewer Path` section with the same first
+serious review sequence exposed by the command surface, plus purpose and
+`not_a` boundary text so a reviewer can see whether they are looking at the
+public gate, the evidence collector, or the readiness handoff without treating
+the sequence as a workflow runner.
+The same check is available directly through
+`cognitive-firm-userland composition-packet --observed-json ... --action-label
+...`, which calls the read-only `POST /kernel/governed-action-composition`
+route and exits non-zero when required composition links are missing.
+`scripts/native_e2e_demo.py --output ...`,
+`scripts/kernel_service_smoke.py --output ...`, and
+`scripts/learning_loop_walkthrough.py --output ...` are the shortest required
+deterministic evidence files for that packet. The kernel-service smoke output is
+expected to include provenance follow-through fields showing a closed-loop
+service report over outcome, routine-review, learning-event, and learning-use
+records; an older thin smoke JSON remains a review blocker. Optional
+adoption-wedge evidence can be captured the same way with
+`scripts/agent_fleet_audit_demo.py --output ...` and
+`scripts/field_pilot_action_impact_demo.py --output ...`; optional proof-pack
+evidence can be captured with `scripts/formal_provider_proof_pack.py --output ...`
+and `scripts/runtime_adapter_proof_pack.py --output ...`. Optional
+adapter-policy evidence can be captured with
+`scripts/langgraph_adapter_policy_preview.py --output ...`.
 
 For the smallest overlay shape, inspect `tenants/example/`. It is intentionally
 generic and should be copied into a private tenant repo before real use.
@@ -273,6 +356,66 @@ python -m cognitive_firm.orchestration.learning_events create \
 The event is the durable learning record. The tenant still owns the actual
 route, mandate, charter, threshold, routine, or policy-adapter change.
 
+Before a role starts related future work, inspect the service projection
+instead of searching old conversations:
+
+```bash
+cognitive-firm-userland work-context \
+  --assigned-to role.manager \
+  --cue "same failure mode repeats across reviewed runs"
+```
+
+`work-context` returns a read-only context packet over matching approved
+learning events, outcome links, routine-review state, and current work
+candidates. After the work, record whether the learning was applied, ignored,
+or deferred:
+
+```bash
+cognitive-firm-userland learning-use <learning_event_id> \
+  --role role.manager \
+  --cue "same failure mode repeats across reviewed runs" \
+  --outcome applied \
+  --context-packet-ref <ctx_id> \
+  --work-ref work_item:<id>
+```
+
+This keeps learning observable without turning the kernel into a hidden memory
+store or workflow engine.
+
+For "why did this happen?" or "what did this affect?" views, use the
+projection routes instead of rebuilding state from raw JSONL:
+
+```bash
+cognitive-firm-userland timeline --ref <object_or_artifact_ref>
+cognitive-firm-userland graph --ref <object_or_artifact_ref>
+```
+
+The graph is a read-only event/ref projection over the same canonical records
+as the timeline. It is intended for adopter-built dashboards and lineage views,
+not as a workflow database.
+
+To inspect whether A2H work is repeatedly bottlenecking on the same role and
+human-work class, use the observer-only pressure view:
+
+```bash
+cognitive-firm-userland human-pressure --agent-counterparty-role role.manager --tenant-id tenant-a
+cognitive-firm-userland learning-candidates --source human_work
+```
+
+Treat these rows as review signals. Access, labor, or cognition pressure may
+justify tooling or mandate review; taste, safety, relationship, and authority
+pressure often means the human boundary is doing useful work. In multi-tenant
+logs, apply `tenant_id` / `project_id` selectors so one tenant's human-work
+pressure does not shape another tenant's review.
+Use the candidate command when the whole-firm pressure groups should enter a
+review queue; it keeps source refs back to human-work sessions and does not
+automate, reroute, or close the work.
+If a candidate should become a governance proposal, use
+`cognitive-firm-userland proposal-from-candidate <candidate_id> --target-ref <ref>`.
+The command preserves candidate evidence but still requires target, risk,
+rollback, and invariant evidence; incomplete requests are stored as blocked
+proposals.
+
 ## Governance Changes
 
 Use governance change proposals when a role or agent suggests modifying the
@@ -296,6 +439,11 @@ python -m cognitive_firm.orchestration.governance_changes propose \
 The proposal becomes `review_ready` only if all required invariants pass. It is
 still just a proposal. The tenant or principal must approve and apply the
 referenced change through the appropriate authority path.
+Use `cognitive-firm-userland proposal-packet <proposal_id>` when a reviewer
+needs the compact "why this proposal, what evidence, what happened after" view.
+The packet includes a provenance-derived follow-through status, so a proposal
+can show as proposal-only, decision observed, or closed-loop evidence observed
+without creating a workflow runner or new lifecycle.
 
 ## Long-Running Work
 

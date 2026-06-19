@@ -72,6 +72,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -100,6 +101,7 @@ def _walk_parent_chain(
     starting_message_id: str,
     *,
     max_depth: int = 20,
+    channels_dir: Path | None = None,
 ) -> list[AgentMessage]:
     """Walk parent_obligation_id from the starting message back to the root.
 
@@ -123,7 +125,7 @@ def _walk_parent_chain(
         seen.add(current_id)
         # Search every role's inbox for the message — the parent may live in
         # a different role's inbox than the child.
-        msg = _find_message_anywhere(current_id)
+        msg = _find_message_anywhere(current_id, channels_dir=channels_dir)
         if msg is None:
             log.warning(
                 "saga: parent message %s not found; chain truncated", current_id
@@ -136,12 +138,17 @@ def _walk_parent_chain(
     return chain
 
 
-def _find_message_anywhere(message_id: str) -> Optional[AgentMessage]:
+def _find_message_anywhere(
+    message_id: str,
+    *,
+    channels_dir: Path | None = None,
+) -> Optional[AgentMessage]:
     """Search every role's inbox for a message_id. Used because parent
     chains cross role boundaries."""
-    if not CHANNELS_DIR.exists():
+    root = channels_dir or CHANNELS_DIR
+    if not root.exists():
         return None
-    for role_dir in CHANNELS_DIR.iterdir():
+    for role_dir in root.iterdir():
         if not role_dir.is_dir():
             continue
         candidate = role_dir / "inbox" / f"{message_id}.json"
@@ -163,6 +170,9 @@ def compensate_failed_obligation(
     message_id: str,
     reason: str = "saga compensation triggered by upstream failure",
     enforce_policy: bool = True,
+    channels_dir: Path | None = None,
+    roles_dir: Path | None = None,
+    transition_log_path: Path | None = None,
 ) -> list[AgentMessage]:
     """Trigger saga compensation for a terminally-failed obligation.
 
@@ -176,9 +186,13 @@ def compensate_failed_obligation(
     """
     # role_id is a hint; the message may live in any role's inbox.
     # First try the hinted role, then fall back to cross-role search.
-    starter = read_agent_message(role_id=role_id, message_id=message_id)
+    starter = read_agent_message(
+        role_id=role_id,
+        message_id=message_id,
+        channels_dir=channels_dir,
+    )
     if starter is None:
-        starter = _find_message_anywhere(message_id)
+        starter = _find_message_anywhere(message_id, channels_dir=channels_dir)
     if starter is None:
         raise FileNotFoundError(f"obligation message not found: {message_id}")
     if starter.obligation_state not in ("refused", "expired"):
@@ -188,7 +202,7 @@ def compensate_failed_obligation(
             f"{starter.obligation_state}"
         )
 
-    chain = _walk_parent_chain(role_id, message_id)
+    chain = _walk_parent_chain(role_id, message_id, channels_dir=channels_dir)
     compensations: list[AgentMessage] = []
 
     # Skip the starter itself (its terminal failure is the trigger, not a
@@ -227,6 +241,9 @@ def compensate_failed_obligation(
                 "saga_root_failure_id": message_id,
             },
             enforce_policy=enforce_policy,
+            channels_dir=channels_dir,
+            roles_dir=roles_dir,
+            transition_log_path=transition_log_path,
         )
         compensations.append(comp)
 
@@ -245,6 +262,7 @@ def compensate_failed_obligation(
                 "ancestor_subject": ancestor.subject,
                 "reason": reason,
             },
+            log_path=transition_log_path,
         )
 
     return compensations
@@ -253,6 +271,7 @@ def compensate_failed_obligation(
 def list_active_sagas(
     *,
     log_path: Path | None = None,
+    channels_dir: Path | None = None,
     window_hours: float = 168.0,
 ) -> list[dict[str, Any]]:
     """Return active sagas — chains that have a saga.compensation_emitted
@@ -303,7 +322,7 @@ def list_active_sagas(
             req_id = c.get("compensation_request_id")
             if not req_id:
                 continue
-            msg = _find_message_anywhere(req_id)
+            msg = _find_message_anywhere(req_id, channels_dir=channels_dir)
             if msg is None:
                 continue
             if msg.obligation_state not in ("fulfilled", "refused"):
@@ -317,6 +336,7 @@ def list_active_sagas(
 def check_compensation_freshness(
     *,
     log_path: Path | None = None,
+    channels_dir: Path | None = None,
     stale_after_hours: float = 24.0,
 ) -> list[dict[str, Any]]:
     """Find compensation requests whose obligation has not transitioned
@@ -327,10 +347,10 @@ def check_compensation_freshness(
         log_path = TRANSITIONS_LOG
     cutoff = datetime.now(timezone.utc).timestamp() - stale_after_hours * 3600
     stale: list[dict[str, Any]] = []
-    for saga in list_active_sagas(log_path=log_path):
+    for saga in list_active_sagas(log_path=log_path, channels_dir=channels_dir):
         for c in saga["compensations"]:
             req_id = c.get("compensation_request_id")
-            msg = _find_message_anywhere(req_id) if req_id else None
+            msg = _find_message_anywhere(req_id, channels_dir=channels_dir) if req_id else None
             if msg is None or msg.obligation_state != "pending":
                 continue
             try:
@@ -344,3 +364,119 @@ def check_compensation_freshness(
                     "stale_seconds": datetime.now(timezone.utc).timestamp() - created,
                 })
     return stale
+
+
+def _message_summary(message: AgentMessage) -> dict[str, Any]:
+    return {
+        "message_id": message.message_id,
+        "kind": message.kind,
+        "from_role": message.from_role,
+        "to_role": message.to_role,
+        "subject": message.subject,
+        "obligation_state": message.obligation_state,
+        "parent_obligation_id": message.parent_obligation_id,
+        "metadata": message.metadata,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Tiny operator/conformance CLI for the saga primitive.
+
+    The CLI reports saga state and emits compensation requests. It does not
+    choose actors, schedule work, or mark compensations complete.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="saga_compensation")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    def add_state_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--channels-dir", type=Path)
+        p.add_argument("--roles-dir", type=Path)
+        p.add_argument("--log-path", type=Path)
+
+    compensate_parser = sub.add_parser("compensate")
+    add_state_args(compensate_parser)
+    compensate_parser.add_argument("--role-id", required=True)
+    compensate_parser.add_argument("--message-id", required=True)
+    compensate_parser.add_argument(
+        "--reason",
+        default="saga compensation triggered by upstream failure",
+    )
+    compensate_parser.add_argument(
+        "--no-enforce-policy",
+        action="store_true",
+        help="skip local channel policy while emitting compensation requests",
+    )
+
+    active_parser = sub.add_parser("active")
+    add_state_args(active_parser)
+    active_parser.add_argument("--window-hours", type=float, default=168.0)
+
+    freshness_parser = sub.add_parser("freshness")
+    add_state_args(freshness_parser)
+    freshness_parser.add_argument("--stale-after-hours", type=float, default=24.0)
+
+    args = parser.parse_args(argv)
+    try:
+        if args.cmd == "compensate":
+            messages = compensate_failed_obligation(
+                role_id=args.role_id,
+                message_id=args.message_id,
+                reason=args.reason,
+                enforce_policy=not args.no_enforce_policy,
+                channels_dir=args.channels_dir,
+                roles_dir=args.roles_dir,
+                transition_log_path=args.log_path,
+            )
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "saga_root_failure": args.message_id,
+                        "compensation_requests": [
+                            _message_summary(message) for message in messages
+                        ],
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+        if args.cmd == "active":
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "active_sagas": list_active_sagas(
+                            log_path=args.log_path,
+                            channels_dir=args.channels_dir,
+                            window_hours=args.window_hours,
+                        ),
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+        if args.cmd == "freshness":
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "stale_compensations": check_compensation_freshness(
+                            log_path=args.log_path,
+                            channels_dir=args.channels_dir,
+                            stale_after_hours=args.stale_after_hours,
+                        ),
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+    except Exception as exc:  # noqa: BLE001 - CLI should return a concise blocker.
+        print(str(exc), file=sys.stderr)
+        return 1
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
